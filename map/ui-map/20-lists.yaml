@@ -1,0 +1,448 @@
+# ListBox, ComboBox (+ its ComboLBox drop-down), ComboBoxEx, ListView, TreeView, Header.
+
+entries:
+  - id: listbox.single
+    kind: control
+    title: List box (single selection)
+    win32: {class: ListBox, parts: [LISTBOX/LBCP_ITEM, LISTBOX/LBCP_BORDER_NOSCROLL, LISTBOX/LBCP_BORDER_HSCROLL, LISTBOX/LBCP_BORDER_VSCROLL, LISTBOX/LBCP_BORDER_HVSCROLL]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          List(rows, selection: $selection) { Text($0.name) }.listStyle(.bordered)
+      - since: 13
+        code: |-
+          List(rows, selection: $selection) { Text($0.name) }
+            .listStyle(.bordered)
+            .contextMenu(forSelectionType: Int.self, menu: { _ in EmptyView() }, primaryAction: { _ in action() })
+      - since: 26
+        code: |-
+          List(rows, selection: $selection) { Text($0.name) }
+            .listStyle(.bordered)
+            .contextMenu(forSelectionType: Int.self, menu: { _ in EmptyView() }, primaryAction: { _ in action() })
+            .scrollEdgeEffectStyle(.soft, for: .top)
+    glass: automatic
+    state_in: [LB_ADDSTRING, LB_INSERTSTRING, LB_DELETESTRING, LB_RESETCONTENT, LB_SETCURSEL, LB_SETTOPINDEX, LB_SETITEMDATA, WM_SETREDRAW]
+    events_out: {select: WM_COMMAND/LBN_SELCHANGE, activate: WM_COMMAND/LBN_DBLCLK, focus: LBN_SETFOCUS/LBN_KILLFOCUS}
+    not_translated_when: [LBS_OWNERDRAWFIXED, LBS_OWNERDRAWVARIABLE]
+    notes: >-
+      The item order lives in the Win32 control (LBS_SORT, LB_INSERTSTRING), the view only
+      mirrors it. macOS 13's contextMenu(forSelectionType:primaryAction:) is the native
+      double-click on a row, raised as LBN_DBLCLK. On 12 a double tap on the row does it.
+
+  - id: listbox.multi
+    kind: control
+    title: List box (multiple selection)
+    win32: {class: ListBox, styles: [LBS_MULTIPLESEL, LBS_EXTENDEDSEL]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "List(rows, selection: $multiSelection) { Text($0.name) }.listStyle(.bordered)"
+    glass: automatic
+    state_in: [LB_SETSEL, LB_SELITEMRANGE, LB_SETANCHORINDEX, LB_SETCARETINDEX]
+    events_out: {select: WM_COMMAND/LBN_SELCHANGE}
+    notes: >-
+      LBS_EXTENDEDSEL is macOS's own model (Shift/Command-click). LBS_MULTIPLESEL toggles on
+      a plain click; the bridge turns a plain click into Command-click on that list.
+
+  - id: listbox.multicolumn
+    kind: control
+    title: Multi-column list box
+    win32: {class: ListBox, styles: [LBS_MULTICOLUMN]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          ScrollView(.horizontal) {
+            LazyHGrid(rows: [GridItem(.adaptive(minimum: 18))], alignment: .top) {
+              ForEach(rows) { Text($0.name).frame(width: 120, alignment: .leading) }
+            }
+          }
+    glass: none
+    improvised: true
+    state_in: [LB_SETCOLUMNWIDTH]
+    notes: Columns flow top to bottom, then left to right, like LBS_MULTICOLUMN.
+
+  - id: listbox.nosel
+    kind: control
+    title: List box without selection
+    win32: {class: ListBox, styles: [LBS_NOSEL]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "List(rows) { Text($0.name) }.listStyle(.bordered)"
+    glass: none
+
+  - id: combobox.dropdownlist
+    kind: control
+    title: Drop-down list (non-editable combo box)
+    win32: {class: [ComboBox, ComboLBox], styles: [CBS_DROPDOWNLIST], parts: [COMBOBOX/CP_DROPDOWNBUTTON, COMBOBOX/CP_DROPDOWNBUTTONRIGHT, COMBOBOX/CP_DROPDOWNBUTTONLEFT, COMBOBOX/CP_READONLY, COMBOBOX/CP_DROPDOWNITEM, COMBOBOX/CP_BACKGROUND, COMBOBOX/CP_TRANSPARENTBACKGROUND, COMBOBOX/CP_BORDER]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          Picker(title, selection: $choice) {
+            ForEach(choices) { Text($0.title).tag($0.id) }
+          }.pickerStyle(.menu).labelsHidden()
+    glass: automatic
+    state_in: [CB_ADDSTRING, CB_INSERTSTRING, CB_DELETESTRING, CB_RESETCONTENT, CB_SETCURSEL, CB_SELECTSTRING, CB_SHOWDROPDOWN]
+    events_out: {select: WM_COMMAND/CBN_SELCHANGE then CBN_SELENDOK, open: CBN_DROPDOWN, close: CBN_CLOSEUP}
+    not_translated_when: [CBS_OWNERDRAWFIXED, CBS_OWNERDRAWVARIABLE]
+    notes: >-
+      A pop-up button, exactly what winecfg's "Windows version" box becomes. The
+      ComboLBox drop-down window is never shown: the menu replaces it.
+
+  - id: combobox.editable
+    kind: control
+    title: Editable combo box
+    win32: {class: ComboBox, styles: [CBS_DROPDOWN]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: |-
+          let c = NSComboBox()
+          c.addItems(withObjectValues: items)
+          c.stringValue = title
+          c.completes = true
+    glass: automatic
+    state_in: [WM_SETTEXT, CB_ADDSTRING, CB_SETCURSEL, CB_SETEDITSEL, CB_LIMITTEXT]
+    events_out: {edit: WM_COMMAND/CBN_EDITCHANGE, select: CBN_SELCHANGE, open: CBN_DROPDOWN}
+    improvised: true
+    notes: >-
+      SwiftUI has no editable combo box on macOS. NSComboBox is the native control; a
+      TextField plus Menu would look home-made.
+
+  - id: combobox.simple
+    kind: control
+    title: Simple combo box (edit above a list)
+    win32: {class: ComboBox, styles: [CBS_SIMPLE], parts: [COMBOBOX/CP_CUEBANNER]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          VStack(spacing: 4) {
+            TextField(title, text: $text, prompt: Text(note)).textFieldStyle(.roundedBorder).labelsHidden()
+            List(rows, selection: $selection) { Text($0.name) }.listStyle(.bordered)
+          }
+    glass: automatic
+    improvised: true
+    events_out: {edit: CBN_EDITCHANGE, select: CBN_SELCHANGE}
+
+  - id: comboboxex
+    kind: control
+    title: ComboBoxEx (items with images)
+    win32: {class: ComboBoxEx32}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          Picker(title, selection: $choice) {
+            ForEach(choices) { c in
+              Label { Text(c.title) } icon: { Image(nsImage: image) }.tag(c.id)
+            }
+          }.pickerStyle(.menu).labelsHidden()
+    glass: automatic
+    state_in: [CBEM_INSERTITEM, CBEM_SETITEM, CBEM_DELETEITEM, CBEM_SETIMAGELIST, CB_SETCURSEL]
+    events_out: {select: CBN_SELCHANGE, edit: CBEN_ENDEDIT}
+    notes: >-
+      Images come from the control's image list (ImageList_GetIcon -> NSImage). An editable
+      ComboBoxEx uses combobox.editable with images drawn in the item cells.
+
+  - id: listview.report
+    kind: control
+    title: List view, details (report) mode
+    win32: {class: SysListView32, styles: [LVS_REPORT], parts: [LISTVIEW/LVP_LISTITEM, LISTVIEW/LVP_LISTDETAIL, LISTVIEW/LVP_LISTSORTEDDETAIL, LISTVIEW/LVP_COLUMNDETAIL, HEADER/HP_HEADERITEM, HEADER/HP_HEADERITEMLEFT, HEADER/HP_HEADERITEMRIGHT, HEADER/HP_HEADERSORTARROW]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          Table(rows, selection: $multiSelection, sortOrder: $sortOrder) {
+            TableColumn("Name", value: \.name)
+            TableColumn("Detail", value: \.detail)
+          }
+      - since: 13
+        code: |-
+          Table(rows, selection: $multiSelection, sortOrder: $sortOrder) {
+            TableColumn("Name", value: \.name)
+            TableColumn("Detail", value: \.detail)
+          }
+          .contextMenu(forSelectionType: Int.self, menu: { _ in EmptyView() }, primaryAction: { _ in action() })
+      - since: 26
+        code: |-
+          Table(rows, selection: $multiSelection, sortOrder: $sortOrder) {
+            TableColumn("Name", value: \.name)
+            TableColumn("Detail", value: \.detail)
+          }
+          .contextMenu(forSelectionType: Int.self, menu: { _ in EmptyView() }, primaryAction: { _ in action() })
+          .scrollEdgeEffectStyle(.soft, for: .top)
+    glass: automatic
+    state_in: [LVM_INSERTCOLUMN, LVM_SETCOLUMN, LVM_DELETECOLUMN, LVM_INSERTITEM, LVM_SETITEM, LVM_SETITEMTEXT, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SETITEMSTATE, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_ENSUREVISIBLE, LVM_SETCOLUMNWIDTH, LVM_SETITEMCOUNT]
+    events_out: {select: WM_NOTIFY/LVN_ITEMCHANGED, sort: LVN_COLUMNCLICK, activate: NM_DBLCLK + LVN_ITEMACTIVATE, menu: NM_RCLICK, rename: LVN_BEGINLABELEDIT/LVN_ENDLABELEDIT, keys: LVN_KEYDOWN}
+    not_translated_when: [LVS_OWNERDRAWFIXED]
+    notes: >-
+      Clicking a header does not sort in the view: it raises LVN_COLUMNCLICK, the app sorts
+      (LVM_SORTITEMS), and the view mirrors the new order. sortOrder only draws the arrow.
+      Custom-draw (NM_CUSTOMDRAW returning anything but CDRF_DODEFAULT) is detected at run
+      time and drops that list back to wine's drawing.
+
+  - id: listview.icon
+    kind: control
+    title: List view, icon modes
+    win32: {class: SysListView32, styles: [LVS_ICON, LVS_SMALLICON]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 88))], spacing: 12) {
+              ForEach(rows) { r in
+                VStack(spacing: 4) {
+                  Image(nsImage: image).resizable().frame(width: 48, height: 48)
+                  Text(r.name).font(.callout).lineLimit(2).multilineTextAlignment(.center)
+                }
+              }
+            }.padding()
+          }
+    glass: none
+    improvised: true
+    state_in: [LVM_SETIMAGELIST, LVM_ARRANGE, LVM_SETICONSPACING]
+    events_out: {select: LVN_ITEMCHANGED, activate: NM_DBLCLK}
+    notes: >-
+      Finder's icon view. SwiftUI's grid has no built-in selection, so selection highlight
+      and rubber-band are drawn by the bridge (NSCollectionView would be the AppKit
+      alternative if this proves too weak).
+
+  - id: listview.list
+    kind: control
+    title: List view, list mode
+    win32: {class: SysListView32, styles: [LVS_LIST]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          List(rows, selection: $multiSelection) { r in
+            Label { Text(r.name) } icon: { Image(nsImage: image) }
+          }.listStyle(.bordered)
+    glass: automatic
+
+  - id: listview.checkboxes
+    kind: control
+    title: List view with check boxes
+    win32: {class: SysListView32, styles: [LVS_EX_CHECKBOXES]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          Table(rows, selection: $multiSelection) {
+            TableColumn("") { (r: Row) in
+              Toggle(r.name, isOn: .constant(r.checked)).toggleStyle(.checkbox).labelsHidden()
+            }.width(24)
+            TableColumn("Name", value: \.name)
+          }
+    glass: automatic
+    state_in: [LVM_SETITEMSTATE (state image index)]
+    events_out: {toggle: LVN_ITEMCHANGED with LVIS_STATEIMAGEMASK}
+
+  - id: listview.groups
+    kind: control
+    title: List view groups
+    win32: {class: SysListView32, parts: [LISTVIEW/LVP_LISTGROUP, LISTVIEW/LVP_GROUPHEADER, LISTVIEW/LVP_GROUPHEADERLINE, LISTVIEW/LVP_EXPANDBUTTON, LISTVIEW/LVP_COLLAPSEBUTTON]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          List(selection: $multiSelection) {
+            Section(title) { ForEach(rows) { Text($0.name) } }
+          }.listStyle(.bordered)
+    glass: automatic
+    state_in: [LVM_ENABLEGROUPVIEW, LVM_INSERTGROUP, LVM_SETGROUPINFO]
+    notes: A report view with groups keeps Table and shows each group as a section header row.
+
+  - id: listview.empty
+    kind: control
+    title: Empty list view text
+    win32: {class: SysListView32, parts: [LISTVIEW/LVP_EMPTYTEXT]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "Text(title).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)"
+      - since: 14
+        code: "ContentUnavailableView(title, systemImage: \"tray\")"
+    glass: none
+    notes: The text comes from LVN_GETEMPTYMARKUP; macOS 14 has the dedicated empty-state view.
+
+  - id: treeview
+    kind: control
+    title: Tree view
+    win32: {class: SysTreeView32, parts: [TREEVIEW/TVP_TREEITEM, TREEVIEW/TVP_GLYPH, TREEVIEW/TVP_HOTGLYPH, TREEVIEW/TVP_BRANCH]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          List(selection: $selection) {
+            ForEach(tree) { node in
+              DisclosureGroup(isExpanded: $isOn) {
+                ForEach(node.children ?? []) { Text($0.name) }
+              } label: {
+                Text(node.name)
+              }
+            }
+          }.listStyle(.sidebar)
+    glass: automatic
+    state_in: [TVM_INSERTITEM, TVM_DELETEITEM, TVM_SETITEM, TVM_EXPAND, TVM_SELECTITEM, TVM_ENSUREVISIBLE, TVM_SETIMAGELIST]
+    events_out: {select: WM_NOTIFY/TVN_SELCHANGING then TVN_SELCHANGED, expand: TVN_ITEMEXPANDING then TVN_ITEMEXPANDED, activate: NM_DBLCLK, menu: NM_RCLICK, rename: TVN_BEGINLABELEDIT/TVN_ENDLABELEDIT}
+    notes: >-
+      Rows are DisclosureGroup(isExpanded:) rather than List(children:), because apps fill a
+      node's children only when TVN_ITEMEXPANDING arrives (file browsers do this), so the
+      bridge must see the expansion before the children exist. .sidebar is the Finder-sidebar
+      look; a tree inside a dialog uses .bordered.
+
+  - id: header
+    kind: control
+    title: Stand-alone header control
+    win32: {class: SysHeader32}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          HStack(spacing: 0) {
+            Text("Name").frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 6)
+            Divider()
+            Text("Detail").frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 6)
+          }.font(.headline).frame(height: 24).background(.bar)
+    glass: none
+    improvised: true
+    state_in: [HDM_INSERTITEM, HDM_SETITEM, HDM_LAYOUT]
+    events_out: {click: HDN_ITEMCLICK, resize: HDN_BEGINTRACK/HDN_TRACK/HDN_ENDTRACK}
+    notes: >-
+      Headers inside a list view become the Table's own header. A header on its own (rare,
+      custom grids) is drawn to match NSTableHeaderView.
+
+flags:
+  # ListBox
+  LBS_NOTIFY: {behavior: "send LBN_SELCHANGE/LBN_DBLCLK (without it the parent gets no notifications)"}
+  LBS_SORT: {behavior: "the Win32 control keeps items sorted; the view mirrors its order"}
+  LBS_NOREDRAW: {behavior: "batch view updates until WM_SETREDRAW TRUE"}
+  LBS_HASSTRINGS: {behavior: "item text is stored by the control (always the case for translated lists)"}
+  LBS_USETABSTOPS: {view: 'List(rows, selection: $selection) { r in HStack { Text(r.name).frame(width: 120, alignment: .leading); Text(r.detail) } }', note: tab-separated item text split into fixed-width columns}
+  LBS_NOINTEGRALHEIGHT: {ignore: "macOS lists scroll by pixel, never snap to whole rows"}
+  LBS_WANTKEYBOARDINPUT: {behavior: "forward key presses as WM_VKEYTOITEM/WM_CHARTOITEM before the view handles them"}
+  LBS_DISABLENOSCROLL: {ignore: "macOS scroll bars follow the system setting (overlay or always)"}
+  LBS_NODATA: {behavior: "no per-item data; only valid with owner-draw, which is not translated"}
+  LBS_OWNERDRAWFIXED: {not_translated: "the app draws each item in WM_DRAWITEM"}
+  LBS_OWNERDRAWVARIABLE: {not_translated: "the app draws each item in WM_DRAWITEM"}
+  LBS_COMBOBOX: {entry: combobox.dropdownlist, note: the ComboLBox drop-down of a combo box}
+
+  # ComboBox
+  CBS_AUTOHSCROLL: {behavior: "the edit part scrolls; without it input stops at the edge"}
+  CBS_DISABLENOSCROLL: {ignore: "menus and combo box lists scroll natively"}
+  CBS_HASSTRINGS: {behavior: "item text is stored by the control"}
+  CBS_LOWERCASE: {behavior: "the Win32 control lower-cases items and input"}
+  CBS_UPPERCASE: {behavior: "the Win32 control upper-cases items and input"}
+  CBS_NOINTEGRALHEIGHT: {ignore: "no row snapping on macOS"}
+  CBS_OEMCONVERT: {ignore: "OEM code-page round trip"}
+  CBS_SORT: {behavior: "the Win32 control keeps items sorted"}
+  CBS_OWNERDRAWFIXED: {not_translated: "the app draws each item"}
+  CBS_OWNERDRAWVARIABLE: {not_translated: "the app draws each item"}
+
+  # ComboBoxEx
+  CBES_EX_NOEDITIMAGE: {behavior: "no image in the closed control, only in the list"}
+  CBES_EX_NOEDITIMAGEINDENT: {ignore: "indentation of the closed control is native"}
+  CBES_EX_PATHWORDBREAKPROC: {behavior: "word breaks at path separators when editing"}
+  CBES_EX_NOSIZELIMIT: {ignore: "native controls size themselves"}
+  CBES_EX_CASESENSITIVE: {behavior: "case-sensitive string search (CB_FINDSTRING)"}
+
+  # ListView
+  LVS_ALIGNLEFT: {behavior: "icons flow in columns; the grid is rotated (LazyHGrid)"}
+  LVS_ALIGNTOP: {behavior: "icons flow in rows (the default grid)"}
+  LVS_AUTOARRANGE: {behavior: "icons stay arranged; native grids always are"}
+  LVS_EDITLABELS: {behavior: "rename in place - the row's text becomes a TextField on LVM_EDITLABEL or a slow second click"}
+  LVS_NOCOLUMNHEADER: {mod: .tableColumnHeaders(.hidden), since: 14, fallback: headers stay visible on 12-13}
+  LVS_NOLABELWRAP: {mod: ".lineLimit(1)"}
+  LVS_NOSCROLL: {mod: .scrollDisabled(true), since: 13, fallback: the list can scroll on 12}
+  LVS_NOSORTHEADER: {behavior: "no sortOrder binding - headers are not clickable"}
+  LVS_OWNERDATA: {behavior: "virtual list - rows are fetched on demand with LVN_GETDISPINFO into a lazy RandomAccessCollection, LVN_ODCACHEHINT prefetches"}
+  LVS_OWNERDRAWFIXED: {not_translated: "the app draws each row"}
+  LVS_SHAREIMAGELISTS: {behavior: "image lists are not destroyed with the control"}
+  LVS_SHOWSELALWAYS: {ignore: "macOS shows an inactive selection in grey"}
+  LVS_SINGLESEL: {behavior: "single selection in every mode: the selection binding is Int? instead of Set<Int>"}
+  LVS_SORTASCENDING: {behavior: "the Win32 control keeps items sorted"}
+  LVS_SORTDESCENDING: {behavior: "the Win32 control keeps items sorted"}
+  LVS_EX_AUTOAUTOARRANGE: {behavior: "icons re-arrange when items change"}
+  LVS_EX_AUTOCHECKSELECT: {behavior: "clicking a row toggles its check box"}
+  LVS_EX_AUTOSIZECOLUMNS: {behavior: "columns share the width - TableColumn .width(min:ideal:max:)"}
+  LVS_EX_BORDERSELECT: {ignore: "macOS highlights selected icons with a rounded background"}
+  LVS_EX_COLUMNOVERFLOW: {ignore: "tables scroll horizontally instead"}
+  LVS_EX_COLUMNSNAPPOINTS: {ignore: "column widths are continuous"}
+  LVS_EX_DOUBLEBUFFER: {ignore: "a Win32 flicker fix; native views are layer-backed"}
+  LVS_EX_FLATSB: {ignore: "macOS draws one scroll bar style"}
+  LVS_EX_FULLROWSELECT: {ignore: "macOS tables always select whole rows"}
+  LVS_EX_GRIDLINES: {mod: '.tableStyle(.bordered(alternatesRowBackgrounds: true))'}
+  LVS_EX_HEADERDRAGDROP: {behavior: "columns can be reordered; the new order is reported as HDN_ENDDRAG and LVM_SETCOLUMNORDERARRAY"}
+  LVS_EX_HEADERINALLVIEWS: {ignore: "only the details view has a header on macOS"}
+  LVS_EX_HIDELABELS: {behavior: "icon view without titles"}
+  LVS_EX_INFOTIP: {behavior: ".help on each row, text from LVN_GETINFOTIP"}
+  LVS_EX_JUSTIFYCOLUMNS: {ignore: "grid spacing is native"}
+  LVS_EX_LABELTIP: {ignore: "macOS shows expansion tool tips for truncated cells itself"}
+  LVS_EX_MULTIWORKAREAS: {ignore: "icon work areas have no macOS equivalent"}
+  LVS_EX_ONECLICKACTIVATE: {behavior: "a single click raises LVN_ITEMACTIVATE"}
+  LVS_EX_TWOCLICKACTIVATE: {behavior: "activation on the second click"}
+  LVS_EX_REGIONAL: {ignore: "obsolete shaped list windows"}
+  LVS_EX_SIMPLESELECT: {ignore: "icon selection behaves the macOS way"}
+  LVS_EX_SINGLEROW: {ignore: "tile layout detail"}
+  LVS_EX_SNAPTOGRID: {ignore: "native grids are always aligned"}
+  LVS_EX_SUBITEMIMAGES: {behavior: "cells show images through TableColumn content with a Label"}
+  LVS_EX_TRACKSELECT: {ignore: "hover selection is not a macOS behaviour"}
+  LVS_EX_TRANSPARENTBKGND: {mod: .scrollContentBackground(.hidden), since: 13, fallback: opaque list background on 12}
+  LVS_EX_TRANSPARENTSHADOWTEXT: {ignore: "desktop-icon text shadow"}
+  LVS_EX_UNDERLINECOLD: {ignore: "web-style underlines are not used in macOS lists"}
+  LVS_EX_UNDERLINEHOT: {ignore: "web-style underlines are not used in macOS lists"}
+
+  # TreeView
+  TVS_CHECKBOXES: {view: 'List(tree, children: \.children, selection: $selection) { n in Toggle(n.name, isOn: $isOn).toggleStyle(.checkbox) }'}
+  TVS_DISABLEDRAGDROP: {behavior: "no TVN_BEGINDRAG"}
+  TVS_EDITLABELS: {behavior: "rename in place as in list views"}
+  TVS_FULLROWSELECT: {ignore: "macOS outlines select whole rows"}
+  TVS_HASBUTTONS: {ignore: "disclosure triangles are always shown on expandable rows"}
+  TVS_HASLINES: {ignore: "macOS outlines have no connecting lines"}
+  TVS_INFOTIP: {behavior: ".help on each row, text from TVN_GETINFOTIP"}
+  TVS_LINESATROOT: {ignore: "no lines on macOS"}
+  TVS_NOHSCROLL: {ignore: "outlines truncate instead of scrolling horizontally"}
+  TVS_NONEVENHEIGHT: {ignore: "row height is native"}
+  TVS_NOSCROLL: {mod: .scrollDisabled(true), since: 13, fallback: the outline can scroll on 12}
+  TVS_NOTOOLTIPS: {ignore: "expansion tool tips are native"}
+  TVS_PRIVATEIMAGELISTS: {behavior: "image lists owned by the control"}
+  TVS_SHAREDIMAGELISTS: {behavior: "image lists are not destroyed with the control"}
+  TVS_RTLREADING: {mod: '.environment(\.layoutDirection, .rightToLeft)'}
+  TVS_SHOWSELALWAYS: {ignore: "macOS shows an inactive selection in grey"}
+  TVS_SINGLEEXPAND: {behavior: "expanding a node collapses its siblings"}
+  TVS_TRACKSELECT: {ignore: "hover selection is not a macOS behaviour"}
+  TVS_EX_AUTOHSCROLL: {ignore: "no horizontal auto-scroll in outlines"}
+  TVS_EX_DIMMEDCHECKBOXES: {behavior: "dimmed state shown as a disabled check box"}
+  TVS_EX_DOUBLEBUFFER: {ignore: "a Win32 flicker fix"}
+  TVS_EX_DRAWIMAGEASYNC: {behavior: "images arrive later through TVN_ASYNCDRAW"}
+  TVS_EX_EXCLUSIONCHECKBOXES: {behavior: "exclusion state shown as an unchecked, dimmed box"}
+  TVS_EX_FADEINOUTEXPANDOS: {ignore: "disclosure triangles are always visible on macOS"}
+  TVS_EX_MULTISELECT: {view: 'List(tree, children: \.children, selection: $multiSelection) { Text($0.name) }'}
+  TVS_EX_NOINDENTSTATE: {ignore: "state-image indent is native"}
+  TVS_EX_NOSINGLECOLLAPSE: {behavior: "a click does not collapse the selected node"}
+  TVS_EX_PARTIALCHECKBOXES: {behavior: "partial state shown as the mixed dash (Toggle(sources:) on 13+, NSButton mixed on 12)"}
+  TVS_EX_RICHTOOLTIP: {behavior: ".help on each row"}
+
+  # Header
+  HDS_BUTTONS: {behavior: "header items are clickable (HDN_ITEMCLICK)"}
+  HDS_CHECKBOXES: {behavior: "a check box in each header item (HDF_CHECKBOX)"}
+  HDS_DRAGDROP: {behavior: "header items can be reordered"}
+  HDS_FILTERBAR: {view: 'VStack(spacing: 2) { Text("Name").font(.headline); TextField(title, text: $text).textFieldStyle(.roundedBorder).controlSize(.small) }', note: a filter field under each header item}
+  HDS_FLAT: {ignore: "macOS headers are always flat"}
+  HDS_FULLDRAG: {ignore: "live resize is native"}
+  HDS_HIDDEN: {mod: .tableColumnHeaders(.hidden), since: 14, fallback: header height 0 on 12-13}
+  HDS_HORZ: {ignore: "headers are always horizontal"}
+  HDS_HOTTRACK: {ignore: "hover highlight is native"}
+  HDS_NOSIZING: {behavior: "fixed column width - TableColumn .width(n)"}
+  HDS_OVERFLOW: {ignore: "tables scroll horizontally"}
+
+parts:
+  HEADER/HP_HEADERDROPDOWN: {behavior: "split-button arrow in a header item (HDN_DROPDOWN) shown as a Menu"}
+  HEADER/HP_HEADERDROPDOWNFILTER: {behavior: "filter button in a header item"}
+  HEADER/HP_HEADEROVERFLOW: {ignore: "tables scroll horizontally"}

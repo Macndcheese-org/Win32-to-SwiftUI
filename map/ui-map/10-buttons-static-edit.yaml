@@ -1,0 +1,396 @@
+# Button, Static and Edit: user32 builtins, re-registered by comctl32_v6.
+#
+# Placeholders in code (see tools/typecheck_snippets.py): title, note, text/$text,
+# isOn/$isOn, flags, value, intValue, date, selection, multiSelection, choice,
+# color, isPresented, sortOrder, rows (Row), tree (Node), choices (Choice),
+# image (NSImage), attributed (AttributedString), action().
+
+entries:
+  - id: button.push
+    kind: control
+    title: Push button
+    win32: {class: Button, styles: [BS_PUSHBUTTON], parts: [BUTTON/BP_PUSHBUTTON, BUTTON/BP_USERBUTTON]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "Button(title, action: action).buttonStyle(.bordered)"
+    appkit:
+      - since: 12
+        code: "let b = NSButton(title: title, target: nil, action: nil); b.bezelStyle = .push"
+    glass: automatic
+    state_in: [WM_SETTEXT, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK]
+    events_out: {activate: WM_COMMAND/BN_CLICKED, focus: BN_SETFOCUS/BN_KILLFOCUS (BS_NOTIFY)}
+    not_translated_when: [BS_OWNERDRAW]
+    notes: >-
+      The control whose id is IDCANCEL also gets .keyboardShortcut(.cancelAction) so Escape
+      works as on macOS. Buttons keep the app's positions: Windows orders OK before Cancel,
+      and moving them would break apps that hard-code the layout.
+
+  - id: button.default
+    kind: control
+    title: Default push button
+    win32: {class: Button, styles: [BS_DEFPUSHBUTTON]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "Button(title, action: action).keyboardShortcut(.defaultAction)"
+    glass: automatic
+    state_in: [WM_SETTEXT, WM_ENABLE, BM_SETSTYLE, DM_SETDEFID]
+    events_out: {activate: WM_COMMAND/BN_CLICKED}
+    notes: >-
+      .defaultAction makes it the accent-coloured default button and binds Return, as in
+      Apple's dialogs; on 26 that button is the tinted Liquid Glass capsule without asking.
+      .glassProminent is deliberately not used here: Apple keeps it for controls floating
+      over content, which is where this map uses it (the default command link).
+      DM_SETDEFID moves the default from one button to another.
+
+  - id: button.checkbox
+    kind: control
+    title: Check box
+    win32: {class: Button, styles: [BS_CHECKBOX, BS_AUTOCHECKBOX], parts: [BUTTON/BP_CHECKBOX, BUTTON/BP_CHECKBOX_HCDISABLED]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "Toggle(title, isOn: $isOn).toggleStyle(.checkbox)"
+    glass: automatic
+    state_in: [WM_SETTEXT, WM_ENABLE, BM_SETCHECK, BM_GETCHECK]
+    events_out: {toggle: WM_COMMAND/BN_CLICKED}
+    notes: >-
+      BS_CHECKBOX (not auto) does not flip itself: the click is sent as BN_CLICKED and the
+      view only changes when the app answers with BM_SETCHECK. The binding's setter posts
+      the click; the getter reads the Win32 state.
+
+  - id: button.3state
+    kind: control
+    title: Three-state check box
+    win32: {class: Button, styles: [BS_3STATE, BS_AUTO3STATE]}
+    runtime: swiftui
+    swiftui:
+      - since: 13
+        code: "Toggle(title, sources: $flags, isOn: \\.self).toggleStyle(.checkbox)"
+    appkit:
+      - since: 12
+        code: "let b = NSButton(checkboxWithTitle: title, target: nil, action: nil); b.allowsMixedState = true; b.state = .mixed"
+    glass: automatic
+    state_in: [BM_SETCHECK (BST_INDETERMINATE)]
+    events_out: {toggle: WM_COMMAND/BN_CLICKED}
+    improvised: true
+    notes: >-
+      SwiftUI has no indeterminate Toggle initialiser; Toggle(sources:) shows the mixed dash
+      when its sources disagree, so the bridge feeds it [true, false] for BST_INDETERMINATE.
+      macOS 12 uses NSButton's mixed state directly.
+
+  - id: button.pushlike
+    kind: control
+    title: Push-like check box or radio
+    win32: {class: Button, styles: [BS_PUSHLIKE]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "Toggle(title, isOn: $isOn).toggleStyle(.button)"
+    glass: automatic
+    state_in: [BM_SETCHECK]
+    events_out: {toggle: WM_COMMAND/BN_CLICKED}
+
+  - id: button.radio
+    kind: control
+    title: Radio buttons
+    win32: {class: Button, styles: [BS_RADIOBUTTON, BS_AUTORADIOBUTTON], parts: [BUTTON/BP_RADIOBUTTON, BUTTON/BP_RADIOBUTTON_HCDISABLED]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          Picker(title, selection: $choice) {
+            ForEach(choices) { Text($0.title).tag($0.id) }
+          }.pickerStyle(.radioGroup).labelsHidden()
+    glass: automatic
+    state_in: [BM_SETCHECK, WM_SETTEXT, WM_ENABLE]
+    events_out: {select: WM_COMMAND/BN_CLICKED on the chosen button}
+    notes: >-
+      Win32 radios are separate windows; a group runs from a WS_GROUP button to the next
+      WS_GROUP sibling. The bridge hosts one radioGroup Picker over the group when the
+      buttons are stacked vertically and evenly spaced; otherwise each radio is its own
+      single-option Picker at its own rect, so custom layouts survive.
+
+  - id: button.groupbox
+    kind: control
+    title: Group box
+    win32: {class: Button, styles: [BS_GROUPBOX], parts: [BUTTON/BP_GROUPBOX, BUTTON/BP_GROUPBOX_HCDISABLED]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "GroupBox(title) { Color.clear }"
+    glass: none
+    state_in: [WM_SETTEXT]
+    notes: >-
+      Win32 group boxes don't contain their controls: the controls are siblings drawn on
+      top. The hosted GroupBox is only the frame, placed behind those siblings.
+
+  - id: button.split
+    kind: control
+    title: Split button
+    win32: {class: Button, styles: [BS_SPLITBUTTON, BS_DEFSPLITBUTTON], parts: [BUTTON/BP_PUSHBUTTONDROPDOWN]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          Menu {
+            Button(note, action: action)
+          } label: {
+            Text(title)
+          } primaryAction: {
+            action()
+          }
+      - since: 13
+        code: |-
+          Menu {
+            Button(note, action: action)
+          } label: {
+            Text(title)
+          } primaryAction: {
+            action()
+          }.menuStyle(.button)
+    glass: automatic
+    state_in: [WM_SETTEXT, BCM_SETSPLITINFO]
+    events_out: {activate: WM_COMMAND/BN_CLICKED, menu: WM_NOTIFY/BCN_DROPDOWN then the app's TrackPopupMenu}
+    notes: >-
+      The arrow half raises BCN_DROPDOWN; the app then calls TrackPopupMenu, and that menu
+      is translated by menu.popup and shown from the arrow.
+
+  - id: button.commandlink
+    kind: control
+    title: Command link
+    win32: {class: Button, styles: [BS_COMMANDLINK], parts: [BUTTON/BP_COMMANDLINK, BUTTON/BP_COMMANDLINKGLYPH]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          Button(action: action) {
+            VStack(alignment: .leading, spacing: 2) {
+              Text(title).font(.headline)
+              Text(note).font(.callout).foregroundStyle(.secondary)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+          }.buttonStyle(.bordered).controlSize(.large)
+      - since: 26
+        code: |-
+          Button(action: action) {
+            VStack(alignment: .leading, spacing: 2) {
+              Text(title).font(.headline)
+              Text(note).font(.callout).foregroundStyle(.secondary)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+          }.buttonStyle(.glass).controlSize(.large)
+    glass: explicit
+    state_in: [WM_SETTEXT, BCM_SETNOTE, BCM_SETSHIELD]
+    events_out: {activate: WM_COMMAND/BN_CLICKED}
+    improvised: true
+    notes: >-
+      macOS has no command-link control. The closest Apple pattern is a large button with a
+      title and a secondary line, the style of the choices in Setup Assistant. The green
+      arrow glyph is dropped; BCM_SETSHIELD (UAC shield) has no macOS meaning.
+
+  - id: static.text
+    kind: control
+    title: Static text
+    win32: {class: Static, styles: [SS_LEFT, SS_SIMPLE], parts: [TEXTSTYLE/TEXT_LABEL, TEXTSTYLE/TEXT_CONTROLLABEL]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "Text(title).frame(maxWidth: .infinity, alignment: .leading)"
+    glass: none
+    state_in: [WM_SETTEXT, WM_SETFONT, WM_ENABLE]
+    events_out: {click: WM_COMMAND/STN_CLICKED (SS_NOTIFY)}
+    notes: >-
+      Text is drawn in the macOS system font. Apps ask for "MS Shell Dlg"/Segoe UI and size
+      their controls for it; the translated text keeps the control's rect, so it may wrap or
+      truncate earlier than on Windows. '&' mnemonics are removed: macOS has no underlined
+      access keys.
+
+  - id: static.image
+    kind: control
+    title: Static icon or picture
+    win32: {class: Static, styles: [SS_ICON, SS_BITMAP, SS_ENHMETAFILE]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "Image(nsImage: image).resizable().scaledToFit()"
+    glass: none
+    state_in: [STM_SETICON, STM_SETIMAGE]
+    notes: >-
+      HICON/HBITMAP are converted to NSImage by winemac's existing image code (image.c).
+      Enhanced metafiles are rendered to a bitmap by gdi32 first.
+
+  - id: static.separator
+    kind: control
+    title: Etched line
+    win32: {class: Static, styles: [SS_ETCHEDHORZ, SS_ETCHEDVERT]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "Divider()"
+    glass: none
+
+  - id: static.frame
+    kind: control
+    title: Frame and rectangle statics
+    win32: {class: Static, styles: [SS_BLACKFRAME, SS_GRAYFRAME, SS_WHITEFRAME, SS_ETCHEDFRAME]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor))"
+    glass: none
+    improvised: true
+    notes: macOS has no bevelled frames; a separator-coloured rounded outline is the equivalent.
+
+  - id: edit.single
+    kind: control
+    title: Single-line edit
+    win32: {class: Edit, styles: [ES_LEFT], parts: [EDIT/EP_EDITTEXT, EDIT/EP_BACKGROUND, EDIT/EP_BACKGROUNDWITHBORDER, EDIT/EP_EDITBORDER_NOSCROLL, EDIT/EP_EDITBORDER_HSCROLL, EDIT/EP_EDITBORDER_VSCROLL, EDIT/EP_EDITBORDER_HVSCROLL, EDIT/EP_CARET]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "TextField(title, text: $text, prompt: Text(note)).textFieldStyle(.roundedBorder).labelsHidden()"
+    glass: automatic
+    state_in: [WM_SETTEXT, EM_SETSEL, EM_REPLACESEL, EM_SETREADONLY, EM_SETLIMITTEXT, EM_SETCUEBANNER, EM_SETPASSWORDCHAR, EM_UNDO]
+    events_out: {edit: WM_COMMAND/EN_UPDATE then EN_CHANGE, focus: EN_SETFOCUS/EN_KILLFOCUS, limit: EN_MAXTEXT}
+    notes: >-
+      The cue banner (EM_SETCUEBANNER) is the prompt. The Win32 edit stays authoritative:
+      each native change is applied with the equivalent of EM_REPLACESEL, so subclassed edits
+      that filter input (WM_CHAR) still see every character. The view then shows the result.
+
+  - id: edit.password
+    kind: control
+    title: Password edit
+    win32: {class: Edit, styles: [ES_PASSWORD], parts: [EDIT/EP_PASSWORD]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "SecureField(title, text: $text, prompt: Text(note)).textFieldStyle(.roundedBorder).labelsHidden()"
+    glass: automatic
+    state_in: [WM_SETTEXT, EM_SETPASSWORDCHAR]
+    events_out: {edit: WM_COMMAND/EN_CHANGE}
+
+  - id: edit.number
+    kind: control
+    title: Number-only edit
+    win32: {class: Edit, styles: [ES_NUMBER]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "TextField(title, value: $intValue, format: .number.grouping(.never)).textFieldStyle(.roundedBorder).labelsHidden()"
+    glass: automatic
+    state_in: [WM_SETTEXT]
+    events_out: {edit: WM_COMMAND/EN_CHANGE}
+    notes: ES_NUMBER accepts digits only (no sign, no grouping), hence .grouping(.never).
+
+  - id: edit.readonly
+    kind: control
+    title: Read-only edit
+    win32: {class: Edit, styles: [ES_READONLY]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "Text(text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)"
+    glass: none
+    state_in: [WM_SETTEXT, EM_SETREADONLY]
+    notes: >-
+      Apple shows read-only values as selectable text, not as a greyed field. A multiline
+      read-only edit (a licence text) is the same Text inside a ScrollView.
+
+  - id: edit.multiline
+    kind: control
+    title: Multiline edit
+    win32: {class: Edit, styles: [ES_MULTILINE]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: |-
+          let scroll = NSTextView.scrollableTextView()
+          let tv = scroll.documentView as! NSTextView
+          tv.string = title
+          tv.setSelectedRange(NSRange(location: 0, length: 0))
+          tv.isRichText = false
+    swiftui:
+      - since: 15
+        code: "TextEditor(text: $text, selection: $textSelection)"
+    glass: none
+    state_in: [WM_SETTEXT, EM_SETSEL, EM_GETSEL, EM_REPLACESEL, EM_LINEFROMCHAR, EM_LINEINDEX, EM_GETLINECOUNT, EM_POSFROMCHAR, EM_SCROLLCARET, EM_LINESCROLL]
+    events_out: {edit: WM_COMMAND/EN_CHANGE, scroll: EN_VSCROLL/EN_HSCROLL}
+    notes: >-
+      Apps query the caret, selection and line layout synchronously (EM_GETSEL,
+      EM_LINEFROMCHAR, EM_POSFROMCHAR). TextEditor exposes its selection only from macOS 15,
+      so 12-14 use NSTextView, the view TextEditor itself is built on. Line metrics always
+      come from NSTextView's layout.
+
+  - id: edit.balloon
+    kind: control
+    title: Edit balloon tip
+    win32: {class: Edit}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          TextField(title, text: $text).popover(isPresented: $isPresented) {
+            VStack(alignment: .leading) { Text(title).font(.headline); Text(note) }.padding()
+          }
+    glass: automatic
+    state_in: [EM_SHOWBALLOONTIP, EM_HIDEBALLOONTIP]
+    notes: >-
+      Balloon tips (for example "Caps Lock is on") are popovers anchored to the field. On
+      macOS 26 popovers are Liquid Glass automatically.
+
+flags:
+  # Button
+  BS_TEXT: {behavior: "the window text is the label (value 0, the default content)"}
+  BS_PUSHBOX: {mod: ".buttonStyle(.borderless)"}
+  BS_OWNERDRAW: {not_translated: "the app draws the button itself in WM_DRAWITEM"}
+  BS_USERBUTTON: {not_translated: "Win16 relic painted by the app"}
+  BS_BITMAP: {view: 'Button(action: action) { Image(nsImage: image) }.buttonStyle(.bordered)'}
+  BS_ICON: {view: 'Button(action: action) { Image(nsImage: image) }.buttonStyle(.bordered)'}
+  BS_LEFT: {mod: '.frame(maxWidth: .infinity, alignment: .leading)'}
+  BS_RIGHT: {mod: '.frame(maxWidth: .infinity, alignment: .trailing)'}
+  BS_CENTER: {mod: '.frame(maxWidth: .infinity, alignment: .center)'}
+  BS_TOP: {mod: '.frame(maxHeight: .infinity, alignment: .top)'}
+  BS_BOTTOM: {mod: '.frame(maxHeight: .infinity, alignment: .bottom)'}
+  BS_VCENTER: {mod: '.frame(maxHeight: .infinity, alignment: .center)'}
+  BS_MULTILINE: {mod: ".lineLimit(nil)"}
+  BS_LEFTTEXT: {view: 'HStack { Text(title); Toggle(title, isOn: $isOn).toggleStyle(.checkbox).labelsHidden() }', note: label before the box; BS_RIGHTBUTTON is the same bit}
+  BS_NOTIFY: {behavior: "also send BN_SETFOCUS/BN_KILLFOCUS/BN_DBLCLK from the view's focus and click count"}
+  BS_FLAT: {ignore: "macOS has one look per control role; flat versus 3D is a Windows distinction"}
+  BS_DEFCOMMANDLINK: {view: 'Button(action: action) { VStack(alignment: .leading, spacing: 2) { Text(title).font(.headline); Text(note).font(.callout) }.frame(maxWidth: .infinity, alignment: .leading) }.buttonStyle(.glassProminent).controlSize(.large).keyboardShortcut(.defaultAction)', since: 26, fallback: 12-25 use the same view with .buttonStyle(.borderedProminent)}
+  BCSS_NOSPLIT: {view: 'Menu { Button(note, action: action) } label: { Text(title) }', note: arrow-only split button}
+  BCSS_STRETCH: {ignore: "the menu arrow size is fixed on macOS"}
+  BCSS_ALIGNLEFT: {ignore: "the menu arrow is always trailing on macOS"}
+  BCSS_IMAGE: {view: 'Menu { Button(note, action: action) } label: { Image(nsImage: image) } primaryAction: { action() }'}
+
+  # Static
+  SS_CENTER: {mod: ".multilineTextAlignment(.center)"}
+  SS_RIGHT: {mod: ".multilineTextAlignment(.trailing)"}
+  SS_LEFTNOWORDWRAP: {mod: ".lineLimit(1)"}
+  SS_ENDELLIPSIS: {mod: ".lineLimit(1).truncationMode(.tail)"}
+  SS_PATHELLIPSIS: {mod: ".lineLimit(1).truncationMode(.middle)"}
+  SS_WORDELLIPSIS: {mod: ".truncationMode(.tail)"}
+  SS_NOPREFIX: {behavior: "keep '&' as a literal instead of stripping the mnemonic marker"}
+  SS_EDITCONTROL: {behavior: "wrap like a multiline edit (character-accurate width)"}
+  SS_NOTIFY: {behavior: "STN_CLICKED/STN_DBLCLK from tap gestures"}
+  SS_SUNKEN: {ignore: "no sunken bevels on macOS"}
+  SS_RIGHTJUST: {mod: '.frame(maxWidth: .infinity, alignment: .trailing)'}
+  SS_CENTERIMAGE: {mod: '.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)'}
+  SS_REALSIZECONTROL: {mod: ".scaledToFit()"}
+  SS_REALSIZEIMAGE: {behavior: "keep the image's natural size instead of scaling to the control"}
+  SS_BLACKRECT: {view: 'Rectangle().fill(Color(nsColor: .labelColor))'}
+  SS_GRAYRECT: {view: 'Rectangle().fill(Color(nsColor: .separatorColor))'}
+  SS_WHITERECT: {view: 'Rectangle().fill(Color(nsColor: .windowBackgroundColor))'}
+  SS_OWNERDRAW: {not_translated: "the app draws the control itself in WM_DRAWITEM"}
+  SS_USERITEM: {not_translated: "app-drawn item"}
+
+  # Edit
+  ES_CENTER: {mod: ".multilineTextAlignment(.center)"}
+  ES_RIGHT: {mod: ".multilineTextAlignment(.trailing)"}
+  ES_UPPERCASE: {behavior: "the Win32 edit upper-cases input; the view shows its text"}
+  ES_LOWERCASE: {behavior: "the Win32 edit lower-cases input; the view shows its text"}
+  ES_AUTOHSCROLL: {behavior: "native fields scroll horizontally; without the bit, input stops at the edge (EN_MAXTEXT)"}
+  ES_AUTOVSCROLL: {behavior: "native text views scroll; without the bit, input stops at the last line"}
+  ES_NOHIDESEL: {ignore: "macOS keeps an inactive selection visible in grey"}
+  ES_OEMCONVERT: {ignore: "OEM code-page round trip, meaningless for Unicode text"}
+  ES_WANTRETURN: {behavior: "Return inserts a newline instead of pressing the default button"}
+  ES_COMBO: {entry: "combobox.editable"}

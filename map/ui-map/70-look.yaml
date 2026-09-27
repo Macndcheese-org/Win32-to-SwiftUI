@@ -1,0 +1,113 @@
+# System colours, fonts and the visual parts that aren't a control of their own.
+#
+# Colours: wine's system colour table (GetSysColor, HKCU\Control Panel\Colors) is written
+# from these NSColors resolved against NSApp.effectiveAppearance, and rewritten with
+# WM_SYSCOLORCHANGE + WM_THEMECHANGED on NSSystemColorsDidChangeNotification and on
+# appearance changes. Whatever an app still draws itself (owner-draw, custom windows)
+# then follows Light/Dark mode and the accent colour.
+
+flags:
+  COLOR_WINDOW: {nscolor: "NSColor.textBackgroundColor"}
+  COLOR_WINDOWTEXT: {nscolor: "NSColor.textColor"}
+  COLOR_BTNFACE: {nscolor: NSColor.windowBackgroundColor, note: also COLOR_3DFACE - it is the dialog background}
+  COLOR_3DFACE: {nscolor: "NSColor.windowBackgroundColor"}
+  COLOR_BTNTEXT: {nscolor: "NSColor.controlTextColor"}
+  COLOR_BTNSHADOW: {nscolor: "NSColor.separatorColor"}
+  COLOR_3DSHADOW: {nscolor: "NSColor.separatorColor"}
+  COLOR_BTNHIGHLIGHT: {nscolor: "NSColor.controlBackgroundColor"}
+  COLOR_BTNHILIGHT: {nscolor: "NSColor.controlBackgroundColor"}
+  COLOR_3DHIGHLIGHT: {nscolor: "NSColor.controlBackgroundColor"}
+  COLOR_3DHILIGHT: {nscolor: "NSColor.controlBackgroundColor"}
+  COLOR_3DLIGHT: {nscolor: "NSColor.controlColor"}
+  COLOR_3DDKSHADOW: {nscolor: "NSColor.shadowColor"}
+  COLOR_HIGHLIGHT: {nscolor: NSColor.selectedContentBackgroundColor, note: follows the accent colour}
+  COLOR_HIGHLIGHTTEXT: {nscolor: "NSColor.alternateSelectedControlTextColor"}
+  COLOR_GRAYTEXT: {nscolor: "NSColor.disabledControlTextColor"}
+  COLOR_HOTLIGHT: {nscolor: "NSColor.linkColor"}
+  COLOR_INFOBK: {nscolor: NSColor.windowBackgroundColor, note: macOS tool tips have no separate colour}
+  COLOR_INFOTEXT: {nscolor: "NSColor.labelColor"}
+  COLOR_MENU: {nscolor: "NSColor.windowBackgroundColor"}
+  COLOR_MENUBAR: {nscolor: "NSColor.windowBackgroundColor"}
+  COLOR_MENUTEXT: {nscolor: "NSColor.labelColor"}
+  COLOR_MENUHILIGHT: {nscolor: "NSColor.selectedContentBackgroundColor"}
+  COLOR_SCROLLBAR: {nscolor: "NSColor.controlBackgroundColor"}
+  COLOR_APPWORKSPACE: {nscolor: NSColor.underPageBackgroundColor, note: the MDI background}
+  COLOR_ALTERNATEBTNFACE: {nscolor: 'NSColor.alternatingContentBackgroundColors[1]'}
+  COLOR_ACTIVECAPTION: {nscolor: NSColor.windowBackgroundColor, note: captions are native; this is for apps that draw their own}
+  COLOR_INACTIVECAPTION: {nscolor: "NSColor.windowBackgroundColor"}
+  COLOR_GRADIENTACTIVECAPTION: {nscolor: "NSColor.windowBackgroundColor"}
+  COLOR_GRADIENTINACTIVECAPTION: {nscolor: "NSColor.windowBackgroundColor"}
+  COLOR_CAPTIONTEXT: {nscolor: "NSColor.labelColor"}
+  COLOR_INACTIVECAPTIONTEXT: {nscolor: "NSColor.secondaryLabelColor"}
+  COLOR_ACTIVEBORDER: {nscolor: "NSColor.separatorColor"}
+  COLOR_INACTIVEBORDER: {nscolor: "NSColor.separatorColor"}
+  COLOR_WINDOWFRAME: {nscolor: "NSColor.separatorColor"}
+  COLOR_BACKGROUND: {ignore: "the desktop colour; macOS's desktop picture belongs to macOS"}
+  COLOR_DESKTOP: {ignore: "the desktop colour; macOS's desktop picture belongs to macOS"}
+
+fonts:
+  lfMessageFont: {nsfont: 'NSFont.systemFont(ofSize: 0)', note: message boxes and dialog text; also what "MS Shell Dlg" resolves to}
+  lfCaptionFont: {nsfont: 'NSFont.titleBarFont(ofSize: 0)'}
+  lfSmCaptionFont: {nsfont: 'NSFont.titleBarFont(ofSize: NSFont.smallSystemFontSize)'}
+  lfMenuFont: {nsfont: 'NSFont.menuFont(ofSize: 0)'}
+  lfStatusFont: {nsfont: 'NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)'}
+
+parts:
+
+  # Drag and drop feedback: macOS drag cursors
+  DRAGDROP/DD_COPY: {nscolor: NSColor.controlAccentColor, note: drag feedback uses NSCursor.dragCopy; the colour is the badge tint}
+  DRAGDROP/DD_MOVE: {behavior: "plain arrow cursor (NSCursor.arrow) - a move has no badge on macOS"}
+  DRAGDROP/DD_CREATELINK: {behavior: "NSCursor.dragLink"}
+  DRAGDROP/DD_NONE: {behavior: "NSCursor.operationNotAllowed"}
+  DRAGDROP/DD_WARNING: {behavior: "NSCursor.operationNotAllowed"}
+  DRAGDROP/DD_UPDATEMETADATA: {ignore: "drop-description metadata"}
+  DRAGDROP/DD_IMAGEBG: {ignore: "drag images are native"}
+  DRAGDROP/DD_TEXTBG: {ignore: "drag images are native"}
+
+  # MDI parts of the window class
+  WINDOW/WP_MDISYSBUTTON: {entry: "mdiclient"}
+  WINDOW/WP_MDIMINBUTTON: {entry: "mdiclient"}
+  WINDOW/WP_MDICLOSEBUTTON: {entry: "mdiclient"}
+  WINDOW/WP_MDIRESTOREBUTTON: {entry: "mdiclient"}
+  WINDOW/WP_MDIHELPBUTTON: {entry: "mdiclient"}
+
+  # Windows shell surfaces that no application control uses
+  CONTROLPANEL/CPANEL_NAVIGATIONPANE: {ignore: "Windows Control Panel chrome; wine's applets use ordinary controls"}
+  CONTROLPANEL/CPANEL_CONTENTPANE: {ignore: "Windows Control Panel chrome"}
+  CONTROLPANEL/CPANEL_NAVIGATIONPANELABEL: {ignore: "Windows Control Panel chrome"}
+  CONTROLPANEL/CPANEL_CONTENTPANELABEL: {ignore: "Windows Control Panel chrome"}
+  CONTROLPANEL/CPANEL_TITLE: {ignore: "Windows Control Panel chrome"}
+  CONTROLPANEL/CPANEL_BODYTEXT: {ignore: "Windows Control Panel chrome"}
+  CONTROLPANEL/CPANEL_HELPLINK: {ignore: "Windows Control Panel chrome"}
+  CONTROLPANEL/CPANEL_TASKLINK: {ignore: "Windows Control Panel chrome"}
+  CONTROLPANEL/CPANEL_GROUPTEXT: {ignore: "Windows Control Panel chrome"}
+  CONTROLPANEL/CPANEL_CONTENTLINK: {ignore: "Windows Control Panel chrome"}
+  CONTROLPANEL/CPANEL_SECTIONTITLELINK: {ignore: "Windows Control Panel chrome"}
+  CONTROLPANEL/CPANEL_LARGECOMMANDAREA: {ignore: "Windows Control Panel chrome"}
+  CONTROLPANEL/CPANEL_SMALLCOMMANDAREA: {ignore: "Windows Control Panel chrome"}
+  CONTROLPANEL/CPANEL_BUTTON: {ignore: "Windows Control Panel chrome"}
+  CONTROLPANEL/CPANEL_MESSAGETEXT: {ignore: "Windows Control Panel chrome"}
+  CONTROLPANEL/CPANEL_NAVIGATIONPANELINE: {ignore: "Windows Control Panel chrome"}
+  CONTROLPANEL/CPANEL_CONTENTPANELINE: {ignore: "Windows Control Panel chrome"}
+  CONTROLPANEL/CPANEL_BANNERAREA: {ignore: "Windows Control Panel chrome"}
+  CONTROLPANEL/CPANEL_BODYTITLE: {ignore: "Windows Control Panel chrome"}
+  EXPLORERBAR/EBP_HEADERBACKGROUND: {ignore: "Windows XP Explorer task pane"}
+  EXPLORERBAR/EBP_HEADERCLOSE: {ignore: "Windows XP Explorer task pane"}
+  EXPLORERBAR/EBP_HEADERPIN: {ignore: "Windows XP Explorer task pane"}
+  EXPLORERBAR/EBP_IEBARMENU: {ignore: "Windows XP Explorer task pane"}
+  EXPLORERBAR/EBP_NORMALGROUPBACKGROUND: {ignore: "Windows XP Explorer task pane"}
+  EXPLORERBAR/EBP_NORMALGROUPCOLLAPSE: {ignore: "Windows XP Explorer task pane"}
+  EXPLORERBAR/EBP_NORMALGROUPEXPAND: {ignore: "Windows XP Explorer task pane"}
+  EXPLORERBAR/EBP_NORMALGROUPHEAD: {ignore: "Windows XP Explorer task pane"}
+  EXPLORERBAR/EBP_SPECIALGROUPBACKGROUND: {ignore: "Windows XP Explorer task pane"}
+  EXPLORERBAR/EBP_SPECIALGROUPCOLLAPSE: {ignore: "Windows XP Explorer task pane"}
+  EXPLORERBAR/EBP_SPECIALGROUPEXPAND: {ignore: "Windows XP Explorer task pane"}
+  EXPLORERBAR/EBP_SPECIALGROUPHEAD: {ignore: "Windows XP Explorer task pane"}
+  FLYOUT/FLYOUT_HEADER: {ignore: "Windows 7 tray flyout chrome"}
+  FLYOUT/FLYOUT_BODY: {ignore: "Windows 7 tray flyout chrome"}
+  FLYOUT/FLYOUT_LABEL: {ignore: "Windows 7 tray flyout chrome"}
+  FLYOUT/FLYOUT_LINK: {ignore: "Windows 7 tray flyout chrome"}
+  FLYOUT/FLYOUT_DIVIDER: {ignore: "Windows 7 tray flyout chrome"}
+  FLYOUT/FLYOUT_WINDOW: {ignore: "Windows 7 tray flyout chrome"}
+  FLYOUT/FLYOUT_LINKAREA: {ignore: "Windows 7 tray flyout chrome"}
+  FLYOUT/FLYOUT_LINKHEADER: {ignore: "Windows 7 tray flyout chrome"}

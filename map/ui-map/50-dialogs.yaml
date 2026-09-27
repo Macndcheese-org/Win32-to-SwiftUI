@@ -1,0 +1,612 @@
+# Whole dialogs replaced by macOS system panels: message box, task dialog, file and
+# folder pickers, colour/font/print/page setup, find/replace, shell dialogs, progress.
+#
+# AppKit code runs with: window (the owner NSWindow), view, menu, title, note, items,
+# image, action().
+
+entries:
+  - id: messagebox
+    kind: dialog
+    title: Message box
+    win32: {apis: [MessageBox, MessageBoxEx, MessageBoxIndirect, MessageBoxTimeout], styles: [MB_OK]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: |-
+          let a = NSAlert()
+          a.messageText = title
+          a.informativeText = note
+          a.alertStyle = .warning
+          a.addButton(withTitle: "OK")
+          a.beginSheetModal(for: window) { response in _ = response }
+    swiftui:
+      - since: 12
+        code: |-
+          Color.clear.alert(title, isPresented: $isPresented) {
+            Button("OK", role: .cancel, action: action)
+          } message: {
+            Text(note)
+          }
+    glass: automatic
+    events_out: {result: the MessageBox return value (IDOK, IDCANCEL, IDYES, ...)}
+    notes: >-
+      NSAlert is exactly what SwiftUI's .alert shows on macOS; the free-standing form is
+      used because the caller isn't a SwiftUI view. The text becomes messageText (bold). The
+      caption becomes informativeText only when it isn't just the app's name, since macOS
+      alerts already show the app icon. With an owner window the alert is a sheet on it
+      (MB_APPLMODAL); otherwise it is app-modal. The calling thread keeps pumping messages
+      while waiting, as MessageBox does on Windows.
+
+  - id: taskdialog
+    kind: dialog
+    title: Task dialog
+    win32: {apis: [TaskDialog, TaskDialogIndirect], parts: [TASKDIALOG/TDLG_PRIMARYPANEL, TASKDIALOG/TDLG_MAININSTRUCTIONPANE, TASKDIALOG/TDLG_MAINICON, TASKDIALOG/TDLG_CONTENTPANE, TASKDIALOG/TDLG_CONTENTICON, TASKDIALOG/TDLG_EXPANDEDCONTENT, TASKDIALOG/TDLG_COMMANDLINKPANE, TASKDIALOG/TDLG_SECONDARYPANEL, TASKDIALOG/TDLG_CONTROLPANE, TASKDIALOG/TDLG_BUTTONSECTION, TASKDIALOG/TDLG_BUTTONWRAPPER, TASKDIALOG/TDLG_EXPANDOTEXT, TASKDIALOG/TDLG_EXPANDOBUTTON, TASKDIALOG/TDLG_VERIFICATIONTEXT, TASKDIALOG/TDLG_FOOTNOTEPANE, TASKDIALOG/TDLG_FOOTNOTEAREA, TASKDIALOG/TDLG_FOOTNOTESEPARATOR, TASKDIALOG/TDLG_EXPANDEDFOOTERAREA, TASKDIALOG/TDLG_PROGRESSBAR, TASKDIALOG/TDLG_IMAGEALIGNMENT, TASKDIALOG/TDLG_RADIOBUTTONPANE, TEXTSTYLE/TEXT_MAININSTRUCTION, TEXTSTYLE/TEXT_INSTRUCTION, TEXTSTYLE/TEXT_EXPANDED]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: |-
+          let a = NSAlert()
+          a.messageText = title
+          a.informativeText = note
+          a.showsSuppressionButton = true
+          a.suppressionButton?.title = "Don't show this again"
+          a.accessoryView = NSHostingView(rootView:
+            VStack(alignment: .leading, spacing: 8) {
+              ProgressView(value: 0.4).progressViewStyle(.linear)
+              DisclosureGroup("Details") { Text(note).font(.callout) }
+            }.frame(width: 300))
+          a.addButton(withTitle: "Continue")
+          a.addButton(withTitle: "Cancel")
+          a.beginSheetModal(for: window) { response in _ = response }
+    glass: automatic
+    state_in: [TDM_SET_ELEMENT_TEXT, TDM_UPDATE_ELEMENT_TEXT, TDM_SET_PROGRESS_BAR_POS, TDM_SET_PROGRESS_BAR_STATE, TDM_SET_MARQUEE_PROGRESS_BAR, TDM_ENABLE_BUTTON, TDM_CLICK_BUTTON, TDM_CLICK_RADIO_BUTTON, TDM_CLICK_VERIFICATION]
+    events_out: {created: TDN_CREATED, button: TDN_BUTTON_CLICKED, radio: TDN_RADIO_BUTTON_CLICKED, verify: TDN_VERIFICATION_CLICKED, link: TDN_HYPERLINK_CLICKED, timer: TDN_TIMER, destroyed: TDN_DESTROYED}
+    notes: >-
+      Main instruction -> messageText; content -> informativeText; verification check box
+      -> NSAlert's suppression button. Radio buttons, the progress bar, expanded information
+      and the footer are SwiftUI in the alert's accessory view (NSHostingView). Custom and
+      command-link buttons are added as alert buttons, which NSAlert stacks vertically when
+      there are more than three, the macOS form of a command-link list.
+
+  - id: filedialog.open
+    kind: dialog
+    title: Open file dialog
+    win32: {apis: [GetOpenFileName, IFileOpenDialog], styles: [OFN_EXPLORER]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: |-
+          let p = NSOpenPanel()
+          p.canChooseFiles = true
+          p.canChooseDirectories = false
+          p.allowsMultipleSelection = false
+          p.allowedContentTypes = [UTType(filenameExtension: "txt") ?? .data]
+          p.directoryURL = URL(fileURLWithPath: NSHomeDirectory())
+          p.beginSheetModal(for: window) { response in _ = response == .OK ? p.urls : [] }
+    swiftui:
+      - since: 12
+        code: |-
+          Color.clear.fileImporter(isPresented: $isPresented, allowedContentTypes: [.data]) { result in _ = result }
+    glass: automatic
+    events_out: {result: 'OPENFILENAME lpstrFile (Windows path through wine_get_dos_file_name), or IShellItem(s)', change: CDN_SELCHANGE / IFileDialogEvents only when the app asks for them}
+    not_translated_when: [OFN_ENABLEHOOK, OFN_ENABLETEMPLATE, OFN_ENABLETEMPLATEHANDLE]
+    notes: >-
+      The real macOS open panel: iCloud Drive, tags, Quick Look, the sidebar. Filters
+      ("Text files|*.txt;*.log") become UTTypes from their extensions; "*.*" allows
+      everything. The chosen Unix path is converted to the drive path the app expects. Apps
+      that put their own controls inside the dialog (hooks and templates) keep wine's
+      dialog, because those controls can't live in a macOS panel.
+
+  - id: filedialog.save
+    kind: dialog
+    title: Save file dialog
+    win32: {apis: [GetSaveFileName, IFileSaveDialog]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: |-
+          let s = NSSavePanel()
+          s.nameFieldStringValue = title
+          s.allowedContentTypes = [.plainText]
+          s.canCreateDirectories = true
+          s.beginSheetModal(for: window) { response in _ = response == .OK ? s.url : nil }
+    glass: automatic
+    notes: >-
+      Several filters become a file-format pop-up in an accessory view, as in TextEdit's
+      save panel. The native panel confirms replacing an existing file on its own, which is
+      what OFN_OVERWRITEPROMPT asks for.
+
+  - id: filedialog.folder
+    kind: dialog
+    title: Folder picker
+    win32: {apis: [SHBrowseForFolder], styles: [FOS_PICKFOLDERS, BIF_RETURNONLYFSDIRS]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: |-
+          let p = NSOpenPanel()
+          p.canChooseFiles = false
+          p.canChooseDirectories = true
+          p.canCreateDirectories = true
+          p.prompt = "Choose"
+          p.message = note
+          p.beginSheetModal(for: window) { response in _ = response == .OK ? p.url : nil }
+    glass: automatic
+    events_out: {result: PIDL of the chosen folder, callback: BFFM_INITIALIZED / BFFM_SELCHANGED to the app's callback}
+    notes: >-
+      SHBrowseForFolder's tree dialog and IFileOpenDialog with FOS_PICKFOLDERS both become
+      the macOS open panel in folder mode. BFFM_SETSELECTION sets directoryURL.
+
+  - id: colordialog
+    kind: dialog
+    title: Colour picker
+    win32: {apis: [ChooseColor]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: |-
+          let c = NSColorPanel.shared
+          c.showsAlpha = false
+          c.color = .systemBlue
+          c.accessoryView = NSHostingView(rootView:
+            HStack {
+              Spacer()
+              Button("Cancel", role: .cancel) {}.keyboardShortcut(.cancelAction)
+              Button("OK") {}.keyboardShortcut(.defaultAction)
+            }.padding(8))
+          _ = NSApp.runModal(for: c)
+    swiftui:
+      - since: 12
+        code: "ColorPicker(title, selection: $color, supportsOpacity: false)"
+    glass: automatic
+    improvised: true
+    events_out: {result: CHOOSECOLOR rgbResult and lpCustColors}
+    not_translated_when: [CC_ENABLEHOOK, CC_ENABLETEMPLATE, CC_ENABLETEMPLATEHANDLE]
+    notes: >-
+      ColorPicker is the inline well; the dialog form is NSColorPanel, which SwiftUI opens
+      from the well. The system panel is modeless and has no OK button, so a small accessory
+      with Cancel/OK and a modal session reproduce ChooseColor's modal contract. The 16
+      custom colours are loaded into the panel's colour list.
+
+  - id: fontdialog
+    kind: dialog
+    title: Font picker
+    win32: {apis: [ChooseFont]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: |-
+          let fm = NSFontManager.shared
+          fm.setSelectedFont(NSFont.systemFont(ofSize: 13), isMultiple: false)
+          let fp = NSFontPanel.shared
+          fp.accessoryView = NSHostingView(rootView:
+            HStack {
+              Spacer()
+              Button("Cancel", role: .cancel) {}.keyboardShortcut(.cancelAction)
+              Button("OK") {}.keyboardShortcut(.defaultAction)
+            }.padding(8))
+          fm.orderFrontFontPanel(nil)
+          _ = NSApp.runModal(for: fp)
+    glass: automatic
+    improvised: true
+    events_out: {result: CHOOSEFONT LOGFONT, iPointSize and rgbColors}
+    not_translated_when: [CF_ENABLEHOOK, CF_ENABLETEMPLATE, CF_ENABLETEMPLATEHANDLE]
+    notes: >-
+      SwiftUI has no font picker. The macOS font panel lists macOS fonts; the chosen family
+      is returned only if wine can load it (it sees /System/Library/Fonts and ~/Library/Fonts),
+      otherwise the closest face that GDI enumerates.
+
+  - id: printdialog
+    kind: dialog
+    title: Print dialog
+    win32: {apis: [PrintDlg, PrintDlgEx]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: |-
+          let info = NSPrintInfo.shared
+          let pp = NSPrintPanel()
+          pp.options = [.showsCopies, .showsPageRange, .showsPaperSize, .showsOrientation]
+          _ = pp.runModal(with: info)
+    glass: automatic
+    events_out: {result: 'PRINTDLG hDevMode/hDevNames, page range, copies; hDC from the chosen printer'}
+    not_translated_when: [PD_ENABLEPRINTHOOK, PD_ENABLEPRINTTEMPLATE, PD_ENABLEPRINTTEMPLATEHANDLE]
+    notes: >-
+      The macOS print panel picks the printer and options; the result is written back into
+      the DEVMODE that wine's CUPS printing (wineps) already uses. "Save as PDF" replaces
+      "Print to file".
+
+  - id: pagesetup
+    kind: dialog
+    title: Page setup
+    win32: {apis: [PageSetupDlg], styles: [PD_PRINTSETUP]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: "_ = NSPageLayout().runModal(with: NSPrintInfo.shared)"
+    glass: automatic
+    not_translated_when: [PSD_ENABLEPAGESETUPHOOK, PSD_ENABLEPAGESETUPTEMPLATE, PSD_ENABLEPAGESETUPTEMPLATEHANDLE]
+    notes: >-
+      macOS Page Setup has paper size, orientation and scale but no margins; the app's
+      margins are passed through unchanged.
+
+  - id: findreplace
+    kind: dialog
+    title: Find / Replace
+    win32: {apis: [FindText, ReplaceText], styles: [FR_DOWN]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          VStack(alignment: .leading, spacing: 8) {
+            TextField("Find", text: $text).textFieldStyle(.roundedBorder)
+            TextField("Replace", text: $text).textFieldStyle(.roundedBorder)
+            HStack {
+              Toggle("Match Case", isOn: $isOn).toggleStyle(.checkbox)
+              Toggle("Whole Words", isOn: $isOn).toggleStyle(.checkbox)
+            }
+            HStack {
+              Spacer()
+              Button("Replace All", action: action)
+              Button("Previous", action: action)
+              Button("Next", action: action).keyboardShortcut(.defaultAction)
+            }
+          }.padding().frame(width: 420)
+    glass: automatic
+    improvised: true
+    events_out: {find: 'the app''s registered FINDMSGSTRING message with FR_FINDNEXT / FR_REPLACE / FR_REPLACEALL / FR_DIALOGTERM'}
+    not_translated_when: [FR_ENABLEHOOK, FR_ENABLETEMPLATE, FR_ENABLETEMPLATEHANDLE]
+    notes: >-
+      A floating utility panel (NSPanel), like TextEdit's classic Find panel. Apple's inline
+      find bar (NSTextFinder) needs to own the text view, which the app does. The direction
+      radio (Up/Down) becomes Previous/Next buttons.
+
+  - id: shellabout
+    kind: dialog
+    title: About box
+    win32: {apis: [ShellAbout]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: |-
+          NSApp.orderFrontStandardAboutPanel(options: [
+            .applicationName: title,
+            .credits: NSAttributedString(string: note),
+            .applicationIcon: image,
+          ])
+    glass: automatic
+
+  - id: rundialog
+    kind: dialog
+    title: Run dialog
+    win32: {apis: [RunFileDlg]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          VStack(alignment: .leading, spacing: 10) {
+            Text("Type the name of a program, folder, document, or Internet resource.").font(.callout)
+            TextField("Open", text: $text).textFieldStyle(.roundedBorder)
+            HStack {
+              Spacer()
+              Button("Browse…", action: action)
+              Button("Cancel", role: .cancel, action: action).keyboardShortcut(.cancelAction)
+              Button("Run", action: action).keyboardShortcut(.defaultAction)
+            }
+          }.padding().frame(width: 420)
+    glass: automatic
+    improvised: true
+    notes: Browse… opens filedialog.open.
+
+  - id: pickicon
+    kind: dialog
+    title: Change icon dialog
+    win32: {apis: [PickIconDlg]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          VStack(spacing: 10) {
+            ScrollView {
+              LazyVGrid(columns: [GridItem(.adaptive(minimum: 44))], spacing: 8) {
+                ForEach(rows) { _ in Image(nsImage: image).resizable().frame(width: 32, height: 32) }
+              }.padding(8)
+            }.frame(height: 200).background(Color(nsColor: .controlBackgroundColor))
+            HStack {
+              Spacer()
+              Button("Cancel", role: .cancel, action: action).keyboardShortcut(.cancelAction)
+              Button("OK", action: action).keyboardShortcut(.defaultAction)
+            }
+          }.padding().frame(width: 360)
+    glass: automatic
+    improvised: true
+
+  - id: restartdialog
+    kind: dialog
+    title: Restart prompt
+    win32: {apis: [RestartDialog, RestartDialogEx]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: |-
+          let a = NSAlert()
+          a.messageText = title
+          a.informativeText = note
+          a.addButton(withTitle: "Restart")
+          a.addButton(withTitle: "Later")
+          _ = a.runModal()
+    glass: automatic
+    notes: >-
+      "Restart" restarts the wine session (wineboot --restart), not the Mac, which is what
+      the app actually needs.
+
+  - id: fileprogress
+    kind: dialog
+    title: File operation progress
+    win32: {apis: [SHFileOperation, IFileOperation, IProgressDialog]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.headline)
+            ProgressView(value: value).progressViewStyle(.linear)
+            HStack {
+              Text(note).font(.caption).foregroundStyle(.secondary)
+              Spacer()
+              Button("Stop", role: .cancel, action: action)
+            }
+          }.padding().frame(width: 380)
+    glass: automatic
+    events_out: {cancel: IProgressDialog::HasUserCancelled / SHFileOperation fAnyOperationsAborted}
+    notes: >-
+      The Finder copy window. Conflicts ("replace the file?") are NSAlerts with
+      Keep Both / Stop / Replace, Finder's wording.
+
+flags:
+  # MessageBox buttons and icons (AppKit, on the NSAlert of the messagebox entry)
+  MB_OKCANCEL: {appkit: 'let a = NSAlert(); a.addButton(withTitle: "OK"); a.addButton(withTitle: "Cancel")'}
+  MB_YESNO: {appkit: 'let a = NSAlert(); a.addButton(withTitle: "Yes"); a.addButton(withTitle: "No")'}
+  MB_YESNOCANCEL: {appkit: 'let a = NSAlert(); a.addButton(withTitle: "Yes"); a.addButton(withTitle: "No"); a.addButton(withTitle: "Cancel")'}
+  MB_RETRYCANCEL: {appkit: 'let a = NSAlert(); a.addButton(withTitle: "Retry"); a.addButton(withTitle: "Cancel")'}
+  MB_ABORTRETRYIGNORE: {appkit: 'let a = NSAlert(); a.addButton(withTitle: "Abort"); a.addButton(withTitle: "Retry"); a.addButton(withTitle: "Ignore")'}
+  MB_CANCELTRYCONTINUE: {appkit: 'let a = NSAlert(); a.addButton(withTitle: "Continue"); a.addButton(withTitle: "Try Again"); a.addButton(withTitle: "Cancel")'}
+  MB_DEFBUTTON1: {behavior: "the first button is the default (Return)"}
+  MB_DEFBUTTON2: {appkit: 'let a = NSAlert(); a.addButton(withTitle: "Yes"); a.addButton(withTitle: "No"); a.buttons[0].keyEquivalent = ""; a.buttons[1].keyEquivalent = "\r"'}
+  MB_DEFBUTTON3: {appkit: 'let a = NSAlert(); a.addButton(withTitle: "Yes"); a.addButton(withTitle: "No"); a.addButton(withTitle: "Cancel"); a.buttons[0].keyEquivalent = ""; a.buttons[2].keyEquivalent = "\r"'}
+  MB_DEFBUTTON4: {behavior: "the Help button is never the default on macOS; falls back to the first button"}
+  MB_ICONERROR: {appkit: 'let a = NSAlert(); a.alertStyle = .critical', note: MB_ICONHAND and MB_ICONSTOP are the same value}
+  MB_ICONHAND: {appkit: 'let a = NSAlert(); a.alertStyle = .critical'}
+  MB_ICONSTOP: {appkit: 'let a = NSAlert(); a.alertStyle = .critical'}
+  MB_ICONWARNING: {appkit: 'let a = NSAlert(); a.alertStyle = .warning'}
+  MB_ICONEXCLAMATION: {appkit: 'let a = NSAlert(); a.alertStyle = .warning'}
+  MB_ICONINFORMATION: {appkit: 'let a = NSAlert(); a.alertStyle = .informational'}
+  MB_ICONASTERISK: {appkit: 'let a = NSAlert(); a.alertStyle = .informational'}
+  MB_ICONQUESTION: {appkit: 'let a = NSAlert(); a.alertStyle = .informational', note: macOS has no question icon; Apple's guidelines reserve it}
+  MB_USERICON: {appkit: 'let a = NSAlert(); a.icon = image'}
+  MB_HELP: {appkit: 'let a = NSAlert(); a.showsHelp = true', note: the help button sends WM_HELP to the owner}
+  MB_APPLMODAL: {behavior: "sheet on the owner window when there is one, else app-modal"}
+  MB_TASKMODAL: {behavior: "app-modal (runModal) for the calling thread's windows"}
+  MB_SYSTEMMODAL: {appkit: 'let a = NSAlert(); a.window.level = .floating; _ = a.runModal()'}
+  MB_TOPMOST: {appkit: 'let a = NSAlert(); a.window.level = .floating'}
+  MB_SETFOREGROUND: {appkit: 'NSApp.activate(ignoringOtherApps: true)'}
+  MB_NOFOCUS: {ignore: "the alert always takes focus on macOS"}
+  MB_RIGHT: {behavior: "right-aligned text (right-to-left languages only)"}
+  MB_RTLREADING: {behavior: "right-to-left text; NSAlert follows the text's direction"}
+  MB_DEFAULT_DESKTOP_ONLY: {behavior: "shown as an ordinary app-modal alert"}
+  MB_SERVICE_NOTIFICATION: {behavior: "shown as an ordinary app-modal alert"}
+
+  # TaskDialog
+  TDF_ALLOW_DIALOG_CANCELLATION: {behavior: "Escape and the close button cancel (IDCANCEL)"}
+  TDF_CALLBACK_TIMER: {behavior: "TDN_TIMER every ~200 ms while the alert is up"}
+  TDF_CAN_BE_MINIMIZED: {ignore: "alerts can't be minimised on macOS"}
+  TDF_ENABLE_HYPERLINKS: {view: 'Text(attributed).environment(\.openURL, OpenURLAction { _ in .handled })', note: links in the accessory text raise TDN_HYPERLINK_CLICKED}
+  TDF_EXPANDED_BY_DEFAULT: {behavior: "the Details disclosure starts open"}
+  TDF_EXPAND_FOOTER_AREA: {behavior: "expanded text goes under the footer"}
+  TDF_NO_DEFAULT_RADIO_BUTTON: {behavior: "no radio selected initially"}
+  TDF_NO_SET_FOREGROUND: {behavior: "the app isn't activated"}
+  TDF_POSITION_RELATIVE_TO_WINDOW: {behavior: "sheet on hwndParent"}
+  TDF_RTL_LAYOUT: {mod: '.environment(\.layoutDirection, .rightToLeft)'}
+  TDF_SHOW_MARQUEE_PROGRESS_BAR: {view: "ProgressView().progressViewStyle(.linear)"}
+  TDF_SHOW_PROGRESS_BAR: {view: 'ProgressView(value: value).progressViewStyle(.linear)'}
+  TDF_SIZE_TO_CONTENT: {ignore: "alerts size themselves"}
+  TDF_USE_COMMAND_LINKS: {behavior: "custom buttons are added as stacked alert buttons (title only)"}
+  TDF_USE_COMMAND_LINKS_NO_ICON: {behavior: "as TDF_USE_COMMAND_LINKS"}
+  TDF_USE_HICON_FOOTER: {ignore: "footer icons aren't shown in macOS alerts"}
+  TDF_USE_HICON_MAIN: {appkit: 'let a = NSAlert(); a.icon = image'}
+  TDF_VERIFICATION_FLAG_CHECKED: {appkit: 'let a = NSAlert(); a.showsSuppressionButton = true; a.suppressionButton?.state = .on'}
+  TDCBF_OK_BUTTON: {appkit: 'let a = NSAlert(); a.addButton(withTitle: "OK")'}
+  TDCBF_YES_BUTTON: {appkit: 'let a = NSAlert(); a.addButton(withTitle: "Yes")'}
+  TDCBF_NO_BUTTON: {appkit: 'let a = NSAlert(); a.addButton(withTitle: "No")'}
+  TDCBF_CANCEL_BUTTON: {appkit: 'let a = NSAlert(); a.addButton(withTitle: "Cancel")'}
+  TDCBF_RETRY_BUTTON: {appkit: 'let a = NSAlert(); a.addButton(withTitle: "Retry")'}
+  TDCBF_CLOSE_BUTTON: {appkit: 'let a = NSAlert(); a.addButton(withTitle: "Close")'}
+
+  # Open / save (GetOpenFileName OFN_*, IFileDialog FOS_*)
+  OFN_ALLOWMULTISELECT: {appkit: 'let p = NSOpenPanel(); p.allowsMultipleSelection = true'}
+  FOS_ALLOWMULTISELECT: {appkit: 'let p = NSOpenPanel(); p.allowsMultipleSelection = true'}
+  OFN_FORCESHOWHIDDEN: {appkit: 'let p = NSOpenPanel(); p.showsHiddenFiles = true'}
+  FOS_FORCESHOWHIDDEN: {appkit: 'let p = NSOpenPanel(); p.showsHiddenFiles = true'}
+  OFN_NODEREFERENCELINKS: {appkit: 'let p = NSOpenPanel(); p.resolvesAliases = false'}
+  FOS_NODEREFERENCELINKS: {appkit: 'let p = NSOpenPanel(); p.resolvesAliases = false'}
+  FOS_STRICTFILETYPES: {appkit: 'let s = NSSavePanel(); s.allowsOtherFileTypes = false'}
+  OFN_CREATEPROMPT: {behavior: "after the panel closes, a missing file triggers a \"create it?\" alert"}
+  FOS_CREATEPROMPT: {behavior: "after the panel closes, a missing file triggers a \"create it?\" alert"}
+  OFN_OVERWRITEPROMPT: {behavior: "the save panel asks before replacing, natively"}
+  FOS_OVERWRITEPROMPT: {behavior: "the save panel asks before replacing, natively"}
+  OFN_FILEMUSTEXIST: {behavior: "the open panel only returns existing files"}
+  FOS_FILEMUSTEXIST: {behavior: "the open panel only returns existing files"}
+  OFN_PATHMUSTEXIST: {behavior: "panels only return existing folders"}
+  FOS_PATHMUSTEXIST: {behavior: "panels only return existing folders"}
+  OFN_NOCHANGEDIR: {behavior: "the process's current directory isn't changed"}
+  FOS_NOCHANGEDIR: {behavior: "the process's current directory isn't changed"}
+  OFN_DONTADDTORECENT: {behavior: "the file isn't added to recent documents"}
+  FOS_DONTADDTORECENT: {behavior: "the file isn't added to recent documents"}
+  OFN_NOREADONLYRETURN: {behavior: "read-only files are rejected with an alert"}
+  FOS_NOREADONLYRETURN: {behavior: "read-only files are rejected with an alert"}
+  OFN_NOTESTFILECREATE: {behavior: "no test-create of the file"}
+  FOS_NOTESTFILECREATE: {behavior: "no test-create of the file"}
+  OFN_NOVALIDATE: {behavior: "the name is returned without validation"}
+  FOS_NOVALIDATE: {behavior: "the name is returned without validation"}
+  OFN_SHAREAWARE: {behavior: "sharing violations are returned to the app"}
+  FOS_SHAREAWARE: {behavior: "sharing violations are returned to the app"}
+  OFN_SHAREFALLTHROUGH: {behavior: "sharing-violation answer from the hook"}
+  OFN_SHARENOWARN: {behavior: "sharing-violation answer from the hook"}
+  OFN_SHAREWARN: {behavior: "sharing-violation answer from the hook"}
+  OFN_ENABLEHOOK: {not_translated: "the app's hook procedure expects wine's dialog"}
+  OFN_ENABLETEMPLATE: {not_translated: "the app adds its own controls to the dialog"}
+  OFN_ENABLETEMPLATEHANDLE: {not_translated: "the app adds its own controls to the dialog"}
+  OFN_ENABLEINCLUDENOTIFY: {behavior: "CDN_INCLUDEITEM only exists with hooks"}
+  OFN_ENABLESIZING: {ignore: "panels are always resizable"}
+  OFN_EXTENSIONDIFFERENT: {behavior: "output flag set when the typed extension differs"}
+  OFN_EX_NOPLACESBAR: {ignore: "the macOS sidebar is always shown"}
+  OFN_HIDEREADONLY: {ignore: "macOS panels have no read-only check box"}
+  OFN_READONLY: {ignore: "macOS panels have no read-only check box"}
+  OFN_LONGNAMES: {ignore: "long names are always used"}
+  OFN_NOLONGNAMES: {ignore: "short 8.3 names are generated by wine if the app asks for them"}
+  OFN_NONETWORKBUTTON: {ignore: "network locations are in the sidebar"}
+  OFN_SHOWHELP: {ignore: "macOS panels have no help button"}
+  FOS_ALLNONSTORAGEITEMS: {ignore: "only file-system items exist on macOS"}
+  FOS_SUPPORTSTREAMABLEITEMS: {ignore: "only file-system items exist on macOS"}
+  FOS_FORCEFILESYSTEM: {behavior: "only file URLs are returned (always)"}
+  FOS_DEFAULTNOMINIMODE: {ignore: "the save panel remembers its own expanded state"}
+  FOS_FORCEPREVIEWPANEON: {ignore: "Quick Look previews are built into the panel"}
+  FOS_HIDEMRUPLACES: {ignore: "the sidebar is the user's"}
+  FOS_HIDEPINNEDPLACES: {ignore: "the sidebar is the user's"}
+
+  # Browse for folder
+  BIF_BROWSEINCLUDEFILES: {appkit: 'let p = NSOpenPanel(); p.canChooseDirectories = true; p.canChooseFiles = true'}
+  BIF_NONEWFOLDERBUTTON: {appkit: 'let p = NSOpenPanel(); p.canCreateDirectories = false'}
+  BIF_STATUSTEXT: {appkit: 'let p = NSOpenPanel(); p.message = note'}
+  BIF_EDITBOX: {ignore: "the panel accepts typed paths with Command-Shift-G"}
+  BIF_NEWDIALOGSTYLE: {behavior: "resizable dialog (the panel always is)"}
+  BIF_USENEWUI: {behavior: "new-style dialog with edit box (the panel always is)"}
+  BIF_VALIDATE: {behavior: "BFFM_VALIDATEFAILED if a typed path doesn't exist"}
+  BIF_NOTRANSLATETARGETS: {behavior: "shortcuts are returned without resolving"}
+  BIF_RETURNFSANCESTORS: {behavior: "only file-system ancestors can be chosen"}
+  BIF_BROWSEINCLUDEURLS: {ignore: "only file-system items exist on macOS"}
+  BIF_DONTGOBELOWDOMAIN: {ignore: "network browsing is in the sidebar"}
+  BIF_UAHINT: {ignore: "usage hint for the edit box"}
+  BIF_BROWSEFORCOMPUTER: {not_translated: "picking a network computer isn't a file-system choice"}
+  BIF_BROWSEFORPRINTER: {not_translated: "picking a printer isn't a file-system choice"}
+
+  # ChooseColor
+  CC_RGBINIT: {appkit: 'let c = NSColorPanel.shared; c.color = NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)'}
+  CC_FULLOPEN: {ignore: "the colour panel always shows every mode"}
+  CC_PREVENTFULLOPEN: {ignore: "the colour panel always shows every mode"}
+  CC_ANYCOLOR: {ignore: "every colour is available"}
+  CC_SOLIDCOLOR: {behavior: "the result is rounded to a solid colour"}
+  CC_SHOWHELP: {ignore: "no help button on the colour panel"}
+  CC_ENABLEHOOK: {not_translated: "the app's hook expects wine's dialog"}
+  CC_ENABLETEMPLATE: {not_translated: "the app adds its own controls"}
+  CC_ENABLETEMPLATEHANDLE: {not_translated: "the app adds its own controls"}
+
+  # ChooseFont
+  CF_EFFECTS: {appkit: 'let p = NSFontPanel.shared; _ = p.worksWhenModal', note: "underline, strike-through and colour come from the panel's effects controls"}
+  CF_APPLY: {behavior: "an Apply button in the accessory sends WM_CHOOSEFONT_GETLOGFONT style updates"}
+  CF_SCREENFONTS: {behavior: "list screen fonts (all macOS fonts)"}
+  CF_PRINTERFONTS: {behavior: "list printer fonts (all macOS fonts)"}
+  CF_BOTH: {behavior: "screen and printer fonts (all macOS fonts)"}
+  CF_FIXEDPITCHONLY: {behavior: "only fixed-pitch families are accepted"}
+  CF_FORCEFONTEXIST: {behavior: "an unknown family is rejected"}
+  CF_INITTOLOGFONTSTRUCT: {behavior: "the panel starts on the app's LOGFONT"}
+  CF_LIMITSIZE: {behavior: "sizes outside nSizeMin...nSizeMax are clamped"}
+  CF_NOFACESEL: {behavior: "no initial family selection"}
+  CF_NOSIZESEL: {behavior: "no initial size selection"}
+  CF_NOSTYLESEL: {behavior: "no initial style selection"}
+  CF_USESTYLE: {behavior: "the initial style name comes from lpszStyle"}
+  CF_ANSIONLY: {ignore: "every macOS font covers more than ANSI"}
+  CF_SCRIPTSONLY: {ignore: "every macOS font covers more than ANSI"}
+  CF_NOSCRIPTSEL: {ignore: "macOS panels have no script selector"}
+  CF_SELECTSCRIPT: {ignore: "macOS panels have no script selector"}
+  CF_NOOEMFONTS: {ignore: "no OEM fonts on macOS"}
+  CF_NOVECTORFONTS: {ignore: "no vector fonts on macOS"}
+  CF_NOVERTFONTS: {ignore: "vertical (@) fonts are a Windows convention"}
+  CF_NOSIMULATIONS: {ignore: "macOS doesn't list simulated styles"}
+  CF_SCALABLEONLY: {ignore: "every macOS font is scalable"}
+  CF_TTONLY: {ignore: "every macOS font is TrueType/OpenType"}
+  CF_WYSIWYG: {ignore: "every macOS font works on screen and paper"}
+  CF_SHOWHELP: {ignore: "no help button on the font panel"}
+  CF_ENABLEHOOK: {not_translated: "the app's hook expects wine's dialog"}
+  CF_ENABLETEMPLATE: {not_translated: "the app adds its own controls"}
+  CF_ENABLETEMPLATEHANDLE: {not_translated: "the app adds its own controls"}
+
+  # PrintDlg
+  PD_ALLPAGES: {behavior: "the page range starts on All"}
+  PD_PAGENUMS: {behavior: "the page range starts on From/To"}
+  PD_SELECTION: {appkit: 'let pp = NSPrintPanel(); pp.options.insert(.showsPrintSelection)'}
+  PD_CURRENTPAGE: {behavior: "current page chosen (macOS shows it as a one-page range)"}
+  PD_NOPAGENUMS: {appkit: 'let pp = NSPrintPanel(); pp.options.remove(.showsPageRange)'}
+  PD_NOSELECTION: {appkit: 'let pp = NSPrintPanel(); pp.options.remove(.showsPrintSelection)'}
+  PD_NOCURRENTPAGE: {behavior: "no current-page choice"}
+  PD_COLLATE: {behavior: "collation state read from and written to the print settings"}
+  PD_USEDEVMODECOPIES: {behavior: "copies go in the DEVMODE, not nCopies"}
+  PD_USEDEVMODECOPIESANDCOLLATE: {behavior: "copies and collate go in the DEVMODE"}
+  PD_EXCLUSIONFLAGS: {behavior: "PrintDlgEx exclusions"}
+  PD_EXCL_COPIESANDCOLLATE: {appkit: 'let pp = NSPrintPanel(); pp.options.remove(.showsCopies)'}
+  PD_PRINTTOFILE: {behavior: "the panel's Save as PDF"}
+  PD_DISABLEPRINTTOFILE: {ignore: "Save as PDF is always offered"}
+  PD_HIDEPRINTTOFILE: {ignore: "Save as PDF is always offered"}
+  PD_NONETWORKBUTTON: {ignore: "printers are added in System Settings"}
+  PD_NOWARNING: {behavior: "no alert when there is no default printer"}
+  PD_RETURNDC: {behavior: "an HDC for the chosen printer is returned"}
+  PD_RETURNIC: {behavior: "an information context is returned"}
+  PD_RETURNDEFAULT: {behavior: "no UI - the default printer is returned directly"}
+  PD_RESULT_APPLY: {behavior: "PrintDlgEx result"}
+  PD_RESULT_CANCEL: {behavior: "PrintDlgEx result"}
+  PD_RESULT_PRINT: {behavior: "PrintDlgEx result"}
+  PD_SHOWHELP: {ignore: "no help button on the print panel"}
+  PD_USELARGETEMPLATE: {ignore: "template size only matters to wine's dialog"}
+  PD_ENABLEPRINTHOOK: {not_translated: "the app's hook expects wine's dialog"}
+  PD_ENABLEPRINTTEMPLATE: {not_translated: "the app adds its own controls"}
+  PD_ENABLEPRINTTEMPLATEHANDLE: {not_translated: "the app adds its own controls"}
+  PD_ENABLESETUPHOOK: {not_translated: "the app's hook expects wine's dialog"}
+  PD_ENABLESETUPTEMPLATE: {not_translated: "the app adds its own controls"}
+  PD_ENABLESETUPTEMPLATEHANDLE: {not_translated: "the app adds its own controls"}
+
+  # PageSetupDlg
+  PSD_MARGINS: {behavior: "the app's margins pass through (macOS page setup has no margins)"}
+  PSD_MINMARGINS: {behavior: "the app's margins pass through"}
+  PSD_DEFAULTMINMARGINS: {behavior: "the app's margins pass through"}
+  PSD_DISABLEMARGINS: {ignore: "no margin fields on macOS"}
+  PSD_DISABLEORIENTATION: {behavior: "orientation is forced back to the app's value"}
+  PSD_DISABLEPAPER: {behavior: "paper size is forced back to the app's value"}
+  PSD_DISABLEPRINTER: {ignore: "the printer is chosen in the print panel on macOS"}
+  PSD_DISABLEPAGEPAINTING: {ignore: "the preview is native"}
+  PSD_ENABLEPAGEPAINTHOOK: {ignore: "the preview is native; the app's paint hook isn't called"}
+  PSD_ENABLEPAGESETUPHOOK: {not_translated: "the app's hook expects wine's dialog"}
+  PSD_ENABLEPAGESETUPTEMPLATE: {not_translated: "the app adds its own controls"}
+  PSD_ENABLEPAGESETUPTEMPLATEHANDLE: {not_translated: "the app adds its own controls"}
+  PSD_INHUNDREDTHSOFMILLIMETERS: {behavior: "result units"}
+  PSD_INTHOUSANDTHSOFINCHES: {behavior: "result units"}
+  PSD_INWININIINTLMEASURE: {behavior: "result units from the locale"}
+  PSD_NONETWORKBUTTON: {ignore: "printers are added in System Settings"}
+  PSD_NOWARNING: {behavior: "no alert when there is no default printer"}
+  PSD_RETURNDEFAULT: {behavior: "no UI - defaults returned directly"}
+  PSD_SHOWHELP: {ignore: "no help button"}
+
+  # Find / Replace
+  FR_MATCHCASE: {behavior: "Match Case starts checked"}
+  FR_WHOLEWORD: {behavior: "Whole Words starts checked"}
+  FR_HIDEMATCHCASE: {behavior: "no Match Case check box"}
+  FR_NOMATCHCASE: {behavior: "Match Case disabled"}
+  FR_HIDEWHOLEWORD: {behavior: "no Whole Words check box"}
+  FR_NOWHOLEWORD: {behavior: "Whole Words disabled"}
+  FR_HIDEUPDOWN: {behavior: "only Next"}
+  FR_NOUPDOWN: {behavior: "Previous disabled"}
+  FR_FINDNEXT: {behavior: "message flag - Next pressed"}
+  FR_REPLACE: {behavior: "message flag - Replace pressed"}
+  FR_REPLACEALL: {behavior: "message flag - Replace All pressed"}
+  FR_DIALOGTERM: {behavior: "message flag - panel closed"}
+  FR_MATCHALEFHAMZA: {behavior: "Arabic matching option passed through"}
+  FR_MATCHDIAC: {behavior: "diacritic matching option passed through"}
+  FR_MATCHKASHIDA: {behavior: "kashida matching option passed through"}
+  FR_SHOWHELP: {ignore: "no help button"}
+  FR_ENABLEHOOK: {not_translated: "the app's hook expects wine's dialog"}
+  FR_ENABLETEMPLATE: {not_translated: "the app adds its own controls"}
+  FR_ENABLETEMPLATEHANDLE: {not_translated: "the app adds its own controls"}
+
+parts:
+  TEXTSTYLE/TEXT_BODYTITLE: {mod: ".font(.headline)"}
+  TEXTSTYLE/TEXT_BODYTEXT: {mod: ".font(.body)"}
+  TEXTSTYLE/TEXT_SECONDARYTEXT: {mod: ".font(.callout).foregroundStyle(.secondary)"}

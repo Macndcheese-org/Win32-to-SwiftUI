@@ -1,0 +1,318 @@
+# Progress, trackbar, up-down, date/time, month calendar, hotkey, IP address,
+# SysLink, animation, tooltips, NativeFontCtl.
+
+entries:
+  - id: progress
+    kind: control
+    title: Progress bar
+    win32: {class: msctls_progress32, styles: [PBST_NORMAL], parts: [PROGRESS/PP_BAR, PROGRESS/PP_BARVERT, PROGRESS/PP_CHUNK, PROGRESS/PP_CHUNKVERT, PROGRESS/PP_FILL, PROGRESS/PP_FILLVERT, PROGRESS/PP_PULSEOVERLAY, PROGRESS/PP_MOVEOVERLAY, PROGRESS/PP_PULSEOVERLAYVERT, PROGRESS/PP_MOVEOVERLAYVERT, PROGRESS/PP_TRANSPARENTBAR, PROGRESS/PP_TRANSPARENTBARVERT]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "ProgressView(value: value, total: 1).progressViewStyle(.linear)"
+    glass: automatic
+    state_in: [PBM_SETPOS, PBM_DELTAPOS, PBM_STEPIT, PBM_SETRANGE, PBM_SETRANGE32, PBM_SETSTATE, PBM_SETMARQUEE, PBM_SETBARCOLOR]
+    notes: PBM_SETBARCOLOR maps to .tint(Color); the default follows the accent colour.
+
+  - id: trackbar
+    kind: control
+    title: Trackbar (slider)
+    win32: {class: msctls_trackbar32, styles: [TBS_HORZ], parts: [TRACKBAR/TKP_TRACK, TRACKBAR/TKP_THUMB, TRACKBAR/TKP_THUMBBOTTOM, TRACKBAR/TKP_THUMBTOP, TRACKBAR/TKP_TICS]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "Slider(value: $value, in: 0...100, step: 1).labelsHidden()"
+      - since: 26
+        code: |-
+          Slider(value: $value, in: 0...100, label: { Text(title) }, ticks: {
+            SliderTick(0.0)
+            SliderTick(25.0)
+            SliderTick(50.0)
+            SliderTick(75.0)
+            SliderTick(100.0)
+          }).labelsHidden()
+    appkit:
+      - since: 12
+        code: |-
+          let s = NSSlider(value: 50, minValue: 0, maxValue: 100, target: nil, action: nil)
+          s.numberOfTickMarks = 11
+          s.allowsTickMarkValuesOnly = false
+          s.tickMarkPosition = .below
+    glass: automatic
+    state_in: [TBM_SETPOS, TBM_SETRANGE, TBM_SETRANGEMIN, TBM_SETRANGEMAX, TBM_SETTICFREQ, TBM_SETTIC, TBM_CLEARTICS, TBM_SETLINESIZE, TBM_SETPAGESIZE]
+    events_out: {drag: WM_HSCROLL/WM_VSCROLL with TB_THUMBTRACK then TB_ENDTRACK, step: TB_LINEUP/TB_LINEDOWN/TB_PAGEUP/TB_PAGEDOWN}
+    notes: >-
+      Tick marks (TBS_AUTOTICKS, TBM_SETTIC) are SliderTick on 26. Before 26 SwiftUI's
+      Slider has no ticks, so a trackbar with ticks uses NSSlider, which Slider is built on.
+
+  - id: trackbar.vertical
+    kind: control
+    title: Vertical trackbar
+    win32: {class: msctls_trackbar32, styles: [TBS_VERT], parts: [TRACKBAR/TKP_TRACKVERT, TRACKBAR/TKP_THUMBVERT, TRACKBAR/TKP_THUMBLEFT, TRACKBAR/TKP_THUMBRIGHT, TRACKBAR/TKP_TICSVERT]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: |-
+          let s = NSSlider(value: 50, minValue: 0, maxValue: 100, target: nil, action: nil)
+          s.isVertical = true
+    glass: automatic
+    improvised: true
+    events_out: {drag: WM_VSCROLL with TB_THUMBTRACK}
+    notes: SwiftUI's Slider is horizontal only; rotating it breaks hit-testing and accessibility.
+
+  - id: updown
+    kind: control
+    title: Up-down (spin) control
+    win32: {class: msctls_updown32, styles: [UDS_SETBUDDYINT, UDS_AUTOBUDDY], parts: [SPIN/SPNP_UP, SPIN/SPNP_DOWN, SPIN/SPNP_UPHORZ, SPIN/SPNP_DOWNHORZ]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          HStack(spacing: 4) {
+            TextField(title, value: $intValue, format: .number).textFieldStyle(.roundedBorder).labelsHidden()
+            Stepper(title, value: $intValue, in: 0...100).labelsHidden()
+          }
+    glass: automatic
+    state_in: [UDM_SETPOS32, UDM_SETRANGE32, UDM_SETBUDDY, UDM_SETACCEL, UDM_SETBASE]
+    events_out: {step: WM_NOTIFY/UDN_DELTAPOS (the app may veto) then WM_VSCROLL}
+    notes: >-
+      With a buddy edit (UDS_AUTOBUDDY / UDM_SETBUDDY) the pair becomes one field plus
+      stepper, the macOS arrangement. Without a buddy, only the Stepper. UDM_SETBASE 16 uses
+      a hexadecimal format.
+
+  - id: datetime
+    kind: control
+    title: Date and time picker
+    win32: {class: SysDateTimePick32, styles: [DTS_SHORTDATEFORMAT, DTS_SHORTDATECENTURYFORMAT], parts: [DATEPICKER/DP_DATETEXT, DATEPICKER/DP_DATEBORDER, DATEPICKER/DP_SHOWCALENDARBUTTONRIGHT]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "DatePicker(title, selection: $date, displayedComponents: .date).datePickerStyle(.compact).labelsHidden()"
+    glass: automatic
+    state_in: [DTM_SETSYSTEMTIME, DTM_SETRANGE, DTM_SETFORMAT, DTM_SETMCCOLOR]
+    events_out: {change: WM_NOTIFY/DTN_DATETIMECHANGE, open: DTN_DROPDOWN, close: DTN_CLOSEUP}
+    notes: >-
+      .compact is the macOS field that opens a calendar popover, the same thing as the
+      Win32 field with its drop-down calendar. Custom formats (DTM_SETFORMAT) that the
+      system formats can't express keep the system format; the value is still exact.
+
+  - id: monthcal
+    kind: control
+    title: Month calendar
+    win32: {class: SysMonthCal32}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "DatePicker(title, selection: $date, displayedComponents: .date).datePickerStyle(.graphical).labelsHidden()"
+    glass: none
+    state_in: [MCM_SETCURSEL, MCM_SETRANGE, MCM_SETTODAY, MCM_SETFIRSTDAYOFWEEK]
+    events_out: {select: WM_NOTIFY/MCN_SELCHANGE then MCN_SELECT}
+
+  - id: hotkey
+    kind: control
+    title: Hotkey control
+    win32: {class: msctls_hotkey32}
+    runtime: swiftui
+    swiftui:
+      - since: 14
+        code: |-
+          TextField(title, text: $text)
+            .textFieldStyle(.roundedBorder)
+            .labelsHidden()
+            .onKeyPress(phases: .down) { _ in .handled }
+    appkit:
+      - since: 12
+        code: |-
+          let field = NSTextField(string: "⌃⌥⇧A")
+          field.isEditable = false
+          field.isSelectable = false
+          let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in event }
+          _ = monitor
+    glass: automatic
+    state_in: [HKM_SETHOTKEY, HKM_SETRULES]
+    events_out: {change: WM_COMMAND/EN_CHANGE}
+    improvised: true
+    notes: >-
+      A shortcut recorder, like the ones in System Settings > Keyboard: it shows the
+      combination with macOS symbols (⌃ ⌥ ⇧) and records the next key press. macOS 14's
+      onKeyPress does the recording; 12-13 use an AppKit key monitor.
+
+  - id: ipaddress
+    kind: control
+    title: IP address control
+    win32: {class: SysIPAddress32}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "TextField(title, text: $text, prompt: Text(\"0.0.0.0\")).textFieldStyle(.roundedBorder).labelsHidden()"
+    glass: automatic
+    state_in: [IPM_SETADDRESS, IPM_CLEARADDRESS, IPM_SETRANGE, IPM_SETFOCUS]
+    events_out: {change: WM_COMMAND/EN_CHANGE, field: IPN_FIELDCHANGED}
+    improvised: true
+    notes: >-
+      macOS's Network settings use one text field for an address, not four boxes. The bridge
+      validates dotted IPv4 and answers IPM_GETADDRESS from it.
+
+  - id: syslink
+    kind: control
+    title: SysLink (text with links)
+    win32: {class: SysLink, parts: [TEXTSTYLE/TEXT_HYPERLINKTEXT]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          Text(attributed)
+            .environment(\.openURL, OpenURLAction { _ in .handled })
+    glass: none
+    state_in: [WM_SETTEXT, LM_SETITEM]
+    events_out: {click: WM_NOTIFY/NM_CLICK or NM_RETURN with the link index}
+    notes: >-
+      The <a href="..." id="...">markup</a> text is converted to an AttributedString with
+      .link runs. Clicks are caught by openURL and sent as NM_CLICK so the app opens the link
+      itself, as it does on Windows.
+
+  - id: animate
+    kind: control
+    title: Animation control
+    win32: {class: SysAnimate32}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "ProgressView().progressViewStyle(.circular).controlSize(.small)"
+    glass: none
+    improvised: true
+    state_in: [ACM_OPEN, ACM_PLAY, ACM_STOP]
+    events_out: {start: ACN_START, stop: ACN_STOP}
+    not_translated_when: []
+    notes: >-
+      The control plays the shell's small "copying files" and "searching" AVIs; on macOS a
+      spinner has that role. Only AVIs loaded from shell32's resources are translated. An
+      app's own AVI stays as wine plays it.
+
+  - id: tooltip
+    kind: control
+    title: Tooltip
+    win32: {class: tooltips_class32, styles: [TTS_ALWAYSTIP], parts: [TOOLTIP/TTP_STANDARD, TOOLTIP/TTP_STANDARDTITLE]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "Button(title, action: action).help(note)"
+    appkit:
+      - since: 12
+        code: "view.toolTip = note"
+    glass: automatic
+    state_in: [TTM_ADDTOOL, TTM_DELTOOL, TTM_UPDATETIPTEXT, TTM_SETTITLE, TTM_ACTIVATE, TTM_SETMAXTIPWIDTH]
+    events_out: {text: WM_NOTIFY/TTN_GETDISPINFO, show: TTN_SHOW, hide: TTN_POP}
+    notes: >-
+      A tool that is itself a translated control gets .help(). A tool that is a plain window
+      area (a game launcher's custom button) gets NSView.toolTip on a tracking rect, so the
+      system tooltip appears after the usual delay.
+
+  - id: tooltip.balloon
+    kind: control
+    title: Balloon tooltip
+    win32: {class: tooltips_class32, styles: [TTS_BALLOON], parts: [TOOLTIP/TTP_BALLOON, TOOLTIP/TTP_BALLOONTITLE, TOOLTIP/TTP_BALLOONSTEM, TOOLTIP/TTP_CLOSE]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          Color.clear.popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 4) {
+              Text(title).font(.headline)
+              Text(note).font(.callout)
+            }.padding(12).frame(maxWidth: 320)
+          }
+    glass: automatic
+    state_in: [TTM_TRACKACTIVATE, TTM_TRACKPOSITION, TTM_SETTITLE]
+    notes: A popover pointing at the tool; Liquid Glass on 26 automatically.
+
+  - id: nativefont
+    kind: control
+    title: NativeFontCtl
+    win32: {class: NativeFontCtl}
+    runtime: not_translated
+    glass: none
+    notes: An internal comctl32 helper that only sets a font on its children; it draws nothing.
+
+flags:
+  # Progress
+  PBS_MARQUEE: {view: "ProgressView().progressViewStyle(.linear)"}
+  PBS_SMOOTH: {ignore: "macOS progress bars are always smooth"}
+  PBS_SMOOTHREVERSE: {ignore: "macOS progress bars animate smoothly both ways"}
+  PBS_VERTICAL: {view: 'ProgressView(value: value).progressViewStyle(.linear).rotationEffect(.degrees(-90))', note: macOS has no vertical progress bar; a rotated bar is the only way}
+  PBST_ERROR: {mod: ".tint(.red)"}
+  PBST_PAUSED: {mod: ".tint(.yellow)"}
+
+  # Trackbar
+  TBS_AUTOTICKS: {behavior: "one tick per TBM_SETTICFREQ step (SliderTick on 26, NSSlider tick marks before)"}
+  TBS_NOTICKS: {behavior: "no ticks - SwiftUI Slider on every version"}
+  TBS_BOTTOM: {appkit: "let s = NSSlider(); s.tickMarkPosition = .below", note: TBS_RIGHT is the same bit}
+  TBS_TOP: {appkit: "let s = NSSlider(); s.tickMarkPosition = .above", note: TBS_LEFT is the same bit}
+  TBS_RIGHT: {appkit: 'let s = NSSlider(); s.isVertical = true; s.tickMarkPosition = .trailing', note: same value as TBS_BOTTOM - ticks on the right of a vertical slider}
+  TBS_LEFT: {appkit: 'let s = NSSlider(); s.isVertical = true; s.tickMarkPosition = .leading', note: same value as TBS_TOP - ticks on the left of a vertical slider}
+  TBS_BOTH: {ignore: "macOS sliders show ticks on one side"}
+  TBS_ENABLESELRANGE: {ignore: "macOS sliders have no selection range"}
+  TBS_FIXEDLENGTH: {ignore: "the thumb size is native"}
+  TBS_NOTHUMB: {mod: .sliderThumbVisibility(.hidden), since: 26, fallback: shown as a linear ProgressView on 12-25}
+  TBS_REVERSED: {behavior: "values run from max to min"}
+  TBS_DOWNISLEFT: {behavior: "Down arrow moves towards the minimum"}
+  TBS_TOOLTIPS: {behavior: ".help shows the current value while dragging"}
+  TBS_TRANSPARENTBKGND: {ignore: "the translated slider has no background"}
+  TBS_NOTIFYBEFOREREMOVE: {behavior: "TRBN_THUMBPOSCHANGING before a change"}
+
+  # Up-down
+  UDS_WRAP: {behavior: "stepping past the end wraps to the other end"}
+  UDS_HORZ: {ignore: "macOS steppers are vertical"}
+  UDS_ARROWKEYS: {behavior: "Up/Down arrow keys step the value"}
+  UDS_ALIGNLEFT: {behavior: "stepper before the field"}
+  UDS_ALIGNRIGHT: {behavior: "stepper after the field (the macOS default)"}
+  UDS_HOTTRACK: {ignore: "hover highlight is native"}
+  UDS_NOTHOUSANDS: {view: 'TextField(title, value: $intValue, format: .number.grouping(.never)).textFieldStyle(.roundedBorder)'}
+
+  # Date/time picker
+  DTS_TIMEFORMAT: {view: 'DatePicker(title, selection: $date, displayedComponents: .hourAndMinute).datePickerStyle(.stepperField).labelsHidden()'}
+  DTS_UPDOWN: {mod: ".datePickerStyle(.stepperField)"}
+  DTS_LONGDATEFORMAT: {behavior: "long system date format"}
+  DTS_SHOWNONE: {view: 'HStack { Toggle(title, isOn: $isOn).labelsHidden(); DatePicker(title, selection: $date, displayedComponents: .date).labelsHidden().disabled(!isOn) }', note: the check box that means "no date"}
+  DTS_APPCANPARSE: {behavior: "typed text goes to the app through DTN_USERSTRING"}
+  DTS_RIGHTALIGN: {ignore: "the calendar popover positions itself"}
+
+  # Month calendar
+  MCS_MULTISELECT: {appkit: 'let p = NSDatePicker(); p.datePickerStyle = .clockAndCalendar; p.datePickerMode = .range', note: range selection exists only in NSDatePicker}
+  MCS_DAYSTATE: {ignore: "macOS calendars can't bold individual days"}
+  MCS_NOTODAY: {ignore: "the macOS calendar has no \"Today\" footer"}
+  MCS_NOTODAYCIRCLE: {ignore: "today is always highlighted on macOS"}
+  MCS_NOTRAILINGDATES: {ignore: "native calendar layout"}
+  MCS_SHORTDAYSOFWEEK: {ignore: "native day names"}
+  MCS_WEEKNUMBERS: {ignore: "the macOS calendar has no week numbers"}
+  MCS_NOSELCHANGEONNAV: {behavior: "changing month doesn't change the selection"}
+
+  # Hotkey modifiers
+  HOTKEYF_ALT: {behavior: "shown as ⌥"}
+  HOTKEYF_CONTROL: {behavior: "shown as ⌃"}
+  HOTKEYF_SHIFT: {behavior: "shown as ⇧"}
+  HOTKEYF_EXT: {behavior: "extended key flag kept in the value"}
+
+  # Animation
+  ACS_AUTOPLAY: {behavior: "starts spinning when opened"}
+  ACS_CENTER: {behavior: "spinner centred in the control"}
+  ACS_TIMER: {behavior: "timing detail of AVI playback"}
+  ACS_TRANSPARENT: {ignore: "the spinner has no background"}
+
+  # SysLink
+  LWS_IGNORERETURN: {behavior: "Return doesn't activate the focused link"}
+  LWS_NOPREFIX: {behavior: "keep '&' literally"}
+  LWS_RIGHT: {mod: ".multilineTextAlignment(.trailing)"}
+  LWS_TRANSPARENT: {ignore: "the text has no background"}
+  LWS_USECUSTOMTEXT: {behavior: "NM_CUSTOMTEXT lets the app change link text"}
+  LWS_USEVISUALSTYLE: {ignore: "macOS link styling"}
+
+  # Tooltips
+  TTS_NOANIMATE: {ignore: "tool tip animation is native"}
+  TTS_NOFADE: {ignore: "tool tip fade is native"}
+  TTS_NOPREFIX: {behavior: "keep '&' literally"}
+  TTS_USEVISUALSTYLE: {ignore: "native look"}
+  TTS_CLOSE: {behavior: "the balloon popover gets a close button"}
+
+parts:
+  TOOLTIP/TTP_WRENCH: {ignore: "unused Vista part"}

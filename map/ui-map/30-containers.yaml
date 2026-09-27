@@ -1,0 +1,445 @@
+# Tab control, property sheets and wizards, dialogs, toolbars, rebar, status bar,
+# pager, MDI, scroll bars.
+
+entries:
+  - id: tab
+    kind: control
+    title: Tab control
+    win32: {class: SysTabControl32, styles: [TCS_TABS], parts: [TAB/TABP_TABITEM, TAB/TABP_TABITEMLEFTEDGE, TAB/TABP_TABITEMRIGHTEDGE, TAB/TABP_TABITEMBOTHEDGE, TAB/TABP_TOPTABITEM, TAB/TABP_TOPTABITEMLEFTEDGE, TAB/TABP_TOPTABITEMRIGHTEDGE, TAB/TABP_TOPTABITEMBOTHEDGE, TAB/TABP_PANE, TAB/TABP_BODY]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          TabView(selection: $choice) {
+            ForEach(choices) { c in Color.clear.tabItem { Text(c.title) }.tag(c.id) }
+          }
+      - since: 27
+        code: |-
+          VStack(spacing: 8) {
+            Picker(title, selection: $choice) {
+              ForEach(choices) { Text($0.title).tag($0.id) }
+            }.pickerStyle(.tabs).labelsHidden()
+            GroupBox { Color.clear }
+          }
+    glass: automatic
+    state_in: [TCM_INSERTITEM, TCM_SETITEM, TCM_DELETEITEM, TCM_SETCURSEL, TCM_SETCURFOCUS, TCM_ADJUSTRECT, TCM_GETITEMRECT]
+    events_out: {select: WM_NOTIFY/TCN_SELCHANGING (the app may veto) then TCN_SELCHANGE}
+    not_translated_when: [TCS_OWNERDRAWFIXED]
+    notes: >-
+      A Win32 tab control is only the strip and the pane frame; the page is a set of sibling
+      windows the app shows and hides on TCN_SELCHANGE. The hosted view is therefore
+      empty inside, and TCM_ADJUSTRECT answers with the native content rect so the app's
+      page lands inside it. macOS 27's .tabs picker style ("segmented tabs") is Apple's new
+      tab strip; 12-26 use TabView, drawn as NSTabView.
+
+  - id: propsheet
+    kind: dialog
+    title: Property sheet
+    win32: {apis: [PropertySheet, CreatePropertySheetPage], styles: [PSH_DEFAULT, PSH_PROPSHEETPAGE]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          VStack(spacing: 12) {
+            TabView(selection: $choice) {
+              ForEach(choices) { c in Color.clear.tabItem { Text(c.title) }.tag(c.id) }
+            }
+            HStack {
+              Spacer()
+              Button("Cancel", role: .cancel, action: action).keyboardShortcut(.cancelAction)
+              Button("Apply", action: action)
+              Button("OK", action: action).keyboardShortcut(.defaultAction)
+            }
+          }.padding()
+      - since: 13
+        code: |-
+          NavigationSplitView {
+            List(choices, selection: $selection) { Text($0.title) }
+          } detail: {
+            VStack {
+              Color.clear
+              HStack {
+                Spacer()
+                Button("Cancel", role: .cancel, action: action).keyboardShortcut(.cancelAction)
+                Button("Apply", action: action)
+                Button("OK", action: action).keyboardShortcut(.defaultAction)
+              }
+            }.padding()
+          }
+    glass: automatic
+    state_in: [PSM_SETCURSEL, PSM_ADDPAGE, PSM_REMOVEPAGE, PSM_CHANGED, PSM_UNCHANGED, PSM_SETTITLE, PSM_SETWIZBUTTONS]
+    events_out: {page: PSN_SETACTIVE/PSN_KILLACTIVE, apply: PSN_APPLY, cancel: PSN_QUERYCANCEL/PSN_RESET}
+    improvised: true
+    notes: >-
+      Up to 5 pages: tabs, as in older macOS preference windows. More than 5 (winecfg has
+      8): from macOS 13 a sidebar, the System Settings layout, which is Liquid Glass on 26
+      automatically. OK/Cancel/Apply stay, because apps commit on PSN_APPLY; macOS settings
+      would apply live, but that can't be emulated safely.
+
+  - id: propsheet.wizard
+    kind: dialog
+    title: Wizard (property sheet in wizard mode)
+    win32: {apis: [], styles: [PSH_WIZARD, PSH_WIZARD97_NEW, PSH_WIZARD97_OLD, PSH_AEROWIZARD, PSH_WIZARD_LITE], parts: [AEROWIZARD/AW_TITLEBAR, AEROWIZARD/AW_HEADERAREA, AEROWIZARD/AW_CONTENTAREA, AEROWIZARD/AW_COMMANDAREA, AEROWIZARD/AW_BUTTON, TAB/TABP_AEROWIZARDBODY, NAVIGATION/NAV_BACKBUTTON, NAVIGATION/NAV_FORWARDBUTTON]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          HStack(alignment: .top, spacing: 0) {
+            VStack(alignment: .leading, spacing: 6) {
+              ForEach(choices) { c in
+                Label(c.title, systemImage: c.id == choice ? "circle.fill" : "circle")
+                  .foregroundStyle(c.id == choice ? .primary : .secondary)
+              }
+              Spacer()
+            }.padding().frame(width: 180).background(.bar)
+            VStack(alignment: .leading, spacing: 12) {
+              Text(title).font(.title2.bold())
+              Text(note).foregroundStyle(.secondary)
+              Color.clear
+              HStack {
+                Button("Cancel", role: .cancel, action: action).keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Go Back", action: action)
+                Button("Continue", action: action).keyboardShortcut(.defaultAction)
+              }
+            }.padding()
+          }
+    glass: automatic
+    state_in: [PSM_SETWIZBUTTONS, PSM_SETHEADERTITLE, PSM_SETHEADERSUBTITLE, PSM_SETFINISHTEXT, PSM_PRESSBUTTON]
+    events_out: {next: PSN_WIZNEXT, back: PSN_WIZBACK, finish: PSN_WIZFINISH, cancel: PSN_QUERYCANCEL}
+    improvised: true
+    notes: >-
+      The macOS Installer layout: the steps (page titles) in a sidebar, the page on the
+      right, Go Back / Continue at the bottom. Finish shows as "Continue" until the last
+      page, then as the finish text (PSM_SETFINISHTEXT). Installers built with NSIS or Inno
+      Setup use their own dialogs, not property sheets; they are covered by the controls
+      they're made of.
+
+  - id: dialog
+    kind: dialog
+    title: Dialog box
+    win32: {class: "#32770", apis: [DialogBoxParam, DialogBoxIndirectParam, CreateDialogParam, CreateDialogIndirectParam], parts: [WINDOW/WP_DIALOG]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "Color(nsColor: .windowBackgroundColor)"
+    glass: none
+    state_in: [WM_INITDIALOG, DM_SETDEFID, WM_NEXTDLGCTL]
+    notes: >-
+      The dialog stays a real window (winemac already gives it a native frame); what changes
+      is its controls, each translated on its own, and its background colour (COLOR_BTNFACE,
+      see 70-look). Positions stay in dialog units computed from the dialog's requested
+      font, so layouts don't shift. Modal dialogs with an owner could become sheets, as on
+      macOS; that is left for a later step because apps position and move their dialogs
+      themselves.
+
+  - id: toolbar
+    kind: control
+    title: Toolbar
+    win32: {class: ToolbarWindow32, styles: [TBSTYLE_BUTTON], parts: [TOOLBAR/TP_BUTTON, TOOLBAR/TP_DROPDOWNBUTTON, TOOLBAR/TP_SPLITBUTTON, TOOLBAR/TP_SPLITBUTTONDROPDOWN, TOOLBAR/TP_DROPDOWNBUTTONGLYPH, TOOLBAR/TP_SEPARATOR, TOOLBAR/TP_SEPARATORVERT]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          HStack(spacing: 2) {
+            ForEach(choices) { c in
+              Button(action: action) { Image(nsImage: image) }.buttonStyle(.borderless).help(c.title)
+            }
+            Divider().frame(height: 18)
+          }.padding(.horizontal, 6)
+      - since: 26
+        code: |-
+          GlassEffectContainer {
+            HStack(spacing: 4) {
+              ForEach(choices) { c in
+                Button(action: action) { Image(nsImage: image) }.buttonStyle(.glass).help(c.title)
+              }
+            }
+          }.padding(.horizontal, 6)
+    appkit:
+      - since: 12
+        code: |-
+          let tb = NSToolbar(identifier: "w2s.toolbar")
+          tb.displayMode = .iconOnly
+          window.toolbar = tb
+    glass: explicit
+    state_in: [TB_ADDBUTTONS, TB_INSERTBUTTON, TB_DELETEBUTTON, TB_SETSTATE, TB_CHECKBUTTON, TB_ENABLEBUTTON, TB_SETIMAGELIST, TB_SETBUTTONINFO, TB_AUTOSIZE]
+    events_out: {activate: WM_COMMAND with the button id, dropdown: WM_NOTIFY/TBN_DROPDOWN, tooltip: TBN_GETINFOTIP}
+    notes: >-
+      Default: the buttons are drawn in place, in the toolbar's own strip, so the app's
+      client layout is untouched. On 26 they are glass buttons in a GlassEffectContainer,
+      as in Apple's toolbars. Moving the toolbar into the window's unified title bar
+      (NSToolbar, the appkit item) is the more Mac-like option. It changes the client area
+      height the app laid out, so it is opt-in per app.
+
+  - id: rebar
+    kind: control
+    title: Rebar (band container)
+    win32: {class: ReBarWindow32, parts: [REBAR/RP_BAND, REBAR/RP_BACKGROUND]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "Color.clear.background(.bar)"
+    glass: none
+    state_in: [RB_INSERTBAND, RB_SETBANDINFO, RB_DELETEBAND, RB_MAXIMIZEBAND, RB_SHOWBAND]
+    events_out: {layout: RBN_HEIGHTCHANGE, chevron: RBN_CHEVRONPUSHED}
+    notes: >-
+      A rebar is only a background with bands; each band's child (toolbar, combo box) is
+      translated by its own entry. Grippers are dropped; a band's chevron becomes an
+      overflow menu.
+
+  - id: statusbar
+    kind: control
+    title: Status bar
+    win32: {class: msctls_statusbar32, parts: [STATUS/SP_PANE, STATUS/SP_GRIPPERPANE]}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: |-
+          HStack(spacing: 8) {
+            ForEach(choices) { c in
+              Text(c.title).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+              Divider().frame(height: 12)
+            }
+            Spacer(minLength: 0)
+          }.padding(.horizontal, 8).frame(maxWidth: .infinity, maxHeight: .infinity).background(.bar)
+    glass: none
+    state_in: [SB_SETPARTS, SB_SETTEXT, SB_SIMPLE, SB_SETICON, SB_SETTIPTEXT]
+    events_out: {click: NM_CLICK/NM_DBLCLK on a pane}
+    notes: >-
+      A Finder-style bottom bar: small secondary text, panes separated by dividers. On 26
+      Apple's bottom bars sit on the window background under the content's scroll edge
+      effect; that only applies once the content above is itself a translated List/Table.
+
+  - id: pager
+    kind: control
+    title: Pager
+    win32: {class: SysPager}
+    runtime: swiftui
+    swiftui:
+      - since: 12
+        code: "ScrollView(.horizontal, showsIndicators: false) { Color.clear.frame(width: 400) }"
+    glass: none
+    events_out: {scroll: PGN_SCROLL, size: PGN_CALCSIZE}
+
+  - id: mdiclient
+    kind: control
+    title: MDI client area
+    win32: {class: MDIClient, styles: [MDIS_ALLCHILDSTYLES]}
+    runtime: not_translated
+    glass: none
+    notes: >-
+      Child windows living inside a parent frame have no macOS counterpart. The children's
+      controls are still translated; the MDI frame, child captions and COLOR_APPWORKSPACE
+      stay as wine draws them. Native window tabs (NSWindow tabbing) are a possible later
+      mapping.
+
+  - id: scrollbar
+    kind: control
+    title: Scroll bar
+    win32: {class: ScrollBar, styles: [SBS_HORZ, SBS_VERT], parts: [SCROLLBAR/SBP_ARROWBTN, SCROLLBAR/SBP_THUMBBTNHORZ, SCROLLBAR/SBP_THUMBBTNVERT, SCROLLBAR/SBP_LOWERTRACKHORZ, SCROLLBAR/SBP_UPPERTRACKHORZ, SCROLLBAR/SBP_LOWERTRACKVERT, SCROLLBAR/SBP_UPPERTRACKVERT, SCROLLBAR/SBP_GRIPPERHORZ, SCROLLBAR/SBP_GRIPPERVERT, WINDOW/WP_HORZSCROLL, WINDOW/WP_HORZTHUMB, WINDOW/WP_VERTSCROLL, WINDOW/WP_VERTTHUMB]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: |-
+          let s = NSScroller(frame: NSRect(x: 0, y: 0, width: 15, height: 200))
+          s.scrollerStyle = NSScroller.preferredScrollerStyle
+          s.knobProportion = 0.25
+          s.doubleValue = 0.5
+          s.isEnabled = true
+    glass: automatic
+    state_in: [SBM_SETSCROLLINFO, SBM_SETPOS, SBM_SETRANGE, SBM_ENABLE_ARROWS, SetScrollInfo on WS_HSCROLL/WS_VSCROLL windows]
+    events_out: {scroll: WM_HSCROLL/WM_VSCROLL with SB_THUMBTRACK, SB_THUMBPOSITION, SB_LINEUP/DOWN, SB_PAGEUP/DOWN}
+    notes: >-
+      SwiftUI has no stand-alone scroller. NSScroller follows the user's "Show scroll bars"
+      setting (overlay or always). The same applies to the scroll bars windows get from
+      WS_HSCROLL/WS_VSCROLL. Arrow buttons don't exist on macOS scrollers, so SB_LINEUP and
+      SB_LINEDOWN only come from wheel and trackpad scrolling.
+
+flags:
+  # Tab
+  TCS_BOTTOM: {ignore: "macOS tabs are always at the top"}
+  TCS_RIGHT: {ignore: "macOS tabs are always at the top"}
+  TCS_VERTICAL: {view: 'List(choices, selection: $selection) { Text($0.title) }.listStyle(.sidebar)', note: vertical tabs read as a sidebar on macOS}
+  TCS_BUTTONS: {view: 'Picker(title, selection: $choice) { ForEach(choices) { Text($0.title).tag($0.id) } }.pickerStyle(.segmented).labelsHidden()'}
+  TCS_FLATBUTTONS: {view: 'Picker(title, selection: $choice) { ForEach(choices) { Text($0.title).tag($0.id) } }.pickerStyle(.segmented).labelsHidden()'}
+  TCS_FIXEDWIDTH: {ignore: "tab widths are native"}
+  TCS_FOCUSNEVER: {behavior: "the tab strip never takes keyboard focus"}
+  TCS_FOCUSONBUTTONDOWN: {behavior: "the tab strip takes focus on click"}
+  TCS_FORCEICONLEFT: {ignore: "tab icon placement is native"}
+  TCS_FORCELABELLEFT: {ignore: "tab label placement is native"}
+  TCS_HOTTRACK: {ignore: "hover highlight is native"}
+  TCS_MULTILINE: {behavior: "macOS has no multi-row tabs - more than 6 tabs switch to the sidebar layout (13+) or scroll (12)"}
+  TCS_SINGLELINE: {behavior: "the default single row"}
+  TCS_MULTISELECT: {view: 'HStack { ForEach(choices) { c in Toggle(c.title, isOn: $isOn).toggleStyle(.button) } }', note: button-style tabs that can be multi-selected}
+  TCS_OWNERDRAWFIXED: {not_translated: "the app draws each tab"}
+  TCS_RAGGEDRIGHT: {ignore: "tab widths are native"}
+  TCS_RIGHTJUSTIFY: {ignore: "tab widths are native"}
+  TCS_SCROLLOPPOSITE: {ignore: "no multi-row tabs on macOS"}
+  TCS_TOOLTIPS: {behavior: ".help on each tab, text from TTN_GETDISPINFO"}
+  TCS_EX_FLATSEPARATORS: {ignore: "separators are native"}
+  TCS_EX_REGISTERDROP: {behavior: "TCN_GETOBJECT for drag and drop over tabs"}
+
+  # Property sheet
+  PSH_HASHELP: {view: 'HelpLink { action() }', since: 14, appkit: 'let b = NSButton(title: "", target: nil, action: nil); b.bezelStyle = .helpButton', note: the round macOS help button}
+  PSH_HEADER: {behavior: "wizard pages show a header title and subtitle"}
+  PSH_HEADERBITMAP: {behavior: "header image shown in the wizard header"}
+  PSH_USEHBMHEADER: {behavior: "header image from an HBITMAP"}
+  PSH_WATERMARK: {view: 'Image(nsImage: image).resizable().scaledToFit().frame(width: 180)', note: "the wizard's side picture becomes the sidebar image, as in Installer"}
+  PSH_USEHBMWATERMARK: {behavior: "side picture from an HBITMAP"}
+  PSH_USEHPLWATERMARK: {behavior: "side picture palette; ignored with 32-bit images"}
+  PSH_STRETCHWATERMARK: {behavior: "side picture scaled to fit"}
+  PSH_MODELESS: {behavior: "the sheet is a normal window rather than modal"}
+  PSH_NOAPPLYNOW: {behavior: "no Apply button"}
+  PSH_NOCONTEXTHELP: {ignore: "macOS has no \"What's this?\" help"}
+  PSH_WIZARDCONTEXTHELP: {ignore: "macOS has no \"What's this?\" help"}
+  PSH_NOMARGIN: {ignore: "native margins"}
+  PSH_PROPTITLE: {behavior: "title shown as \"<name> Properties\""}
+  PSH_RESIZABLE: {behavior: "the sheet window is resizable"}
+  PSH_RTLREADING: {mod: '.environment(\.layoutDirection, .rightToLeft)'}
+  PSH_USECALLBACK: {behavior: "PropSheetProc is called as on Windows"}
+  PSH_USEHICON: {ignore: "macOS windows have no title-bar icons"}
+  PSH_USEICONID: {ignore: "macOS windows have no title-bar icons"}
+  PSH_USEPAGELANG: {ignore: "page resource language"}
+  PSH_USEPSTARTPAGE: {behavior: "start page chosen by name"}
+  PSH_WIZARDHASFINISH: {behavior: "the finish button is shown on every page"}
+  PSP_COMMANDLINKS: {behavior: "page buttons are command links (button.commandlink)"}
+  PSP_DEFAULT: {behavior: "plain page"}
+  PSP_DLGINDIRECT: {behavior: "page template in memory"}
+  PSP_HASHELP: {behavior: "help button enabled on this page (PSH_HASHELP)"}
+  PSP_HIDEHEADER: {behavior: "wizard page without header (welcome and finish pages)"}
+  PSP_PREMATURE: {behavior: "page created with the sheet"}
+  PSP_RTLREADING: {mod: '.environment(\.layoutDirection, .rightToLeft)'}
+  PSP_USECALLBACK: {behavior: "PropSheetPageProc is called"}
+  PSP_USEFUSIONCONTEXT: {behavior: "activation context for the page"}
+  PSP_USEHEADERSUBTITLE: {behavior: "wizard header subtitle"}
+  PSP_USEHEADERTITLE: {behavior: "wizard header title"}
+  PSP_USEHICON: {behavior: "page icon shown in the sidebar row"}
+  PSP_USEICONID: {behavior: "page icon shown in the sidebar row"}
+  PSP_USEREFPARENT: {behavior: "reference count on the parent module"}
+  PSP_USETITLE: {behavior: "tab or sidebar label"}
+
+  # Dialog
+  DS_3DLOOK: {ignore: "no 3D bevels on macOS"}
+  DS_ABSALIGN: {behavior: "coordinates are screen-relative"}
+  DS_CENTER: {behavior: "centred on the owner (or the screen), as macOS centres panels"}
+  DS_CENTERMOUSE: {ignore: "macOS doesn't place windows at the pointer"}
+  DS_CONTEXTHELP: {ignore: "macOS has no \"What's this?\" help"}
+  DS_CONTROL: {behavior: "a child dialog inside another (property pages); its controls are hosted in the parent window"}
+  DS_FIXEDSYS: {ignore: "the text of translated controls uses the system font"}
+  DS_LOCALEDIT: {ignore: "16-bit edit memory"}
+  DS_MODALFRAME: {existing: "winemac gives dialogs a native dialog frame"}
+  DS_NOFAILCREATE: {behavior: "dialog is created even if a control fails"}
+  DS_NOIDLEMSG: {behavior: "no WM_ENTERIDLE"}
+  DS_SETFONT: {behavior: "the requested font still drives dialog-unit layout; drawn text uses the system font"}
+  DS_SHELLFONT: {behavior: "same as DS_SETFONT"}
+  DS_SETFOREGROUND: {behavior: "NSApp.activate when the dialog opens"}
+  DS_SYSMODAL: {behavior: "app-modal and floating above other windows"}
+  DS_USEPIXELS: {behavior: "template coordinates are pixels"}
+
+  # Toolbar
+  BTNS_BUTTON: {entry: "toolbar"}
+  BTNS_SEP: {view: 'Divider().frame(height: 18)', note: on 26 a separator also closes one GlassEffectContainer and opens the next}
+  BTNS_CHECK: {view: 'Toggle(isOn: $isOn) { Image(nsImage: image) }.toggleStyle(.button)'}
+  BTNS_CHECKGROUP: {view: 'Picker(title, selection: $choice) { ForEach(choices) { Text($0.title).tag($0.id) } }.pickerStyle(.segmented).labelsHidden()'}
+  BTNS_GROUP: {behavior: "starts a radio group of BTNS_CHECKGROUP buttons"}
+  BTNS_DROPDOWN: {view: 'Menu { Button(note, action: action) } label: { Image(nsImage: image) } primaryAction: { action() }'}
+  BTNS_WHOLEDROPDOWN: {view: 'Menu { Button(note, action: action) } label: { Image(nsImage: image) }'}
+  BTNS_AUTOSIZE: {ignore: "toolbar buttons size themselves"}
+  BTNS_NOPREFIX: {behavior: "keep '&' literally"}
+  BTNS_SHOWTEXT: {mod: ".labelStyle(.titleAndIcon)"}
+  # pre-comctl 5.81 names of the BTNS_ button styles (same values)
+  TBSTYLE_SEP: {view: 'Divider().frame(height: 18)'}
+  TBSTYLE_CHECK: {view: 'Toggle(isOn: $isOn) { Image(nsImage: image) }.toggleStyle(.button)'}
+  TBSTYLE_GROUP: {behavior: "starts a radio group of check-group buttons"}
+  TBSTYLE_CHECKGROUP: {view: 'Picker(title, selection: $choice) { ForEach(choices) { Text($0.title).tag($0.id) } }.pickerStyle(.segmented).labelsHidden()'}
+  TBSTYLE_DROPDOWN: {view: 'Menu { Button(note, action: action) } label: { Image(nsImage: image) } primaryAction: { action() }'}
+  TBSTYLE_AUTOSIZE: {ignore: "toolbar buttons size themselves"}
+  TBSTYLE_NOPREFIX: {behavior: "keep '&' literally"}
+  TBSTYLE_ALTDRAG: {behavior: "Alt-drag customisation"}
+  TBSTYLE_CUSTOMERASE: {behavior: "NM_CUSTOMDRAW erase stage"}
+  TBSTYLE_FLAT: {ignore: "macOS toolbar buttons are borderless by default"}
+  TBSTYLE_LIST: {mod: ".labelStyle(.titleAndIcon)"}
+  TBSTYLE_REGISTERDROP: {behavior: "TBN_GETOBJECT for drag and drop"}
+  TBSTYLE_TOOLTIPS: {behavior: ".help on each button, text from TBN_GETINFOTIP/TTN_GETDISPINFO"}
+  TBSTYLE_TRANSPARENT: {ignore: "the strip is drawn by the translated view"}
+  TBSTYLE_WRAPABLE: {behavior: "buttons that don't fit go to an overflow menu (») as in macOS toolbars"}
+  TBSTYLE_EX_DOUBLEBUFFER: {ignore: "a Win32 flicker fix"}
+  TBSTYLE_EX_DRAWDDARROWS: {behavior: "drop-down buttons get the split arrow (Menu with primaryAction)"}
+  TBSTYLE_EX_HIDECLIPPEDBUTTONS: {behavior: "clipped buttons move to the overflow menu"}
+  TBSTYLE_EX_MIXEDBUTTONS: {mod: .labelStyle(.iconOnly), note: only BTNS_SHOWTEXT buttons show their title}
+  TBSTYLE_EX_MULTICOLUMN: {behavior: "vertical toolbar in several columns"}
+  TBSTYLE_EX_VERTICAL: {behavior: "buttons in a VStack"}
+
+  # Rebar
+  RBS_AUTOSIZE: {behavior: "bands re-flow on resize"}
+  RBS_BANDBORDERS: {ignore: "no band borders on macOS"}
+  RBS_DBLCLKTOGGLE: {ignore: "bands aren't collapsible on macOS"}
+  RBS_FIXEDORDER: {behavior: "bands can't be reordered"}
+  RBS_REGISTERDROP: {behavior: "RBN_GETOBJECT for drag and drop"}
+  RBS_TOOLTIPS: {behavior: ".help on bands"}
+  RBS_VARHEIGHT: {ignore: "band heights are native"}
+  RBS_VERTICALGRIPPER: {ignore: "no grippers on macOS"}
+  RBBS_BREAK: {behavior: "band starts a new row"}
+  RBBS_CHILDEDGE: {ignore: "no edges"}
+  RBBS_FIXEDBMP: {ignore: "band background image"}
+  RBBS_FIXEDSIZE: {behavior: "band can't be resized"}
+  RBBS_GRIPPERALWAYS: {ignore: "no grippers on macOS"}
+  RBBS_NOGRIPPER: {ignore: "no grippers on macOS"}
+  RBBS_HIDDEN: {behavior: "band hidden"}
+  RBBS_HIDETITLE: {behavior: "band title hidden"}
+  RBBS_NOVERT: {ignore: "bands are horizontal"}
+  RBBS_TOPALIGN: {behavior: "band child aligned to the top"}
+  RBBS_USECHEVRON: {behavior: "band overflow shown as a menu"}
+  RBBS_VARIABLEHEIGHT: {ignore: "band heights are native"}
+
+  # Status bar
+  SBARS_SIZEGRIP: {ignore: "macOS windows resize from any edge"}
+  SBARS_TOOLTIPS: {behavior: ".help on panes"}
+  SBT_NOBORDERS: {ignore: "panes have no borders on macOS"}
+  SBT_POPOUT: {ignore: "no raised panes on macOS"}
+  SBT_OWNERDRAW: {not_translated: "that pane stays app-drawn (the rest of the bar is translated)"}
+  SBT_RTLREADING: {mod: '.environment(\.layoutDirection, .rightToLeft)'}
+  SBT_TOOLTIPS: {behavior: ".help on the pane"}
+
+  # Pager
+  PGS_HORZ: {behavior: "horizontal scroll axis"}
+  PGS_VERT: {view: 'ScrollView(.vertical, showsIndicators: false) { Color.clear.frame(height: 400) }'}
+  PGS_AUTOSCROLL: {behavior: "scrolls while hovering the ends"}
+  PGS_DRAGNDROP: {behavior: "scrolls during drag and drop"}
+
+  # Scroll bar control
+  SBS_SIZEBOX: {ignore: "macOS windows resize from any edge"}
+  SBS_SIZEGRIP: {ignore: "macOS windows resize from any edge"}
+  SBS_SIZEBOXBOTTOMRIGHTALIGN: {ignore: "size box"}
+  SBS_SIZEBOXTOPLEFTALIGN: {ignore: "size box"}
+  SBS_TOPALIGN: {behavior: "geometry kept by the Win32 control"}
+  SBS_BOTTOMALIGN: {behavior: "geometry kept by the Win32 control"}
+  SBS_LEFTALIGN: {behavior: "geometry kept by the Win32 control"}
+  SBS_RIGHTALIGN: {behavior: "geometry kept by the Win32 control"}
+
+  # Common control positioning (toolbar, rebar, status bar, header)
+  CCS_ADJUSTABLE: {behavior: "user customisation - only in the unified NSToolbar mode (allowsUserCustomization)"}
+  CCS_BOTTOM: {behavior: "docked at the bottom of the parent; position kept"}
+  CCS_TOP: {behavior: "docked at the top of the parent; position kept"}
+  CCS_LEFT: {behavior: "docked on the left; position kept"}
+  CCS_RIGHT: {behavior: "docked on the right; position kept"}
+  CCS_VERT: {behavior: "vertical orientation"}
+  CCS_NODIVIDER: {ignore: "no highlight line on macOS"}
+  CCS_NOMOVEX: {behavior: "geometry kept by the Win32 control"}
+  CCS_NOMOVEY: {behavior: "geometry kept by the Win32 control"}
+  CCS_NOPARENTALIGN: {behavior: "geometry kept by the Win32 control"}
+  CCS_NORESIZE: {behavior: "geometry kept by the Win32 control"}
+
+parts:
+  REBAR/RP_GRIPPER: {ignore: "no grippers on macOS"}
+  REBAR/RP_GRIPPERVERT: {ignore: "no grippers on macOS"}
+  REBAR/RP_CHEVRON: {view: 'Menu { Button(note, action: action) } label: { Image(systemName: "chevron.right.2") }.menuIndicator(.hidden)', note: overflow menu}
+  REBAR/RP_CHEVRONVERT: {view: 'Menu { Button(note, action: action) } label: { Image(systemName: "chevron.down") }.menuIndicator(.hidden)'}
+  REBAR/RP_SPLITTER: {view: "Divider()"}
+  REBAR/RP_SPLITTERVERT: {view: "Divider()"}
+  STATUS/SP_GRIPPER: {ignore: "macOS windows resize from any edge"}
+  SCROLLBAR/SBP_SIZEBOX: {ignore: "macOS windows resize from any edge"}
+  SCROLLBAR/SBP_SIZEBOXBKGND: {ignore: "macOS windows resize from any edge"}
+  NAVIGATION/NAV_MENUBUTTON: {ignore: "Explorer history drop-down"}
+  COMMUNICATIONS/CSST_TAB: {entry: "tab"}

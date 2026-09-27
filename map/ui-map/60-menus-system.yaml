@@ -1,0 +1,303 @@
+# Menus, tray, taskbar/Dock, notifications, attention, window chrome and the
+# non-control window classes.
+
+entries:
+  - id: menu.bar
+    kind: menu
+    title: Window menu bar
+    win32: {apis: [SetMenu, CreateMenu], styles: [MF_STRING, MFT_STRING], parts: [MENU/MENU_BARBACKGROUND, MENU/MENU_BARITEM, MENU/MENU_MENUBARITEM_TMSCHEMA, MENU/MENU_MENUBARDROPDOWN_TMSCHEMA, MENU/MENU_CHEVRON_TMSCHEMA]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: |-
+          let file = NSMenu(title: title)
+          let open = NSMenuItem(title: "Open…", action: nil, keyEquivalent: "o")
+          open.keyEquivalentModifierMask = [.command]
+          file.addItem(open)
+          file.addItem(.separator())
+          let top = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+          top.submenu = file
+          NSApp.mainMenu?.addItem(top)
+    glass: automatic
+    state_in: [SetMenu, InsertMenuItem, SetMenuItemInfo, ModifyMenu, DeleteMenu, CheckMenuItem, EnableMenuItem, DrawMenuBar]
+    events_out: {open: WM_INITMENU then WM_INITMENUPOPUP (the app updates items), select: WM_MENUSELECT, choose: WM_COMMAND with the item id}
+    not_translated_when: [MF_OWNERDRAW, MFT_OWNERDRAW]
+    notes: >-
+      The menu of the key window becomes the Mac menu bar, after the application menu
+      winemac already builds (CW HACK 10912 added Edit). The in-window menu strip goes away,
+      so the client area grows by the menu height. That is the one visible layout change and
+      is switchable per app. WM_INITMENUPOPUP is sent from menuNeedsUpdate: so apps can
+      still check and enable items just in time. Ctrl accelerators are shown as ⌘ when
+      winemac maps Command to Ctrl. The '&' mnemonics are dropped. "Help" becomes
+      NSApp.helpMenu, which gets the macOS search field. SwiftUI's .commands only exists for
+      SwiftUI App scenes, and wine's application is AppKit, so this entry is AppKit.
+
+  - id: menu.popup
+    kind: menu
+    title: Context and pop-up menus
+    win32: {class: "#32768", apis: [TrackPopupMenu, TrackPopupMenuEx, CreatePopupMenu], styles: [MF_POPUP], parts: [MENU/MENU_POPUPBACKGROUND, MENU/MENU_POPUPBORDERS, MENU/MENU_POPUPCHECK, MENU/MENU_POPUPCHECKBACKGROUND, MENU/MENU_POPUPGUTTER, MENU/MENU_POPUPITEM, MENU/MENU_POPUPSEPARATOR, MENU/MENU_POPUPSUBMENU, MENU/MENU_MENUITEM_TMSCHEMA, MENU/MENU_MENUDROPDOWN_TMSCHEMA, MENU/MENU_SEPARATOR_TMSCHEMA]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: |-
+          let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+          item.state = .on
+          menu.addItem(item)
+          menu.popUp(positioning: nil, at: NSPoint(x: 10, y: 10), in: view)
+    swiftui:
+      - since: 12
+        code: |-
+          Text(title).contextMenu {
+            Button(note, action: action)
+            Divider()
+            Menu("More") { Button(note, action: action) }
+          }
+    glass: automatic
+    events_out: {choose: 'WM_COMMAND, or the id returned by TrackPopupMenu with TPM_RETURNCMD'}
+    notes: >-
+      NSMenu popUp is what SwiftUI's .contextMenu shows. It runs a modal tracking loop,
+      which TrackPopupMenu also does, so the call returns the chosen command as on Windows.
+      On 26 menus are Liquid Glass automatically.
+
+  - id: menu.system
+    kind: menu
+    title: System menu and caption buttons
+    win32: {apis: [GetSystemMenu], styles: [MF_SYSMENU], parts: [MENU/MENU_SYSTEMCLOSE, MENU/MENU_SYSTEMMAXIMIZE, MENU/MENU_SYSTEMMINIMIZE, MENU/MENU_SYSTEMRESTORE, WINDOW/WP_SYSBUTTON, WINDOW/WP_MINBUTTON, WINDOW/WP_MAXBUTTON, WINDOW/WP_CLOSEBUTTON, WINDOW/WP_SMALLCLOSEBUTTON, WINDOW/WP_RESTOREBUTTON, WINDOW/WP_HELPBUTTON]}
+    runtime: existing
+    glass: automatic
+    notes: >-
+      winemac already gives captioned windows the native title bar with the traffic-light
+      buttons (window.c get_cocoa_window_features), and a Window menu. Items an app appends
+      to its system menu belong in that Window menu; that part is new work.
+
+  - id: window.frame
+    kind: system
+    title: Window frame and caption
+    win32: {styles: [WS_CAPTION, WS_THICKFRAME, WS_MINIMIZEBOX, WS_MAXIMIZEBOX, WS_SYSMENU, WS_DLGFRAME, WS_BORDER, WS_POPUP, WS_OVERLAPPED], parts: [WINDOW/WP_CAPTION, WINDOW/WP_SMALLCAPTION, WINDOW/WP_MINCAPTION, WINDOW/WP_SMALLMINCAPTION, WINDOW/WP_MAXCAPTION, WINDOW/WP_SMALLMAXCAPTION, WINDOW/WP_FRAMELEFT, WINDOW/WP_FRAMERIGHT, WINDOW/WP_FRAMEBOTTOM, WINDOW/WP_SMALLFRAMELEFT, WINDOW/WP_SMALLFRAMERIGHT, WINDOW/WP_SMALLFRAMEBOTTOM, WINDOW/WP_CAPTIONSIZINGTEMPLATE, WINDOW/WP_SMALLCAPTIONSIZINGTEMPLATE, WINDOW/WP_FRAMELEFTSIZINGTEMPLATE, WINDOW/WP_SMALLFRAMELEFTSIZINGTEMPLATE, WINDOW/WP_FRAMERIGHTSIZINGTEMPLATE, WINDOW/WP_SMALLFRAMERIGHTSIZINGTEMPLATE, WINDOW/WP_FRAMEBOTTOMSIZINGTEMPLATE, WINDOW/WP_SMALLFRAMEBOTTOMSIZINGTEMPLATE, WINDOW/WP_FRAME, WINDOW/WP_BORDER]}
+    runtime: existing
+    glass: automatic
+    notes: >-
+      Already native: winemac maps the caption, frame and caption-button styles to an
+      NSWindow style mask (window.c get_cocoa_window_features). The title bar in the
+      screenshot is that, and it is Liquid Glass on 26 because the loader is linked against
+      SDK 27.
+
+  - id: tray
+    kind: system
+    title: Notification-area (tray) icon
+    win32: {apis: [Shell_NotifyIcon, Shell_NotifyIconGetRect], styles: [NIF_ICON, NIF_TIP, NIF_MESSAGE, NIF_STATE]}
+    runtime: existing
+    glass: automatic
+    notes: >-
+      Already native: winemac shows tray icons as menu-bar status items (systray.c,
+      cocoa_status_item.m). Balloons (NIF_INFO) are new: see notification.
+
+  - id: notification
+    kind: system
+    title: Notifications (tray balloons, toasts)
+    win32: {apis: [IToastNotifier], styles: [NIF_INFO]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: |-
+          let content = UNMutableNotificationContent()
+          content.title = title
+          content.body = note
+          let request = UNNotificationRequest(identifier: "w2s.balloon", content: content, trigger: nil)
+          UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
+    glass: automatic
+    events_out: {click: NIN_BALLOONUSERCLICK, timeout: NIN_BALLOONTIMEOUT}
+    notes: >-
+      Tray balloons and WinRT toasts go to Notification Center. To verify first:
+      UNUserNotificationCenter needs the process to belong to an app bundle with a bundle
+      identifier. The wine loader runs from inside the MacNdCheese app bundle, but not as
+      its main executable.
+
+  - id: taskbar.progress
+    kind: system
+    title: Taskbar progress and overlay icon
+    win32: {apis: [ITaskbarList3], styles: [TBPF_NORMAL]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: |-
+          let tile = NSApp.dockTile
+          tile.contentView = NSHostingView(rootView:
+            ZStack(alignment: .bottom) {
+              Image(nsImage: NSApp.applicationIconImage).resizable()
+              ProgressView(value: 0.4).progressViewStyle(.linear).padding(6)
+            })
+          tile.display()
+    glass: none
+    state_in: [SetProgressValue, SetProgressState, SetOverlayIcon]
+    notes: >-
+      The Dock icon shows the progress bar, as Safari does for downloads. The overlay icon
+      becomes the Dock badge (badgeLabel), limited to text on macOS.
+
+  - id: attention
+    kind: system
+    title: Flash window (attention request)
+    win32: {apis: [FlashWindow, FlashWindowEx], styles: [FLASHW_ALL]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: |-
+          let request = NSApp.requestUserAttention(.informationalRequest)
+          NSApp.cancelUserAttentionRequest(request)
+    glass: none
+    notes: >-
+      New: winemac has no FlashWindowEx today. A flash becomes a Dock bounce; with
+      FLASHW_TIMER it bounces until the app is activated (criticalRequest).
+
+  - id: beep
+    kind: system
+    title: Message beep
+    win32: {apis: [MessageBeep]}
+    runtime: appkit
+    appkit:
+      - since: 12
+        code: "NSSound.beep()"
+    glass: none
+    notes: Every MB_ICON* sound plays the user's alert sound, which is what macOS apps do.
+
+flags:
+  # Menus
+  MF_SEPARATOR: {appkit: 'menu.addItem(.separator())'}
+  MFT_SEPARATOR: {appkit: 'menu.addItem(.separator())'}
+  MF_CHECKED: {appkit: 'let i = NSMenuItem(title: title, action: nil, keyEquivalent: ""); i.state = .on'}
+  MFS_CHECKED: {appkit: 'let i = NSMenuItem(title: title, action: nil, keyEquivalent: ""); i.state = .on'}
+  MF_UNCHECKED: {behavior: "state .off (the default)"}
+  MFS_UNCHECKED: {behavior: "state .off (the default)"}
+  MFT_RADIOCHECK: {behavior: "shown with a checkmark - macOS menus use checkmarks for exclusive choices too"}
+  MF_GRAYED: {appkit: 'let i = NSMenuItem(title: title, action: nil, keyEquivalent: ""); i.isEnabled = false'}
+  MF_DISABLED: {appkit: 'let i = NSMenuItem(title: title, action: nil, keyEquivalent: ""); i.isEnabled = false'}
+  MFS_GRAYED: {appkit: 'let i = NSMenuItem(title: title, action: nil, keyEquivalent: ""); i.isEnabled = false'}
+  MFS_DISABLED: {appkit: 'let i = NSMenuItem(title: title, action: nil, keyEquivalent: ""); i.isEnabled = false'}
+  MF_ENABLED: {behavior: "enabled (the default)"}
+  MFS_ENABLED: {behavior: "enabled (the default)"}
+  MF_BITMAP: {appkit: 'let i = NSMenuItem(title: title, action: nil, keyEquivalent: ""); i.image = image'}
+  MFT_BITMAP: {appkit: 'let i = NSMenuItem(title: title, action: nil, keyEquivalent: ""); i.image = image'}
+  MF_USECHECKBITMAPS: {appkit: 'let i = NSMenuItem(title: title, action: nil, keyEquivalent: ""); i.onStateImage = image'}
+  MF_OWNERDRAW: {not_translated: "the app draws the item; that menu keeps wine's drawing"}
+  MFT_OWNERDRAW: {not_translated: "the app draws the item; that menu keeps wine's drawing"}
+  MF_MENUBREAK: {ignore: "macOS menus have a single column"}
+  MF_MENUBARBREAK: {ignore: "macOS menus have a single column"}
+  MFT_MENUBREAK: {ignore: "macOS menus have a single column"}
+  MFT_MENUBARBREAK: {ignore: "macOS menus have a single column"}
+  MF_RIGHTJUSTIFY: {behavior: "the right-justified Help menu becomes NSApp.helpMenu"}
+  MFT_RIGHTJUSTIFY: {behavior: "the right-justified Help menu becomes NSApp.helpMenu"}
+  MF_HELP: {behavior: "the right-justified Help menu becomes NSApp.helpMenu"}
+  MFT_RIGHTORDER: {behavior: "right-to-left menu layout follows the system language"}
+  MF_DEFAULT: {ignore: "macOS menus don't bold a default item"}
+  MFS_DEFAULT: {ignore: "macOS menus don't bold a default item"}
+  MF_HILITE: {ignore: "highlight is managed by the menu itself"}
+  MF_UNHILITE: {ignore: "highlight is managed by the menu itself"}
+  MFS_HILITE: {ignore: "highlight is managed by the menu itself"}
+  MFS_UNHILITE: {ignore: "highlight is managed by the menu itself"}
+  MFS_HOTTRACKDRAWN: {ignore: "internal drawing state"}
+  MFS_CACHEDBMP: {ignore: "internal drawing state"}
+  MFS_GAPDROP: {ignore: "Explorer drag-and-drop gap state"}
+  MFS_TOPGAPDROP: {ignore: "Explorer drag-and-drop gap state"}
+  MFS_BOTTOMGAPDROP: {ignore: "Explorer drag-and-drop gap state"}
+  MF_BYCOMMAND: {behavior: "item addressed by id when mirroring edits"}
+  MF_BYPOSITION: {behavior: "item addressed by index when mirroring edits"}
+  MF_APPEND: {behavior: "menu edit mirrored to the NSMenu"}
+  MF_CHANGE: {behavior: "menu edit mirrored to the NSMenu"}
+  MF_DELETE: {behavior: "menu edit mirrored to the NSMenu"}
+  MF_INSERT: {behavior: "menu edit mirrored to the NSMenu"}
+  MF_REMOVE: {behavior: "menu edit mirrored to the NSMenu"}
+  MF_END: {behavior: "end of a 16-bit menu template"}
+  MF_MOUSESELECT: {behavior: "WM_MENUSELECT flag - chosen with the mouse"}
+  TPM_LEFTALIGN: {behavior: "positioning hint for popUp(positioning:at:in:)"}
+  TPM_CENTERALIGN: {behavior: "positioning hint"}
+  TPM_RIGHTALIGN: {behavior: "positioning hint"}
+  TPM_TOPALIGN: {behavior: "positioning hint"}
+  TPM_VCENTERALIGN: {behavior: "positioning hint"}
+  TPM_BOTTOMALIGN: {behavior: "positioning hint"}
+  TPM_HORIZONTAL: {behavior: "positioning hint"}
+  TPM_VERTICAL: {behavior: "positioning hint"}
+  TPM_LEFTBUTTON: {behavior: "which mouse button tracks the menu"}
+  TPM_RIGHTBUTTON: {behavior: "which mouse button tracks the menu"}
+  TPM_NONOTIFY: {behavior: "no WM_COMMAND is sent"}
+  TPM_RETURNCMD: {behavior: "the chosen id is returned from TrackPopupMenu"}
+  TPM_RECURSE: {behavior: "a menu opened from inside another menu"}
+  TPM_LAYOUTRTL: {behavior: "right-to-left layout"}
+  TPM_NOANIMATION: {ignore: "menu animation is native"}
+  TPM_HORPOSANIMATION: {ignore: "menu animation is native"}
+  TPM_HORNEGANIMATION: {ignore: "menu animation is native"}
+  TPM_VERPOSANIMATION: {ignore: "menu animation is native"}
+  TPM_VERNEGANIMATION: {ignore: "menu animation is native"}
+
+  # Tray and notifications
+  NIF_GUID: {behavior: "icon identified by GUID instead of id"}
+  NIF_REALTIME: {behavior: "a balloon that can't be shown now is dropped"}
+  NIF_SHOWTIP: {behavior: "the standard tooltip is shown"}
+  NIIF_NONE: {behavior: "notification without an icon"}
+  NIIF_INFO: {behavior: "plain notification (macOS notifications carry the app icon)"}
+  NIIF_WARNING: {behavior: "plain notification; the level is in the text"}
+  NIIF_ERROR: {behavior: "plain notification; the level is in the text"}
+  NIIF_USER: {appkit: 'let c = UNMutableNotificationContent(); c.attachments = []', note: the app's icon becomes an image attachment}
+  NIIF_LARGEICON: {behavior: "large version of the user icon"}
+  NIIF_NOSOUND: {appkit: 'let c = UNMutableNotificationContent(); c.sound = nil'}
+  NIS_HIDDEN: {existing: "winemac hides the status item (systray.c)"}
+  NIS_SHAREDICON: {behavior: "icon shared between several tray icons"}
+
+  # Taskbar progress
+  TBPF_NOPROGRESS: {appkit: 'NSApp.dockTile.contentView = nil; NSApp.dockTile.display()'}
+  TBPF_INDETERMINATE: {view: "ProgressView().progressViewStyle(.linear)"}
+  TBPF_ERROR: {mod: ".tint(.red)"}
+  TBPF_PAUSED: {mod: ".tint(.yellow)"}
+
+  # Flash
+  FLASHW_STOP: {appkit: 'NSApp.cancelUserAttentionRequest(0)'}
+  FLASHW_CAPTION: {ignore: "macOS title bars don't flash"}
+  FLASHW_TRAY: {behavior: "bounce the Dock icon once"}
+  FLASHW_TIMER: {appkit: '_ = NSApp.requestUserAttention(.criticalRequest)', note: bounces until the app is active}
+  FLASHW_TIMERNOFG: {appkit: '_ = NSApp.requestUserAttention(.criticalRequest)'}
+
+  # Window styles
+  WS_CHILD: {behavior: "child windows live inside their top-level NSWindow (existing)"}
+  WS_VISIBLE: {behavior: "the translated view is shown and hidden with the window"}
+  WS_DISABLED: {mod: ".disabled(true)"}
+  WS_TABSTOP: {behavior: "part of the keyboard loop - the native view joins nextKeyView in the window's tab order"}
+  WS_GROUP: {behavior: "starts a group - radio grouping and arrow-key navigation"}
+  WS_HSCROLL: {entry: "scrollbar"}
+  WS_VSCROLL: {entry: "scrollbar"}
+  WS_CLIPCHILDREN: {ignore: "clipping is native for views"}
+  WS_CLIPSIBLINGS: {ignore: "clipping is native for views"}
+  WS_ICONIC: {existing: "minimised to the Dock by winemac"}
+  WS_MINIMIZE: {existing: "minimised to the Dock by winemac"}
+  WS_MAXIMIZE: {existing: "zoomed by winemac"}
+  WS_ACTIVECAPTION: {ignore: "internal caption state"}
+  WS_EX_ACCEPTFILES: {existing: "winemac accepts drops (cocoa_window.m draggingEntered/performDragOperation)"}
+  WS_EX_APPWINDOW: {existing: "winemac keeps it in the Dock's window list"}
+  WS_EX_TOOLWINDOW: {existing: "winemac makes it a utility-style window"}
+  WS_EX_TOPMOST: {existing: "winemac raises its window level"}
+  WS_EX_LAYERED: {existing: "winemac applies window alpha and colour key"}
+  WS_EX_NOACTIVATE: {existing: "winemac prevents app activation"}
+  WS_EX_DLGMODALFRAME: {existing: "winemac gives it a shadow"}
+  WS_EX_CLIENTEDGE: {ignore: "no sunken 3D edges; native controls draw their own borders"}
+  WS_EX_STATICEDGE: {ignore: "no 3D edges on macOS"}
+  WS_EX_WINDOWEDGE: {ignore: "no 3D edges on macOS"}
+  WS_EX_COMPOSITED: {ignore: "views are layer-backed already"}
+  WS_EX_CONTEXTHELP: {ignore: "macOS has no \"What's this?\" help"}
+  WS_EX_CONTROLPARENT: {behavior: "Tab moves into this window's children"}
+  WS_EX_DRAGDETECT: {behavior: "drag detection (Win16)"}
+  WS_EX_LAYOUTRTL: {mod: '.environment(\.layoutDirection, .rightToLeft)'}
+  WS_EX_RTLREADING: {mod: '.environment(\.layoutDirection, .rightToLeft)'}
+  WS_EX_RIGHT: {mod: ".multilineTextAlignment(.trailing)"}
+  WS_EX_LEFTSCROLLBAR: {behavior: "scroll bar on the left (right-to-left layout)"}
+  WS_EX_LEFT: {behavior: "default left alignment"}
+  WS_EX_LTRREADING: {behavior: "default left-to-right reading"}
+  WS_EX_RIGHTSCROLLBAR: {behavior: "default scroll bar position"}
+  WS_EX_MDICHILD: {entry: "mdiclient"}
+  WS_EX_NOINHERITLAYOUT: {behavior: "children don't inherit right-to-left layout"}
+  WS_EX_NOPARENTNOTIFY: {behavior: "no WM_PARENTNOTIFY"}
+  WS_EX_NOREDIRECTIONBITMAP: {ignore: "DirectComposition detail"}
+  WS_EX_TRANSPARENT: {behavior: "the window doesn't take mouse hits; siblings below it do"}
+
+classes:
+  Message: {ignore: "message-only windows are invisible"}
+  "#32769": {ignore: the Windows desktop window; the Mac desktop is macOS's own}
+  "#32772": {existing: minimised-window icon titles; windows minimise to the Dock}
+  IME: {existing: "winemac hosts input methods through NSTextInputClient (cocoa_window.m)"}
