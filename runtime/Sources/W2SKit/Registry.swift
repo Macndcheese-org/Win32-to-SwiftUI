@@ -198,7 +198,10 @@ final class PassThroughHostingView<Content: View>: NSHostingView<Content> {
                     return false        // the steps and header can't be clicked
                 case "sidebar":
                     let scale = size.width / CGFloat(max(1, snap.widthPx ?? Double(size.width)))
-                    return point.x < CGFloat(snap.sidebarPx ?? 0) * scale
+                    let width = CGFloat(snap.sidebarPx ?? 0) * scale
+                    // on 26+ the floating panel sits 8 pt in from the left edge
+                    if W2S.osVersion.major >= 26 { return point.x >= 8 && point.x < 8 + width }
+                    return point.x < width
                 default:
                     return point.y < 34 // the tab strip, over the top of the page (flipped)
                 }

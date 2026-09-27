@@ -113,7 +113,7 @@ struct ControlRoot: View {
         case "button.commandlink":
             CommandLink(model: model, label: label)
         case "button.groupbox":
-            GroupBox(label: Text(label)) { Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity) }
+            NativeGroupBox(label: label)
                 .allowsHitTesting(false)
         case "static.text":
             StaticText(snap: snap, label: label)
@@ -414,6 +414,38 @@ struct CommandLink: View {
         }
         .controlSize(.large)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// map: button.groupbox. macOS shows a box's title above it (HIG Boxes), but
+/// the native view is exactly the Win32 group box's rectangle and can't draw
+/// outside it, while the Win32 content inside starts right at the box's top
+/// edge. So the rounded box covers the whole rectangle and the title sits as
+/// a small caption inside its top-left, in the title zone the app leaves
+/// clear, leaving the content room below. The Win32 controls are siblings
+/// drawn over this view, on the dialog background.
+struct NativeGroupBox: View {
+    let label: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !label.isEmpty {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.leading, 10)
+                    .padding(.top, 4)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color(nsColor: .controlBackgroundColor))
+                .overlay(RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Color(nsColor: .separatorColor)))
+        )
     }
 }
 
@@ -1583,7 +1615,11 @@ struct TabStrip: View {
 
 /// map: propsheet (more than 5 pages, macOS 13+): the System Settings sidebar.
 /// The sheet's tab control told wine's propsheet to lay the pages out to the
-/// right of it (TCM_ADJUSTRECT), so only the sidebar is drawn here.
+/// right of it (TCM_ADJUSTRECT), so only the sidebar is drawn here: a real
+/// List(selection:) in the sidebar style (native row height, rounded
+/// selection, accent colour, keyboard) on the sidebar material. On macOS 26+
+/// it floats like System Settings (8 pt in from the top, left and bottom,
+/// 12 pt rounded corners); before that it is flush with a hairline separator.
 struct TabSidebar: View {
     @ObservedObject var model: ControlModel
 
@@ -1592,22 +1628,109 @@ struct TabSidebar: View {
             let items = model.snap.items ?? []
             let scale = geo.size.width / CGFloat(max(1, model.snap.widthPx ?? Double(geo.size.width)))
             let width = CGFloat(model.snap.sidebarPx ?? 180) * (scale.isFinite && scale > 0 ? scale : 1)
-            HStack(spacing: 0) {
-                List(selection: Binding<Int?>(
-                    get: { model.snap.selection.flatMap { $0 >= 0 ? $0 : nil } },
-                    set: { i in
-                        guard let i = i, i != model.snap.selection else { return }
-                        model.snap.selection = i
-                        model.emit(["t": "select", "v": i])
-                    })) {
-                    ForEach(items.indices, id: \.self) { i in
-                        Text(stripMnemonic(items[i])).tag(Optional(i))
+            let symbols = SidebarIcon.symbols(for: items.map { stripMnemonic($0) })
+            let selection = Binding<Int?>(
+                get: { model.snap.selection.flatMap { $0 >= 0 ? $0 : nil } },
+                set: { i in
+                    guard let i = i, i != model.snap.selection else { return }
+                    model.snap.selection = i
+                    model.emit(["t": "select", "v": i])
+                })
+            let list = List(selection: selection) {
+                ForEach(items.indices, id: \.self) { i in
+                    sidebarRow(i, title: stripMnemonic(items[i]), symbol: symbols?[i] ?? nil)
+                }
+            }
+            .listStyle(.sidebar)
+            .modifier(HideScrollBackground())
+            Group {
+                if #available(macOS 26, *) {
+                    HStack(spacing: 0) {
+                        list
+                            .frame(width: width)
+                            .background(SidebarBackground())
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .padding(.top, 8)
+                            .padding(.leading, 8)
+                            .padding(.bottom, 8)
+                        Spacer(minLength: 0)
+                    }
+                } else {
+                    HStack(spacing: 0) {
+                        list
+                            .frame(width: width)
+                            .background(SidebarBackground())
+                        Rectangle()
+                            .fill(Color(nsColor: .separatorColor))
+                            .frame(width: 1)
+                        Spacer(minLength: 0)
                     }
                 }
-                .listStyle(.sidebar)
-                .frame(width: width)
-                Spacer(minLength: 0)
             }
+        }
+    }
+
+    @ViewBuilder
+    func sidebarRow(_ i: Int, title: String, symbol: String?) -> some View {
+        if let symbol = symbol {
+            Label(title, systemImage: symbol).tag(Optional(i))
+        } else {
+            Text(title).tag(Optional(i))
+        }
+    }
+}
+
+/// The sidebar material behind the rows (NSVisualEffectView, .sidebar).
+struct SidebarBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .sidebar
+        view.state = .active
+        view.blendingMode = .behindWindow
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+}
+
+/// Hides a List's own background over the material behind it (macOS 13+);
+/// on 12 the list draws its own background.
+struct HideScrollBackground: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 13, *) {
+            content.scrollContentBackground(.hidden)
+        } else {
+            content
+        }
+    }
+}
+
+/// Optional SF Symbols in the sidebar rows, only when every page title is a
+/// known settings page (English or French); otherwise none at all. Every name
+/// below exists at the macOS 12 floor (name_availability.plist, year <=
+/// 2021.1). Staging's flask is 2023-only (macOS 14), so Staging has no symbol
+/// and a sheet with a Staging page (like winecfg) shows no icons at all.
+enum SidebarIcon {
+    static func symbols(for titles: [String]) -> [String?]? {
+        var out: [String?] = []
+        for title in titles {
+            guard let symbol = symbol(for: title) else { return nil }
+            out.append(symbol)
+        }
+        return out
+    }
+
+    static func symbol(for title: String) -> String? {
+        switch title {
+        case "General", "Général": return "gearshape"
+        case "Graphics", "Affichage", "Display": return "display"
+        case "Audio", "Sound", "Son": return "speaker.wave.2"
+        case "Drives", "Lecteurs": return "internaldrive"
+        case "Libraries", "Bibliothèques": return "books.vertical"
+        case "Applications": return "square.grid.2x2"
+        case "Desktop Integration", "Intégration avec le bureau": return "menubar.dock.rectangle"
+        case "About", "À propos": return "info.circle"
+        default: return nil
         }
     }
 }
