@@ -8,14 +8,14 @@ enum ControlViews {
     // map: button.3state button.split button.commandlink
     // map: static.text static.separator static.image edit.single edit.password edit.number edit.readonly
     // map: combobox.dropdownlist listbox.single listbox.multi listview.list listview.report
-    // map: progress trackbar tab static.frame statusbar edit.multiline
+    // map: progress trackbar tab static.frame statusbar edit.multiline combobox.editable
     static let entries: Set<String> = [
         "button.push", "button.default", "button.checkbox", "button.pushlike", "button.radio", "button.groupbox",
         "button.3state", "button.split", "button.commandlink",
         "static.text", "static.separator", "static.image",
         "edit.single", "edit.password", "edit.number", "edit.readonly",
         "combobox.dropdownlist", "listbox.single", "listbox.multi", "listview.list", "listview.report",
-        "progress", "trackbar", "tab", "static.frame", "statusbar", "edit.multiline",
+        "progress", "trackbar", "tab", "static.frame", "statusbar", "edit.multiline", "combobox.editable",
     ]
 
     static func supports(_ entry: String) -> Bool { entries.contains(entry) }
@@ -117,6 +117,9 @@ struct ControlRoot: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         case "combobox.dropdownlist":
             DropDownList(model: model, fontSize: metrics.fontSize, controlSize: metrics.controlSize)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        case "combobox.editable":
+            EditableCombo(model: model, fontSize: metrics.fontSize, controlSize: metrics.controlSize)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         case "listbox.single", "listbox.multi":
             ListBoxView(model: model, multi: entry == "listbox.multi")
@@ -841,6 +844,85 @@ struct DropDownList: NSViewRepresentable {
     /// 13+: say it outright instead of relying on the hugging priority.
     @available(macOS 13, *)
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSPopUpButton, context: Context) -> CGSize? {
+        let natural = nsView.intrinsicContentSize
+        guard let width = proposal.width, width.isFinite else { return natural }
+        return CGSize(width: width, height: natural.height)
+    }
+}
+
+/// CBS_DROPDOWN. SwiftUI has no editable combo box on macOS; NSComboBox is the
+/// native control. It doesn't complete as you type: a Win32 combo box doesn't
+/// either (apps that want it call SHAutoComplete and do it themselves).
+struct EditableCombo: NSViewRepresentable {
+    @ObservedObject var model: ControlModel
+    let fontSize: CGFloat
+    let controlSize: ControlSize
+
+    final class Coordinator: NSObject, NSComboBoxDelegate {
+        var model: ControlModel
+        var updating = false
+        init(model: ControlModel) { self.model = model }
+
+        func controlTextDidBeginEditing(_ obj: Notification) { model.emit(["t": "focus"]) }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard !updating, let box = obj.object as? NSComboBox else { return }
+            let text = box.stringValue
+            model.snap.text = text
+            model.emit(["t": "text", "s": text])
+        }
+
+        func comboBoxSelectionDidChange(_ notification: Notification) {
+            guard !updating, let box = notification.object as? NSComboBox else { return }
+            let i = box.indexOfSelectedItem
+            guard i >= 0, i != model.snap.selection else { return }
+            model.snap.selection = i
+            model.emit(["t": "select", "v": i])
+        }
+
+        func comboBoxWillPopUp(_ notification: Notification) { model.emit(["t": "open"]) }
+        func comboBoxWillDismiss(_ notification: Notification) { model.emit(["t": "close"]) }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(model: model) }
+
+    func makeNSView(context: Context) -> NSComboBox {
+        let box = NSComboBox()
+        box.usesDataSource = false
+        box.completes = false
+        box.isEditable = true
+        box.delegate = context.coordinator
+        box.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        box.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return box
+    }
+
+    func updateNSView(_ box: NSComboBox, context: Context) {
+        let c = context.coordinator
+        c.model = model
+        c.updating = true
+        defer { c.updating = false }
+        box.controlSize = nsControlSize(controlSize)
+        box.font = NSFont.systemFont(ofSize: fontSize)
+        box.isEnabled = model.snap.enabled ?? true
+        let items = model.snap.items ?? []
+        if (box.objectValues as? [String]) ?? [] != items {
+            box.removeAllItems()
+            box.addItems(withObjectValues: items)
+        }
+        let selection = model.snap.selection ?? -1
+        if selection >= 0 && selection < box.numberOfItems {
+            if box.indexOfSelectedItem != selection { box.selectItem(at: selection) }
+        } else if box.indexOfSelectedItem >= 0 {
+            box.deselectItem(at: box.indexOfSelectedItem)
+        }
+        // after the selection: selecting an item sets the text, the Win32 text wins
+        let text = model.snap.text ?? ""
+        if box.stringValue != text { box.stringValue = text }
+    }
+
+    @available(macOS 13, *)
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSComboBox, context: Context) -> CGSize? {
         let natural = nsView.intrinsicContentSize
         guard let width = proposal.width, width.isFinite else { return natural }
         return CGSize(width: width, height: natural.height)

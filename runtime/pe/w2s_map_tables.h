@@ -36,7 +36,7 @@ static const UINT w2s_state_listbox_multi[] = { LB_SETSEL, LB_SELITEMRANGE, LB_S
 static const UINT w2s_state_listbox_multicolumn[] = { LB_SETCOLUMNWIDTH };
 static const UINT w2s_state_listbox_nosel[] = { 0 };
 static const UINT w2s_state_combobox_dropdownlist[] = { CB_ADDSTRING, CB_INSERTSTRING, CB_DELETESTRING, CB_RESETCONTENT, CB_SETCURSEL, CB_SELECTSTRING, CB_SHOWDROPDOWN };
-static const UINT w2s_state_combobox_editable[] = { WM_SETTEXT, CB_ADDSTRING, CB_SETCURSEL, CB_SETEDITSEL, CB_LIMITTEXT };
+static const UINT w2s_state_combobox_editable[] = { WM_SETTEXT, CB_ADDSTRING, CB_INSERTSTRING, CB_DELETESTRING, CB_RESETCONTENT, CB_SETCURSEL, CB_SELECTSTRING, CB_SETEDITSEL, CB_LIMITTEXT, WM_COMMAND };
 static const UINT w2s_state_combobox_simple[] = { 0 };
 static const UINT w2s_state_comboboxex[] = { CBEM_INSERTITEMA, CBEM_INSERTITEMW, CBEM_SETITEMA, CBEM_SETITEMW, CBEM_DELETEITEM, CBEM_SETIMAGELIST, CB_SETCURSEL };
 static const UINT w2s_state_listview_report[] = { LVM_INSERTCOLUMNA, LVM_INSERTCOLUMNW, LVM_SETCOLUMNA, LVM_SETCOLUMNW, LVM_DELETECOLUMN, LVM_INSERTITEMA, LVM_INSERTITEMW, LVM_SETITEMA, LVM_SETITEMW, LVM_SETITEMTEXTA, LVM_SETITEMTEXTW, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SETITEMSTATE, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_ENSUREVISIBLE, LVM_SETCOLUMNWIDTH, LVM_SETITEMCOUNT };
@@ -122,7 +122,7 @@ static const struct w2s_map_entry w2s_map_entries[] =
     { "listbox.multicolumn", w2s_state_listbox_multicolumn, 1, NULL, 0 },
     { "listbox.nosel", w2s_state_listbox_nosel, 0, NULL, 0 },
     { "combobox.dropdownlist", w2s_state_combobox_dropdownlist, 7, NULL, 0 },
-    { "combobox.editable", w2s_state_combobox_editable, 5, NULL, 0 },
+    { "combobox.editable", w2s_state_combobox_editable, 10, NULL, 0 },
     { "combobox.simple", w2s_state_combobox_simple, 0, NULL, 0 },
     { "comboboxex", w2s_state_comboboxex, 7, NULL, 0 },
     { "listview.report", w2s_state_listview_report, 19, NULL, 0 },

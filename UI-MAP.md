@@ -588,8 +588,8 @@ A pop-up button, exactly what winecfg's "Windows version" box becomes. The Combo
 <a id="comboboxeditable"></a>`combobox.editable` · AppKit · Liquid Glass: automatic on 26+
 
 - Windows: `ComboBox` CBS_DROPDOWN
-- Windows → view: WM_SETTEXT, CB_ADDSTRING, CB_SETCURSEL, CB_SETEDITSEL, CB_LIMITTEXT
-- View → Windows: edit: WM_COMMAND/CBN_EDITCHANGE; select: CBN_SELCHANGE; open: CBN_DROPDOWN
+- Windows → view: WM_SETTEXT, CB_ADDSTRING, CB_INSERTSTRING, CB_DELETESTRING, CB_RESETCONTENT, CB_SETCURSEL, CB_SELECTSTRING, CB_SETEDITSEL, CB_LIMITTEXT, WM_COMMAND (EN_CHANGE when the app writes to the edit part itself)
+- View → Windows: edit: WM_COMMAND/CBN_EDITUPDATE then CBN_EDITCHANGE; select: CBN_SELCHANGE then CBN_SELENDOK; open: CBN_DROPDOWN; close: CBN_CLOSEUP
 
 **AppKit, macOS 12+**
 
@@ -597,10 +597,10 @@ A pop-up button, exactly what winecfg's "Windows version" box becomes. The Combo
 let c = NSComboBox()
 c.addItems(withObjectValues: items)
 c.stringValue = title
-c.completes = true
+c.completes = false
 ```
 
-SwiftUI has no editable combo box on macOS. NSComboBox is the native control; a TextField plus Menu would look home-made.
+SwiftUI has no editable combo box on macOS. NSComboBox is the native control; a TextField plus Menu would look home-made. Typing is applied to the combo box's own edit part (EM_REPLACESEL of the changed part), so the combo box raises CBN_EDITUPDATE/CBN_EDITCHANGE and matches its list itself. No completion as you type: a Win32 combo box doesn't complete either (SHAutoComplete apps do it themselves).
 
 ### Simple combo box (edit above a list)
 <a id="comboboxsimple"></a>`combobox.simple` · SwiftUI · Liquid Glass: automatic on 26+

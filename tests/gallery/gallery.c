@@ -190,6 +190,11 @@ static void create_controls2(void)
     }
     make( L"Edit", L"Line one\r\nLine two\r\nLine three",
           ES_MULTILINE | ES_WANTRETURN | ES_AUTOVSCROLL | WS_VSCROLL | WS_BORDER | WS_TABSTOP, 724, 180, 392, 110, ID_MLEDIT );
+    make( L"ComboBox", NULL, CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_VSCROLL | WS_TABSTOP, 724, 298, 180, 200, ID_ECOMBO );
+    SendMessageW( ctl[ID_ECOMBO], CB_ADDSTRING, 0, (LPARAM)L"Red" );
+    SendMessageW( ctl[ID_ECOMBO], CB_ADDSTRING, 0, (LPARAM)L"Green" );
+    SendMessageW( ctl[ID_ECOMBO], CB_ADDSTRING, 0, (LPARAM)L"Blue" );
+    SendMessageW( ctl[ID_ECOMBO], CB_SETCURSEL, 1, 0 );
     make( L"Static", NULL, SS_ETCHEDFRAME, 724, 112, 120, 60, ID_FRAME );
     make( L"Static", NULL, SS_GRAYRECT, 852, 112, 40, 60, ID_RECT );
 
@@ -438,6 +443,25 @@ static void selftest2(void)
         check( p && (unsigned int)atoi( p + 12 ) == before + 3, "... and the native view answered them" );
         pFree( q );
     }
+
+    /* editable combo box */
+    SetWindowTextW( ctl[ID_ECOMBO], L"Purple" );
+    SendMessageW( ctl[ID_ECOMBO], CB_ADDSTRING, 0, (LPARAM)L"Cyan" );
+    pump( 150 );
+    check( query_has( ctl[ID_ECOMBO], "\"text\":\"Purple\"" ) && query_has( ctl[ID_ECOMBO], "\"Cyan\"" ),
+           "the combo box's text and items reach the native combo box" );
+    inject( ctl[ID_ECOMBO], "{\"t\":\"text\",\"s\":\"Teal\"}" );
+    pump( 200 );
+    GetWindowTextW( ctl[ID_ECOMBO], text, ARRAYSIZE(text) );
+    check( !wcscmp( text, L"Teal" ) && got_command[ID_ECOMBO][CBN_EDITCHANGE] > 0,
+           "native typing -> the combo box's edit part + CBN_EDITCHANGE" );
+    inject( ctl[ID_ECOMBO], "{\"t\":\"select\",\"v\":2}" );
+    inject( ctl[ID_ECOMBO], "{\"t\":\"open\"}" );
+    pump( 200 );
+    GetWindowTextW( ctl[ID_ECOMBO], text, ARRAYSIZE(text) );
+    check( SendMessageW( ctl[ID_ECOMBO], CB_GETCURSEL, 0, 0 ) == 2 && !wcscmp( text, L"Blue" ) &&
+           got_command[ID_ECOMBO][CBN_SELCHANGE] > 0 && got_command[ID_ECOMBO][CBN_DROPDOWN] > 0,
+           "native choice -> CB_GETCURSEL, the edit text, CBN_SELCHANGE; opening -> CBN_DROPDOWN" );
 }
 
 static int selftest(void)
@@ -445,7 +469,8 @@ static int selftest(void)
     static const int ids[] = { ID_PUSH, ID_DEFAULT, ID_PUSHLIKE, ID_GROUP, ID_CHECK, ID_RADIO1, ID_RADIO2, ID_LABEL,
                                ID_SEP, ID_ICON, ID_EDIT, ID_PASSWORD, ID_NUMBER, ID_READONLY, ID_COMBO, ID_LIST,
                                ID_MULTI, ID_REPORT, ID_LVLIST, ID_PROGRESS, ID_TRACK, ID_TAB,
-                               ID_3STATE, ID_SPLIT, ID_CMDLINK, ID_FRAME, ID_RECT, ID_STATUS, ID_MLEDIT };
+                               ID_3STATE, ID_SPLIT, ID_CMDLINK, ID_FRAME, ID_RECT, ID_STATUS, ID_MLEDIT,
+                               ID_ECOMBO };
     HMODULE w2s = GetModuleHandleW( L"win32swiftui.dll" );
     WCHAR text[256], file[MAX_PATH] = L"";
     OPENFILENAMEW ofn = { sizeof(ofn) };

@@ -449,7 +449,9 @@ static LRESULT CALLBACK subclass_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
 
     ret = CallWindowProcW( ctl->orig, hwnd, msg, wparam, lparam );
 
-    if (msg == WM_SETFOCUS || msg == WM_KILLFOCUS)
+    /* focus going to one of the control's own children (a combo box's edit
+     * part) stays within the native view */
+    if (msg == WM_SETFOCUS || (msg == WM_KILLFOCUS && !IsChild( hwnd, (HWND)wparam )))
     {
         struct w2s_control_focus_params params = { ctl->handle, msg == WM_SETFOCUS };
         w2s_call( unix_w2s_control_focus, &params );

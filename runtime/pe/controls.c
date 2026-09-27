@@ -272,30 +272,35 @@ static void edit_snapshot( struct w2s_control *ctl, struct json *j )
 
 /* replace only the part that changed, the way typing would, so the edit's
  * own filtering and EN_UPDATE/EN_CHANGE happen as usual */
-static void edit_apply( struct w2s_control *ctl, const struct w2s_event *ev )
+static void replace_text( HWND edit, const WCHAR *text )
 {
     int old_len, new_len, prefix = 0, suffix = 0;
     WCHAR *old, *inserted;
 
-    if (strcmp( ev->type, "text" ) || !ev->string) return;
-    old_len = GetWindowTextLengthW( ctl->hwnd );
+    old_len = GetWindowTextLengthW( edit );
     old = HeapAlloc( GetProcessHeap(), 0, (old_len + 1) * sizeof(WCHAR) );
-    GetWindowTextW( ctl->hwnd, old, old_len + 1 );
-    new_len = wcslen( ev->string );
+    old[0] = 0;
+    old_len = GetWindowTextW( edit, old, old_len + 1 );
+    new_len = wcslen( text );
 
-    while (prefix < old_len && prefix < new_len && old[prefix] == ev->string[prefix]) prefix++;
+    while (prefix < old_len && prefix < new_len && old[prefix] == text[prefix]) prefix++;
     while (suffix < old_len - prefix && suffix < new_len - prefix &&
-           old[old_len - 1 - suffix] == ev->string[new_len - 1 - suffix]) suffix++;
+           old[old_len - 1 - suffix] == text[new_len - 1 - suffix]) suffix++;
 
     inserted = HeapAlloc( GetProcessHeap(), 0, (new_len - prefix - suffix + 1) * sizeof(WCHAR) );
-    memcpy( inserted, ev->string + prefix, (new_len - prefix - suffix) * sizeof(WCHAR) );
+    memcpy( inserted, text + prefix, (new_len - prefix - suffix) * sizeof(WCHAR) );
     inserted[new_len - prefix - suffix] = 0;
 
-    SendMessageW( ctl->hwnd, EM_SETSEL, prefix, old_len - suffix );
-    SendMessageW( ctl->hwnd, EM_REPLACESEL, TRUE, (LPARAM)inserted );
+    SendMessageW( edit, EM_SETSEL, prefix, old_len - suffix );
+    SendMessageW( edit, EM_REPLACESEL, TRUE, (LPARAM)inserted );
 
     HeapFree( GetProcessHeap(), 0, inserted );
     HeapFree( GetProcessHeap(), 0, old );
+}
+
+static void edit_apply( struct w2s_control *ctl, const struct w2s_event *ev )
+{
+    if (!strcmp( ev->type, "text" ) && ev->string) replace_text( ctl->hwnd, ev->string );
 }
 
 static const struct w2s_kind kind_edit_single = { "edit.single", edit_snapshot, edit_apply };
@@ -676,6 +681,37 @@ static void combo_apply( struct w2s_control *ctl, const struct w2s_event *ev )
 }
 
 static const struct w2s_kind kind_combobox_dropdownlist = { "combobox.dropdownlist", combo_snapshot, combo_apply };
+
+/* CBS_DROPDOWN: typing goes into the combo box's own edit part, so the combo
+ * box raises CBN_EDITUPDATE/CBN_EDITCHANGE and matches its list as usual */
+static HWND combo_edit( HWND combo )
+{
+    COMBOBOXINFO info = { sizeof(info) };
+    return GetComboBoxInfo( combo, &info ) ? info.hwndItem : NULL;
+}
+
+static void editable_combo_snapshot( struct w2s_control *ctl, struct json *j )
+{
+    HWND edit = combo_edit( ctl->hwnd );
+
+    combo_snapshot( ctl, j );
+    json_int( j, "limit", edit ? (UINT)SendMessageW( edit, EM_GETLIMITTEXT, 0, 0 ) : 0 );
+}
+
+static void editable_combo_apply( struct w2s_control *ctl, const struct w2s_event *ev )
+{
+    HWND edit;
+
+    if (!strcmp( ev->type, "text" ) && ev->string)
+    {
+        if ((edit = combo_edit( ctl->hwnd ))) replace_text( edit, ev->string );
+    }
+    else if (!strcmp( ev->type, "open" )) w2s_notify_parent_command( ctl->hwnd, CBN_DROPDOWN );
+    else if (!strcmp( ev->type, "close" )) w2s_notify_parent_command( ctl->hwnd, CBN_CLOSEUP );
+    else combo_apply( ctl, ev );
+}
+
+static const struct w2s_kind kind_combobox_editable = { "combobox.editable", editable_combo_snapshot, editable_combo_apply };
 
 /* ---------- ListBox ---------- */
 
@@ -1080,6 +1116,7 @@ const struct w2s_kind *w2s_select_kind( HWND hwnd )
     {
         if (style & (CBS_OWNERDRAWFIXED | CBS_OWNERDRAWVARIABLE)) return NULL;
         if ((style & 3) == CBS_DROPDOWNLIST) return &kind_combobox_dropdownlist;
+        if ((style & 3) == CBS_DROPDOWN) return &kind_combobox_editable;
         return NULL;
     }
     if (is_class( name, L"ListBox" ))
