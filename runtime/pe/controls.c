@@ -1496,7 +1496,32 @@ static BOOL tab_answer( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM
         data = tab_layout( ctl, TRUE );
         if (data->window) w2s_push( ctl, FALSE );
     }
-    if (!data->window) return FALSE;       /* a strip: wine's tab row metrics fit it */
+    if (!data->window)
+    {
+        /* a real NSTabView: the page goes in its box, below (or above, TCS_BOTTOM)
+         * the tabs straddling its edge. Its insets as AppKit lays them out; being
+         * a few points off only moves the page under the translucent box. */
+        static const RECT insets = { 10, 33, 10, 13 };
+        BOOL bottom = (GetWindowLongW( ctl->hwnd, GWL_STYLE ) & TCS_BOTTOM) != 0;
+        int top = bottom ? insets.bottom : insets.top, low = bottom ? insets.top : insets.bottom;
+
+        if (wparam)
+        {
+            rc->left -= insets.left;
+            rc->top -= top;
+            rc->right += insets.right;
+            rc->bottom += low;
+        }
+        else
+        {
+            rc->left += insets.left;
+            rc->top += top;
+            rc->right -= insets.right;
+            rc->bottom -= low;
+        }
+        *ret = 0;
+        return TRUE;
+    }
     /* a window sidebar: the page area is the tab control's whole rectangle */
     *ret = 0;
     return TRUE;
@@ -1526,6 +1551,7 @@ static void tab_snapshot( struct w2s_control *ctl, struct json *j )
     struct tab_data *data = tab_layout( ctl, FALSE );
 
     json_str_a( j, "mode", data->window ? "window" : "strip" );
+    json_bool( j, "bottom", (GetWindowLongW( ctl->hwnd, GWL_STYLE ) & TCS_BOTTOM) != 0 );
     if (data->window) json_int( j, "sidebarPx", data->width );
     tab_items( ctl, j );
 }

@@ -47,6 +47,7 @@ struct Snapshot: Codable, Equatable {
     var imageBGRA: String?
     var imageSymbol: String?    // a stock icon: the macOS image's spec (Icons.swift) instead of imageBGRA
     var titleAbove: Bool?       // group box: room for its title above the box
+    var bottom: Bool?           // tab control: TCS_BOTTOM
     var fill: String?           // static.frame: "none" (an outline) or the rectangle's colour
     var cue: String?
     var readonly: Bool?
@@ -199,7 +200,8 @@ final class PassThroughHostingView<Content: View>: NSHostingView<Content> {
                 case "wizard", "sidebar", "window":
                     return false        // the steps, header and sidebar can't be clicked here
                 default:
-                    return point.y < 34 // the tab strip, over the top of the page (flipped)
+                    // the tabs, straddling the box's top (or bottom) edge (flipped)
+                    return (snap.bottom ?? false) ? point.y > size.height - 34 : point.y < 34
                 }
             }
         default:

@@ -1716,6 +1716,14 @@ static int selftest(void)
         pump( 600 );
         tab = (HWND)SendMessageW( sheet, PSM_GETTABCONTROL, 0, 0 );
         check( pIsTranslated( tab ) && query_has( tab, "\"mode\":\"strip\"" ), "a 3-page property sheet keeps the tab strip" );
+        {
+            HWND page = (HWND)SendMessageW( sheet, PSM_GETCURRENTPAGEHWND, 0, 0 );
+            RECT tab_rc, page_rc;
+            GetWindowRect( tab, &tab_rc );
+            GetWindowRect( page, &page_rc );
+            check( page_rc.left - tab_rc.left == 10 && page_rc.top - tab_rc.top == 33 && tab_rc.bottom - page_rc.bottom == 13,
+                   "wine puts the page in the NSTabView's box (TCM_ADJUSTRECT)" );
+        }
         DestroyWindow( sheet );
         pump( 200 );
 

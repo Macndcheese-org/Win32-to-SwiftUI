@@ -1609,36 +1609,57 @@ struct TabStrip: View {
     }
 
     var strip: some View {
-        let items = model.snap.items ?? []
-        let selection = Binding(
-            get: { model.snap.selection ?? 0 },
-            set: { i in model.emit(["t": "select", "v": i]) })
-        let picker = Group {
-            if #available(macOS 27, *) {
-                Picker("", selection: selection) {
-                    ForEach(items.indices, id: \.self) { Text(stripMnemonic(items[$0])).tag($0) }
-                }
-                .pickerStyle(.tabs)
-            } else {
-                Picker("", selection: selection) {
-                    ForEach(items.indices, id: \.self) { Text(stripMnemonic(items[$0])).tag($0) }
-                }
-                .pickerStyle(.segmented)
-            }
+        TabBox(model: model)
+    }
+}
+
+/// map: tab. A real NSTabView (SwiftUI's TabView on macOS): the tabs straddle
+/// the top (or, TCS_BOTTOM, bottom) edge of its box, and the page, sibling
+/// windows the app shows and hides, is drawn by wine inside the box, whose
+/// fill is translucent. Its items are empty: the tab control answers
+/// TCM_ADJUSTRECT with this box's insets, so wine puts the page in it. Too many
+/// tabs for the width are clipped, as NSTabView does; a property sheet with
+/// that many pages gets the window's sidebar instead.
+struct TabBox: NSViewRepresentable {
+    @ObservedObject var model: ControlModel
+
+    final class Coordinator: NSObject, NSTabViewDelegate {
+        var model: ControlModel
+        var updating = false
+        init(model: ControlModel) { self.model = model }
+
+        func tabView(_ tabView: NSTabView, didSelect item: NSTabViewItem?) {
+            guard !updating, let item = item else { return }
+            let index = tabView.indexOfTabViewItem(item)
+            guard index != model.snap.selection else { return }
+            model.snap.selection = index
+            model.emit(["t": "select", "v": index])
         }
-        .labelsHidden()
-        .fixedSize()
-        return VStack(spacing: 0) {
-            // more tabs than fit (a multi-row Win32 strip) scroll sideways
-            if #available(macOS 13, *) {
-                ViewThatFits(in: .horizontal) {
-                    picker.frame(maxWidth: .infinity)
-                    ScrollView(.horizontal, showsIndicators: false) { picker }
-                }
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) { picker }
-            }
-            Spacer(minLength: 0)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(model: model) }
+
+    func makeNSView(context: Context) -> NSTabView {
+        let view = NSTabView()
+        view.delegate = context.coordinator
+        return view
+    }
+
+    func updateNSView(_ view: NSTabView, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.model = model
+        coordinator.updating = true
+        defer { coordinator.updating = false }
+        view.tabViewType = (model.snap.bottom ?? false) ? .bottomTabsBezelBorder : .topTabsBezelBorder
+        let labels = (model.snap.items ?? []).map { stripMnemonic($0) }
+        while view.numberOfTabViewItems > labels.count { view.removeTabViewItem(view.tabViewItem(at: view.numberOfTabViewItems - 1)) }
+        while view.numberOfTabViewItems < labels.count { view.addTabViewItem(NSTabViewItem()) }
+        for (i, label) in labels.enumerated() where view.tabViewItem(at: i).label != label {
+            view.tabViewItem(at: i).label = label
+        }
+        if let selection = model.snap.selection, selection >= 0, selection < view.numberOfTabViewItems,
+           view.indexOfTabViewItem(view.selectedTabViewItem ?? NSTabViewItem()) != selection {
+            view.selectTabViewItem(at: selection)
         }
     }
 }
