@@ -191,7 +191,7 @@ void w2s_push( struct w2s_control *ctl, BOOL force )
             if (want) DeleteObject( want );
         }
         params.handle = ctl->handle;
-        params.json = snap;
+        params.json = W2S_PTR( snap );
         params.json_len = strlen( snap );
         w2s_call( unix_w2s_control_update, &params );
         if (ctl->last) HeapFree( GetProcessHeap(), 0, ctl->last );
@@ -215,7 +215,7 @@ const char *w2s_native_state( struct w2s_control *ctl, BOOL *changed )
     if (!ctl->handle) return NULL;
     params.handle = ctl->handle;
     params.version = ctl->native_version;
-    params.buffer = ctl->native;
+    params.buffer = W2S_PTR( ctl->native );
     params.size = ctl->native ? ctl->native_size : 0;
     params.len = 0;
     w2s_call( unix_w2s_control_state, &params );
@@ -227,7 +227,7 @@ const char *w2s_native_state( struct w2s_control *ctl, BOOL *changed )
         ctl->native = buf;
         ctl->native_size = params.len + 256;
         params.version = ctl->native_version;
-        params.buffer = ctl->native;
+        params.buffer = W2S_PTR( ctl->native );
         params.size = ctl->native_size;
         params.len = 0;
         w2s_call( unix_w2s_control_state, &params );
@@ -264,14 +264,14 @@ static void apply_events( struct w2s_control *ctl )
 
     if (!ctl->handle) return;
     params.handle = ctl->handle;
-    params.buffer = small;
+    params.buffer = W2S_PTR( small );
     params.size = sizeof(small);
     params.len = 0;
     w2s_call( unix_w2s_pop_events, &params );
     if (params.len > params.size)
     {
         buf = HeapAlloc( GetProcessHeap(), 0, params.len );
-        params.buffer = buf;
+        params.buffer = W2S_PTR( buf );
         params.size = params.len;
         w2s_call( unix_w2s_pop_events, &params );
     }
@@ -372,8 +372,8 @@ static BOOL activate( struct w2s_control *ctl, const struct w2s_kind *kind )
     params.window = ctl->host.window;
     params.post_wake = ctl->host.post_wake;
     params.hwnd = (UINT_PTR)ctl->hwnd;
-    params.entry = kind->entry;
-    params.json = snap;
+    params.entry = W2S_PTR( kind->entry );
+    params.json = W2S_PTR( snap );
     params.json_len = strlen( snap );
     params.handle = 0;
     w2s_call( unix_w2s_control_create, &params );
@@ -563,10 +563,11 @@ static char *debug_call( HWND hwnd, const char *json )
     params.handle = 0;
     if (hwnd && ctl && ctl->handle) params.handle = ctl->handle;
     else if (hwnd && !(params.handle = w2s_frame_handle( hwnd ))) return NULL;
-    params.json = json;
+    params.json = W2S_PTR( json );
     params.json_len = strlen( json );
     params.size = 65536;
-    params.buffer = buf = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, params.size );
+    buf = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, params.size );
+    params.buffer = W2S_PTR( buf );
     params.len = 0;
     w2s_call( unix_w2s_debug, &params );
     return buf;

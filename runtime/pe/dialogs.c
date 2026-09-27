@@ -47,7 +47,7 @@ static char *poll_request( UINT64 id, BOOL *done, UINT32 *len )
     char small[4096], *buf;
 
     poll.id = id;
-    poll.buffer = small;
+    poll.buffer = W2S_PTR( small );
     poll.size = sizeof(small);
     poll.len = 0;
     poll.done = 0;
@@ -55,7 +55,7 @@ static char *poll_request( UINT64 id, BOOL *done, UINT32 *len )
     while (poll.len > poll.size)
     {
         char *big = HeapAlloc( GetProcessHeap(), 0, poll.len );
-        poll.buffer = big;
+        poll.buffer = W2S_PTR( big );
         poll.size = poll.len;
         poll.len = 0;
         poll.done = 0;
@@ -78,7 +78,7 @@ static char *poll_request( UINT64 id, BOOL *done, UINT32 *len )
 
 void w2s_request_update( UINT64 id, const char *json )
 {
-    struct w2s_request_update_params params = { id, json, strlen( json ) };
+    struct w2s_request_update_params params = { id, W2S_PTR( json ), strlen( json ) };
     w2s_call( unix_w2s_request_update, &params );
 }
 
@@ -102,9 +102,9 @@ BOOL w2s_run_request_ex( const char *kind, HWND owner, const char *json, struct 
     /* the owner's NSWindow, for a sheet */
     if (owner && IsWindowVisible( owner )) have_host = w2s_get_host( owner, &owner_host );
 
-    start.kind = kind;
+    start.kind = W2S_PTR( kind );
     start.window = have_host ? owner_host.window : 0;
-    start.json = json;
+    start.json = W2S_PTR( json );
     start.json_len = strlen( json );
     start.id = 0;
     if (w2s_call( unix_w2s_request_start, &start ) || !start.id)

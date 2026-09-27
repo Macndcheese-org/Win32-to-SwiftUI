@@ -117,7 +117,7 @@ static void send_menu( struct w2s_frame *frame, BOOL force )
         return;
     }
     params.handle = frame->handle;
-    params.json = snap;
+    params.json = W2S_PTR( snap );
     params.json_len = strlen( snap );
     w2s_call( unix_w2s_control_update, &params );
     if (frame->last) HeapFree( GetProcessHeap(), 0, frame->last );
@@ -178,8 +178,8 @@ static BOOL create_menubar( struct w2s_frame *frame )
     params.window = frame->host.window;
     params.post_wake = frame->host.post_wake;
     params.hwnd = (UINT_PTR)frame->hwnd;
-    params.entry = "menubar";
-    params.json = snap;
+    params.entry = W2S_PTR( "menubar" );
+    params.json = W2S_PTR( snap );
     params.json_len = strlen( snap );
     params.handle = 0;
     w2s_call( unix_w2s_control_create, &params );
@@ -226,14 +226,14 @@ static void apply_menu_events( struct w2s_frame *frame )
     int i, count;
 
     params.handle = frame->handle;
-    params.buffer = small;
+    params.buffer = W2S_PTR( small );
     params.size = sizeof(small);
     params.len = 0;
     w2s_call( unix_w2s_pop_events, &params );
     if (params.len > params.size)
     {
         buf = HeapAlloc( GetProcessHeap(), 0, params.len );
-        params.buffer = buf;
+        params.buffer = W2S_PTR( buf );
         params.size = params.len;
         w2s_call( unix_w2s_pop_events, &params );
     }

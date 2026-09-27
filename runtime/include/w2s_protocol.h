@@ -10,13 +10,25 @@
  * the last event the native view sent is stale (the user did more since) and
  * the native view ignores it: the PE sends a fresh one once it has applied the
  * events.
+ *
+ * Every parameter block has the same layout in a 32-bit PE (an i386 app under
+ * WoW64) as on the 64-bit unix side: pointers travel as 64-bit integers
+ * (W2S_PTR, W2S_UNPTR), and every 64-bit field sits at a multiple of 8, so
+ * no alignment rule can move it. The offsets are checked at the end of this
+ * file, on both sides, and the unix side serves 32-bit callers with the same
+ * functions (__wine_unix_call_wow64_funcs).
  */
 #ifndef W2S_PROTOCOL_H
 #define W2S_PROTOCOL_H
 
+#include <stddef.h>
 #include <stdint.h>
 
-#define W2S_PROTOCOL_VERSION 2
+#define W2S_PROTOCOL_VERSION 3
+
+/* a pointer in a parameter block, and back */
+#define W2S_PTR(p)      ((uint64_t)(uintptr_t)(p))
+#define W2S_UNPTR(v)    ((void *)(uintptr_t)(v))
 
 /* winemac escapes */
 #define W2S_ESCAPE_GET_HOST     6792
@@ -68,17 +80,19 @@ struct w2s_control_create_params
     uint64_t window;
     uint64_t post_wake;
     uint64_t hwnd;
-    const char *entry;
-    const char *json;
+    uint64_t entry;             /* const char *: the map entry */
+    uint64_t json;              /* const char * */
     uint32_t json_len;
+    uint32_t pad;
     uint64_t handle;            /* out */
 };
 
 struct w2s_control_update_params
 {
     uint64_t handle;
-    const char *json;
+    uint64_t json;              /* const char * */
     uint32_t json_len;
+    uint32_t pad;
 };
 
 struct w2s_control_destroy_params
@@ -90,12 +104,13 @@ struct w2s_control_focus_params
 {
     uint64_t handle;
     uint32_t focused;
+    uint32_t pad;
 };
 
 struct w2s_pop_events_params
 {
     uint64_t handle;
-    char *buffer;
+    uint64_t buffer;            /* char * */
     uint32_t size;
     uint32_t len;               /* out: needed size, including the terminator */
 };
@@ -108,7 +123,7 @@ struct w2s_control_state_params
 {
     uint64_t handle;
     uint64_t version;           /* in: the version the caller has; out: the current one */
-    char *buffer;
+    uint64_t buffer;            /* char * */
     uint32_t size;
     uint32_t len;               /* out: needed size, including the terminator */
 };
@@ -116,10 +131,11 @@ struct w2s_control_state_params
 /* alerts and panels: started, then polled from a Win32 modal loop */
 struct w2s_request_start_params
 {
-    const char *kind;           /* "alert", "open", "save" */
+    uint64_t kind;              /* const char *: "alert", "open", "save", "color", ... */
     uint64_t window;            /* owner NSWindow for a sheet, or 0 */
-    const char *json;
+    uint64_t json;              /* const char * */
     uint32_t json_len;
+    uint32_t pad;
     uint64_t id;                /* out */
 };
 
@@ -128,29 +144,51 @@ struct w2s_request_start_params
 struct w2s_request_poll_params
 {
     uint64_t id;
-    char *buffer;
+    uint64_t buffer;            /* char * */
     uint32_t size;
     uint32_t len;               /* out */
     uint32_t done;              /* out */
+    uint32_t pad;
 };
 
 /* changes an open alert or panel (a task dialog's progress bar, its buttons) */
 struct w2s_request_update_params
 {
     uint64_t id;
-    const char *json;
+    uint64_t json;              /* const char * */
     uint32_t json_len;
+    uint32_t pad;
 };
 
 /* test hooks for tests/gallery: {"op":"query"} or {"op":"inject","event":{...}} */
 struct w2s_debug_params
 {
     uint64_t handle;
-    const char *json;
+    uint64_t json;              /* const char * */
+    uint64_t buffer;            /* char * */
     uint32_t json_len;
-    char *buffer;
     uint32_t size;
     uint32_t len;               /* out */
+    uint32_t pad;
 };
+
+/* the same offsets for a 32-bit PE and the 64-bit unix side */
+#define W2S_CHECK_OFFSET(type, field, offset) \
+    _Static_assert(offsetof(struct type, field) == (offset), #type "." #field " moved")
+W2S_CHECK_OFFSET(w2s_host, post_wake, 24);
+W2S_CHECK_OFFSET(w2s_control_create_params, entry, 32);
+W2S_CHECK_OFFSET(w2s_control_create_params, json_len, 48);
+W2S_CHECK_OFFSET(w2s_control_create_params, handle, 56);
+W2S_CHECK_OFFSET(w2s_control_update_params, json_len, 16);
+W2S_CHECK_OFFSET(w2s_control_focus_params, focused, 8);
+W2S_CHECK_OFFSET(w2s_pop_events_params, size, 16);
+W2S_CHECK_OFFSET(w2s_control_state_params, buffer, 16);
+W2S_CHECK_OFFSET(w2s_control_state_params, len, 28);
+W2S_CHECK_OFFSET(w2s_request_start_params, json, 16);
+W2S_CHECK_OFFSET(w2s_request_start_params, id, 32);
+W2S_CHECK_OFFSET(w2s_request_poll_params, done, 24);
+W2S_CHECK_OFFSET(w2s_request_update_params, json_len, 16);
+W2S_CHECK_OFFSET(w2s_debug_params, buffer, 16);
+W2S_CHECK_OFFSET(w2s_debug_params, len, 32);
 
 #endif /* W2S_PROTOCOL_H */
