@@ -37,7 +37,7 @@ def inventories():
 
 def load_map():
     """Merge map/ui-map/*.yaml, remembering which file each item came from."""
-    merged = {"entries": [], "flags": {}, "parts": {}, "classes": {}, "apis": {}, "fonts": {}}
+    merged = {"entries": [], "flags": {}, "parts": {}, "classes": {}, "apis": {}, "fonts": {}, "icons": {}}
     origin = {}
     for path in sorted(glob.glob(os.path.join(MAP_DIR, "*.yaml"))):
         doc = load_yaml(path) or {}
@@ -45,13 +45,30 @@ def load_map():
         for e in doc.get("entries", []) or []:
             e["_file"] = name
             merged["entries"].append(e)
-        for sect in ("flags", "parts", "classes", "apis", "fonts"):
+        for sect in ("flags", "parts", "classes", "apis", "fonts", "icons"):
             for k, v in (doc.get(sect) or {}).items():
                 if k in merged[sect]:
                     raise SystemExit(f"{name}: {sect}.{k} already set in {origin[(sect, k)]}")
                 merged[sect][k] = v
                 origin[(sect, k)] = name
     return merged, origin
+
+
+# what a stock icon (map section `icons`) may become
+ICON_KINDS = ("sf", "uttype", "file", "nsimage", "app")
+ICON_COLORS = ("white", "black", "systemBlue", "systemRed", "systemYellow", "systemOrange", "systemGreen",
+               "systemGray", "labelColor", "secondaryLabelColor", "controlAccentColor")
+
+
+def icon_spec(d):
+    """An icon's disposition as the runtime's spec string: kind:value[;option]."""
+    kind = next(k for k in ICON_KINDS if k in d)
+    spec = f"{kind}:{d[kind]}"
+    if d.get("multicolor"):
+        spec += ";multicolor"
+    elif d.get("palette"):
+        spec += ";palette=" + ",".join(d["palette"])
+    return spec
 
 
 def aslist(x):

@@ -225,8 +225,10 @@ entries:
     glass: none
     state_in: [STM_SETICON, STM_SETIMAGE]
     notes: >-
-      HICON/HBITMAP are converted to NSImage by winemac's existing image code (image.c).
-      Enhanced metafiles are rendered to a bitmap by gdi32 first.
+      The runtime draws the HICON/HBITMAP into 32bpp BGRA and the native view makes an NSImage
+      of it. wine's stock icons (IDI_INFORMATION and the rest, 75-icons.yaml) show as the macOS
+      image with the same meaning instead. Enhanced metafiles are rendered to a bitmap by gdi32
+      first.
 
   - id: static.separator
     kind: control

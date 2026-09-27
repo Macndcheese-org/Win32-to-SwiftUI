@@ -198,7 +198,7 @@ static void json_base64( struct json *j, const char *key, const BYTE *data, size
 
 /* An icon or bitmap as 32bpp premultiplied BGRA, top-down (what CGImage gets).
  * An icon without an alpha channel takes its opacity from its mask. */
-static BYTE *image_bgra( HICON icon, HBITMAP bitmap, int w, int h )
+BYTE *w2s_image_bgra( HICON icon, HBITMAP bitmap, int w, int h )
 {
     BITMAPINFO bmi;
     BYTE *bits, *out;
@@ -261,6 +261,7 @@ static BYTE *image_bgra( HICON icon, HBITMAP bitmap, int w, int h )
 static void static_image_snapshot( struct w2s_control *ctl, struct json *j )
 {
     DWORD style = GetWindowLongW( ctl->hwnd, GWL_STYLE );
+    const char *spec;
     HANDLE image;
     int w = 0, h = 0;
     BYTE *bits;
@@ -288,12 +289,16 @@ static void static_image_snapshot( struct w2s_control *ctl, struct json *j )
         h = abs( bm.bmHeight );
     }
     if (w <= 0 || h <= 0 || w > 512 || h > 512) return;
-    if ((style & SS_TYPEMASK) == SS_ICON) bits = image_bgra( image, NULL, w, h );
-    else bits = image_bgra( NULL, image, w, h );
+    if ((style & SS_TYPEMASK) == SS_ICON) bits = w2s_image_bgra( image, NULL, w, h );
+    else bits = w2s_image_bgra( NULL, image, w, h );
     if (!bits) return;
     json_int( j, "imageWidth", w );
     json_int( j, "imageHeight", h );
-    json_base64( j, "imageBGRA", bits, (size_t)w * h * 4 );
+    /* wine's stock icons show the macOS image with the same meaning (icons.c) */
+    if ((style & SS_TYPEMASK) == SS_ICON && (spec = w2s_stock_icon( image, bits, w, h, NULL )))
+        json_str_a( j, "imageSymbol", spec );
+    else
+        json_base64( j, "imageBGRA", bits, (size_t)w * h * 4 );
     HeapFree( GetProcessHeap(), 0, bits );
 }
 
@@ -874,7 +879,8 @@ static void listview_icons( struct w2s_control *ctl, struct json *j, BOOL small,
 {
     struct lv_data *data = ctl->data;
     HIMAGELIST himl = (HIMAGELIST)SendMessageW( ctl->hwnd, LVM_GETIMAGELIST, small ? LVSIL_SMALL : LVSIL_NORMAL, 0 );
-    int cx = 0, cy = 0, i, fresh = 0;
+    int cx = 0, cy = 0, i, fresh = 0, spec_index[64];
+    const char *specs[64];
     char key[16];
 
     if (!data) data = ctl->data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data) );
@@ -919,12 +925,19 @@ static void listview_icons( struct w2s_control *ctl, struct json *j, BOOL small,
             continue;
         data->sent[item.iImage / 8] |= 1 << (item.iImage % 8);
         if (!(icon = ImageList_GetIcon( himl, item.iImage, ILD_NORMAL ))) continue;
-        if ((bits = image_bgra( icon, NULL, cx, cy )))
+        if ((bits = w2s_image_bgra( icon, NULL, cx, cy )))
         {
-            snprintf( key, sizeof(key), "%d", item.iImage );
-            json_base64( j, key, bits, (size_t)cx * cy * 4 );
+            /* wine's stock icons go as the macOS image with the same meaning (icons.c) */
+            if ((specs[fresh] = w2s_stock_icon( NULL, bits, cx, cy, himl )))
+                spec_index[fresh] = item.iImage;
+            else
+            {
+                snprintf( key, sizeof(key), "%d", item.iImage );
+                json_base64( j, key, bits, (size_t)cx * cy * 4 );
+            }
             HeapFree( GetProcessHeap(), 0, bits );
         }
+        else specs[fresh] = NULL;
         DestroyIcon( icon );
         if (++fresh == 64)
         {
@@ -932,6 +945,14 @@ static void listview_icons( struct w2s_control *ctl, struct json *j, BOOL small,
             PostMessageW( ctl->hwnd, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
             break;
         }
+    }
+    json_obj_end( j );
+    json_key_obj_begin( j, "symbols" );
+    for (i = 0; i < fresh; i++)
+    {
+        if (!specs[i]) continue;
+        snprintf( key, sizeof(key), "%d", spec_index[i] );
+        json_str_a( j, key, specs[i] );
     }
     json_obj_end( j );
 }

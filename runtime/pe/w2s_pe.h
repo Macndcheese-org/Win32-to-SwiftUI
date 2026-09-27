@@ -83,6 +83,12 @@ WCHAR *strdupW( const WCHAR *s );
 char *utf8_from_wide( const WCHAR *s, int len );                   /* HeapAlloc'd */
 WCHAR *wide_from_utf8( const char *s, int len );                   /* HeapAlloc'd */
 
+/* controls.c: an icon or bitmap as 32bpp premultiplied BGRA, top-down; HeapAlloc'd */
+BYTE *w2s_image_bgra( HICON icon, HBITMAP bitmap, int w, int h );
+
+/* icons.c: the macOS image (a spec for Icons.swift) for a stock icon, or NULL */
+const char *w2s_stock_icon( HICON icon, const BYTE *bits, int cx, int cy, HIMAGELIST himl );
+
 /* main.c */
 /* w2s_wake_message's wparam; 0: the native view has events */
 #define W2S_WAKE_REFRESH 1      /* send a fresh snapshot (from another thread) */

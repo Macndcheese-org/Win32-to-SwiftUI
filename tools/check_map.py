@@ -4,16 +4,32 @@
 Checks that every window class, style/flag bit, dialog entry point, vsstyle.h
 part and non-client font is either an entry or has a disposition; that every
 entry has a macOS 12 path; that nothing cites a SwiftUI/AppKit symbol at a
-tier below the macOS version that introduced it; and that every name the map
-mentions exists in the inventory.
+tier below the macOS version that introduced it; that every name the map
+mentions exists in the inventory; and that every stock icon has one macOS
+image, its SF Symbol available at macOS 12.
 """
 import re
 import sys
 from collections import Counter
 
-from maplib import DISPOSITIONS, IDENT, RUNTIMES, aslist, inventories, load_map, snippets, vkey
+from maplib import DISPOSITIONS, ICON_COLORS, ICON_KINDS, IDENT, RUNTIMES, aslist, inventories, load_map, snippets, vkey
 
 errors = []
+
+SF_AVAILABILITY = "/System/Library/CoreServices/CoreGlyphs.bundle/Contents/Resources/name_availability.plist"
+
+
+def sf_symbols():
+    """SF Symbol name -> the macOS version that introduced it, from the system's own
+    list (None where there is none, e.g. on Linux)."""
+    import plistlib
+    try:
+        with open(SF_AVAILABILITY, "rb") as f:
+            d = plistlib.load(f)
+    except OSError:
+        return None
+    releases = {k: v["macOS"] for k, v in d["year_to_release"].items()}
+    return {n: releases.get(y, "99") for n, y in d["symbols"].items()}
 
 
 def err(msg):
@@ -161,6 +177,23 @@ def main():
             if sym in known and vkey(known[sym]) > vkey(since):
                 err(f"{where}: {sym} needs macOS {known[sym]} but is placed at {since}")
 
+    # ---- stock icons: one macOS image each, SF Symbols that exist at the macOS 12 floor
+    symbols = sf_symbols()
+    for k, d in m["icons"].items():
+        if not re.fullmatch(r"(user32|shell32)/[A-Z0-9_]+", k):
+            err(f"icons.{k}: key is <user32|shell32>/<resource name>")
+        kinds = [x for x in ICON_KINDS if x in d]
+        if len(kinds) != 1:
+            err(f"icons.{k}: needs exactly one of {', '.join(ICON_KINDS)}")
+        for c in aslist(d.get("palette")):
+            if c not in ICON_COLORS:
+                err(f"icons.{k}: palette colour {c} isn't one of {', '.join(ICON_COLORS)}")
+        if "sf" in d and symbols is not None:
+            if d["sf"] not in symbols:
+                err(f"icons.{k}: no SF Symbol named {d['sf']}")
+            elif vkey(symbols[d["sf"]]) > vkey(12):
+                err(f"icons.{k}: SF Symbol {d['sf']} needs macOS {symbols[d['sf']]}")
+
     # ---- report
     kinds = Counter(e["kind"] for e in m["entries"])
     runtimes = Counter(e["runtime"] for e in m["entries"])
@@ -172,6 +205,8 @@ def main():
     print(f"flags: {len(flag_owner)} = {len(claimed['flag'])} as entry variants + {len(m['flags'])} dispositions + {len(auto)} masks/aliases/composites")
     print(f"dispositions by kind: {dict(disp)}")
     print(f"classes {len(classes)}, entry points {len(apis)}, visual parts {len(parts)}, fonts {len(fonts)}")
+    print(f"stock icons: {len(m['icons'])} ({dict(Counter(k for d in m['icons'].values() for k in ICON_KINDS if k in d))})"
+          + ("" if symbols is not None else "; SF Symbol names not checked (no CoreGlyphs here)"))
     if errors:
         for e in errors[:400]:
             print("ERROR", e)

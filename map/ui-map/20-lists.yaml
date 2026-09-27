@@ -230,7 +230,8 @@ entries:
       alternative if this proves too weak). The runtime draws the selection (click,
       Command-click, Shift-click) but no rubber band yet. Icons come from the view's image
       list (LVSIL_NORMAL, or LVSIL_SMALL for LVS_SMALLICON), each sent once per image list
-      and kept by the native view. The mode is read with LVM_GETVIEW, so LVM_SETVIEW
+      and kept by the native view. wine's stock icons (75-icons.yaml: folders, drives, IDI_*)
+      are known by their pixels and show as the macOS images. The mode is read with LVM_GETVIEW, so LVM_SETVIEW
       switches the native view as a style change does.
 
   - id: listview.list

@@ -345,7 +345,7 @@ Text is drawn in the macOS system font. Apps ask for "MS Shell Dlg"/Segoe UI and
 Image(nsImage: image).resizable().scaledToFit()
 ```
 
-HICON/HBITMAP are converted to NSImage by winemac's existing image code (image.c). Enhanced metafiles are rendered to a bitmap by gdi32 first.
+The runtime draws the HICON/HBITMAP into 32bpp BGRA and the native view makes an NSImage of it. wine's stock icons (IDI_INFORMATION and the rest, 75-icons.yaml) show as the macOS image with the same meaning instead. Enhanced metafiles are rendered to a bitmap by gdi32 first.
 
 ### Etched line
 <a id="staticseparator"></a>`static.separator` · SwiftUI · Liquid Glass: —
@@ -700,7 +700,7 @@ ScrollView {
 }
 ```
 
-Finder's icon view. SwiftUI's grid has no built-in selection, so selection highlight and rubber-band are drawn by the bridge (NSCollectionView would be the AppKit alternative if this proves too weak). The runtime draws the selection (click, Command-click, Shift-click) but no rubber band yet. Icons come from the view's image list (LVSIL_NORMAL, or LVSIL_SMALL for LVS_SMALLICON), each sent once per image list and kept by the native view. The mode is read with LVM_GETVIEW, so LVM_SETVIEW switches the native view as a style change does.
+Finder's icon view. SwiftUI's grid has no built-in selection, so selection highlight and rubber-band are drawn by the bridge (NSCollectionView would be the AppKit alternative if this proves too weak). The runtime draws the selection (click, Command-click, Shift-click) but no rubber band yet. Icons come from the view's image list (LVSIL_NORMAL, or LVSIL_SMALL for LVS_SMALLICON), each sent once per image list and kept by the native view. wine's stock icons (75-icons.yaml: folders, drives, IDI_*) are known by their pixels and show as the macOS images. The mode is read with LVM_GETVIEW, so LVM_SETVIEW switches the native view as a style change does.
 
 ### List view, list mode
 <a id="listviewlist"></a>`listview.list` · SwiftUI · Liquid Glass: automatic on 26+
@@ -3393,6 +3393,86 @@ Bits that select an entry are listed as that entry; masks, aliases and composite
 | `lfSmCaptionFont` | nsfont | `NSFont.titleBarFont(ofSize: NSFont.smallSystemFontSize)` |
 | `lfMenuFont` | nsfont | `NSFont.menuFont(ofSize: 0)` |
 | `lfStatusFont` | nsfont | `NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)` |
+
+## Stock icons
+
+wine's own icons, shown as the macOS image with the same meaning (runtime: icons.c, Icons.swift).
+
+| Icon | Also | macOS image |
+|---|---|---|
+| `user32/OIC_SAMPLE` | `IDI_APPLICATION` | `uttype:com.apple.application-bundle` - an app with no icon of its own |
+| `user32/OIC_HAND` | `IDI_HAND`, `IDI_ERROR` | `sf:xmark.octagon.fill;multicolor` |
+| `user32/OIC_QUES` | `IDI_QUESTION` | `sf:questionmark.circle.fill;palette=white,systemBlue` |
+| `user32/OIC_BANG` | `IDI_EXCLAMATION`, `IDI_WARNING` | `nsimage:NSCaution` - the caution triangle of macOS alerts |
+| `user32/OIC_NOTE` | `IDI_ASTERISK`, `IDI_INFORMATION` | `sf:info.circle.fill;palette=white,systemBlue` |
+| `user32/OIC_WINLOGO` | `IDI_WINLOGO` | `uttype:com.apple.application-bundle` |
+| `user32/OIC_SHIELD` | `IDI_SHIELD` | `sf:lock.shield.fill;palette=white,systemBlue` - UAC's shield: macOS asks for an administrator with a lock |
+| `shell32/IDI_SHELL_FILE` |  | `uttype:public.data` |
+| `shell32/IDI_SHELL_DOCUMENT` |  | `uttype:public.plain-text` |
+| `shell32/IDI_SHELL_WINDOW` |  | `uttype:com.apple.application-bundle` - a program |
+| `shell32/IDI_SHELL_FOLDER` |  | `uttype:public.folder` |
+| `shell32/IDI_SHELL_FOLDER_OPEN` |  | `uttype:public.folder` |
+| `shell32/IDI_SHELL_FOLDER_SMALL_XP` |  | `uttype:public.folder` |
+| `shell32/IDI_SHELL_FOLDER_OPEN_LARGE` |  | `uttype:public.folder` |
+| `shell32/IDI_SHELL_FOLDER_OPEN_SMALL` |  | `uttype:public.folder` |
+| `shell32/IDI_SHELL_5_12_FLOPPY` |  | `sf:externaldrive` |
+| `shell32/IDI_SHELL_3_14_FLOPPY` |  | `sf:externaldrive` |
+| `shell32/IDI_SHELL_FLOPPY` |  | `sf:externaldrive` |
+| `shell32/IDI_SHELL_DRIVE` |  | `file:/` - the startup disk's icon |
+| `shell32/IDI_SHELL_NETDRIVE` |  | `nsimage:NSNetwork` |
+| `shell32/IDI_SHELL_NETDRIVE2` |  | `nsimage:NSNetwork` |
+| `shell32/IDI_SHELL_OPTICAL_DRIVE` |  | `sf:opticaldiscdrive` |
+| `shell32/IDI_SHELL_MUSIC_CD` |  | `sf:opticaldisc` |
+| `shell32/IDI_SHELL_RAMDISK` |  | `sf:memorychip` |
+| `shell32/IDI_SHELL_UNKNOWN_DRIVE` |  | `sf:externaldrive` |
+| `shell32/IDI_SHELL_ENTIRE_NETWORK` |  | `nsimage:NSNetwork` |
+| `shell32/IDI_SHELL_NETWORK` |  | `nsimage:NSNetwork` |
+| `shell32/IDI_SHELL_MY_NETWORK_PLACES` |  | `nsimage:NSNetwork` |
+| `shell32/IDI_SHELL_COMPUTERS_NEAR_ME` |  | `nsimage:NSNetwork` |
+| `shell32/IDI_SHELL_MY_COMPUTER` |  | `nsimage:NSComputer` |
+| `shell32/IDI_SHELL_DESKTOP` |  | `file:~/Desktop` |
+| `shell32/IDI_SHELL_APP_FOLDER` |  | `file:/Applications` |
+| `shell32/IDI_SHELL_START_MENU` |  | `app:com.apple.launchpad.launcher` |
+| `shell32/IDI_SHELL_CONTROL_PANEL` |  | `app:com.apple.systempreferences` - System Settings from macOS 13 |
+| `shell32/IDI_SHELL_CONTROL_PANEL_XP` |  | `app:com.apple.systempreferences` |
+| `shell32/IDI_SHELL_SETTINGS` |  | `app:com.apple.systempreferences` |
+| `shell32/IDI_SHELL_FONTS_FOLDER` |  | `app:com.apple.FontBook` |
+| `shell32/IDI_SHELL_PRINTER` |  | `sf:printer.fill` |
+| `shell32/IDI_SHELL_PRINTERS_FOLDER` |  | `sf:printer.fill` |
+| `shell32/IDI_SHELL_PRINTERS_FOLDER_XP` |  | `sf:printer.fill` |
+| `shell32/IDI_SHELL_REMOTE_PRINTER` |  | `sf:printer.fill` |
+| `shell32/IDI_SHELL_TO_FILE_PRINTER` |  | `sf:printer.fill` |
+| `shell32/IDI_SHELL_EMPTY_RECYCLE_BIN` |  | `nsimage:NSTrashEmpty` |
+| `shell32/IDI_SHELL_FULL_RECYCLE_BIN` |  | `nsimage:NSTrashFull` |
+| `shell32/IDI_SHELL_TRASH_FILE` |  | `nsimage:NSTrashFull` |
+| `shell32/IDI_SHELL_TRASH_FOLDER` |  | `nsimage:NSTrashFull` |
+| `shell32/IDI_SHELL_TRASH_MIXED` |  | `nsimage:NSTrashFull` |
+| `shell32/IDI_SHELL_RECENT_DOCUMENTS` |  | `sf:clock` |
+| `shell32/IDI_SHELL_SEARCH` |  | `sf:magnifyingglass` |
+| `shell32/IDI_SHELL_SEARCH_FOLDER` |  | `sf:magnifyingglass` |
+| `shell32/IDI_SHELL_FILE_SEARCH` |  | `sf:magnifyingglass` |
+| `shell32/IDI_SHELL_SYSTEM_SEARCH` |  | `sf:magnifyingglass` |
+| `shell32/IDI_SHELL_HELP` |  | `sf:questionmark.circle` |
+| `shell32/IDI_SHELL_RUN` |  | `sf:terminal` |
+| `shell32/IDI_SHELL_RUN2` |  | `sf:terminal` |
+| `shell32/IDI_SHELL_SLEEP` |  | `sf:moon.zzz` |
+| `shell32/IDI_SHELL_EJECT` |  | `sf:eject` |
+| `shell32/IDI_SHELL_SHUT_DOWN` |  | `sf:power` |
+| `shell32/IDI_SHELL_CONFIRM_SHUTDOWN` |  | `sf:power` |
+| `shell32/IDI_SHELL_LOG_OFF` |  | `sf:rectangle.portrait.and.arrow.right` |
+| `shell32/IDI_SHELL_FAVORITES` |  | `sf:star` |
+| `shell32/IDI_SHELL_UPDATE` |  | `sf:arrow.triangle.2.circlepath` |
+| `shell32/IDI_SHELL_SECURITY` |  | `sf:lock.shield` |
+| `shell32/IDI_SHELL_FILES` |  | `sf:doc.on.doc` |
+| `shell32/IDI_SHELL_INSTALL` |  | `uttype:com.apple.installer-package-archive` |
+| `shell32/IDI_SHELL_CONFIG_FILE` |  | `uttype:public.plain-text` |
+| `shell32/IDI_SHELL_TEXT_FILE` |  | `uttype:public.plain-text` |
+| `shell32/IDI_SHELL_BATCH_FILE` |  | `uttype:public.shell-script` |
+| `shell32/IDI_SHELL_LIBRARY_FILE` |  | `uttype:public.data` |
+| `shell32/IDI_SHELL_SYSTEM_FONT` |  | `uttype:public.font` |
+| `shell32/IDI_SHELL_TRUETYPE_FONT` |  | `uttype:public.truetype-ttf-font` |
+| `shell32/IDI_SHELL_POSTSCRIPT_FONT` |  | `uttype:com.adobe.postscript-font` |
+| `shell32/IDI_SHELL_BACKUP` |  | `sf:externaldrive.badge.timemachine` |
 
 ## SwiftUI with no Windows counterpart (yet)
 

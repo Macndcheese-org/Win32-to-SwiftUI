@@ -23,7 +23,7 @@ mkdir -p $OUT/x86_64-windows
 x86_64-w64-mingw32-gcc -O2 -Wall -Wno-unused-parameter -shared -D_WIN32_WINNT=0x0a00 -Iruntime/include \
   -o $OUT/x86_64-windows/win32swiftui.dll \
   runtime/pe/main.c runtime/pe/controls.c runtime/pe/json.c runtime/pe/dialogs.c runtime/pe/taskdialog.c runtime/pe/menus.c \
-  runtime/pe/pickers.c runtime/pe/look.c \
+  runtime/pe/pickers.c runtime/pe/look.c runtime/pe/icons.c \
   runtime/pe/win32swiftui.def \
   -Wl,--file-alignment=4096 -static-libgcc \
   "$WINE_BUILD/libs/winecrt0/x86_64-windows/libwinecrt0.a" "$WINE_BUILD/dlls/ntdll/x86_64-windows/libntdll.a" \
@@ -41,7 +41,7 @@ if [[ -f "$WINE_BUILD/libs/winecrt0/i386-windows/libwinecrt0.a" ]] && whence i68
   i686-w64-mingw32-gcc -O2 -Wall -Wno-unused-parameter -shared -D_WIN32_WINNT=0x0a00 -Iruntime/include \
     -o $OUT/i386-windows/win32swiftui.dll \
     runtime/pe/main.c runtime/pe/controls.c runtime/pe/json.c runtime/pe/dialogs.c runtime/pe/taskdialog.c runtime/pe/menus.c \
-    runtime/pe/pickers.c runtime/pe/look.c \
+    runtime/pe/pickers.c runtime/pe/look.c runtime/pe/icons.c \
     runtime/pe/win32swiftui.def \
     -Wl,--file-alignment=4096 -Wl,--enable-stdcall-fixup -static-libgcc \
     "$WINE_BUILD/libs/winecrt0/i386-windows/libwinecrt0.a" "$WINE_BUILD/dlls/ntdll/i386-windows/libntdll.a" \

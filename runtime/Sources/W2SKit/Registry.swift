@@ -45,6 +45,7 @@ struct Snapshot: Codable, Equatable {
     var imageWidth: Int?
     var imageHeight: Int?
     var imageBGRA: String?
+    var imageSymbol: String?    // a stock icon: the macOS image's spec (Icons.swift) instead of imageBGRA
     var fill: String?           // static.frame: "none" (an outline) or the rectangle's colour
     var cue: String?
     var readonly: Bool?
@@ -68,6 +69,7 @@ struct Snapshot: Codable, Equatable {
     var checks: [Bool]?         // LVS_EX_CHECKBOXES
     var icons: [Int]?           // icon views: each row's image index
     var images: [String: String]?   // icons not sent before (index: BGRA base64); see ControlModel.images
+    var symbols: [String: String]?  // stock icons not sent before (index: macOS image spec)
     var imageGen: Int?
     var imageSize: [Int]?
     var small: Bool?
@@ -117,6 +119,8 @@ final class ControlModel: ObservableObject {
 
     /// Icons of an icon view, sent once each (main thread).
     var images: [Int: NSImage] = [:]
+    /// Which of them are stock icons shown as macOS images (for the tests).
+    var imageSymbols: [Int: String] = [:]
     private var imageGen: Int?
 
     /// Keeps the icons a snapshot brings, even one dropped as stale: they are
@@ -125,12 +129,18 @@ final class ControlModel: ObservableObject {
         if snap.imageGen != imageGen {
             imageGen = snap.imageGen
             images = [:]
+            imageSymbols = [:]
         }
-        guard let fresh = snap.images, let size = snap.imageSize, size.count == 2 else { return }
-        for (key, base64) in fresh {
+        guard let size = snap.imageSize, size.count == 2 else { return }
+        for (key, base64) in snap.images ?? [:] {
             if let index = Int(key), let image = bgraImage(base64, width: size[0], height: size[1]) {
                 images[index] = image
             }
+        }
+        for (key, spec) in snap.symbols ?? [:] {
+            guard let index = Int(key) else { continue }
+            imageSymbols[index] = spec
+            if let image = Icons.image(spec, size: NSSize(width: size[0], height: size[1])) { images[index] = image }
         }
     }
 

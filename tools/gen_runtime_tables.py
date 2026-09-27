@@ -15,7 +15,7 @@ import os
 import re
 import sys
 
-from maplib import ROOT, aslist, load_map
+from maplib import ROOT, aslist, icon_spec, load_map
 
 TOKEN = re.compile(r"^([A-Z][A-Z0-9]*_[A-Z0-9_]+)\b")
 
@@ -28,6 +28,26 @@ def defined_names(tree):
         for body in re.findall(r"\benum\b[^{;]*\{([^}]*)\}", text):
             names.update(re.findall(r"^\s*(\w+)", body, re.M))
     return names
+
+
+# where each module's icon resource names are defined in the wine tree
+ICON_HEADERS = {"user32": "include/winuser.rh", "shell32": "dlls/shell32/shresdef.h"}
+
+
+def icon_rows(tree, icons):
+    """{ L"module.dll", id, "spec" } for every stock icon; names resolved in wine's headers."""
+    values = {}
+    for module, header in ICON_HEADERS.items():
+        text = open(os.path.join(tree, header), errors="replace").read()
+        values[module] = {n: int(v) for n, v in re.findall(r"#\s*define\s+(\w+)\s+(\d+)\b", text)}
+    rows = []
+    for key, d in icons.items():
+        module, name = key.split("/")
+        if name not in values[module]:
+            sys.exit(f"icons.{key}: {name} is not defined in {ICON_HEADERS[module]}")
+        spec = icon_spec(d).replace("\\", "\\\\").replace('"', '\\"')
+        rows.append(f'    {{ L"{module}.dll", {values[module][name]}, "{spec}" }},')
+    return rows
 
 
 def main():
@@ -93,6 +113,19 @@ struct w2s_map_entry
 static const struct w2s_map_entry w2s_map_entries[] =
 {{
 {chr(10).join(rows)}
+}};
+
+/* stock icons (map: 75-icons.yaml): a module's icon resource -> the macOS image */
+struct w2s_icon_entry
+{{
+    const WCHAR *module;
+    unsigned int id;
+    const char *spec;
+}};
+
+static const struct w2s_icon_entry w2s_icon_entries[] =
+{{
+{chr(10).join(icon_rows(tree, m["icons"]))}
 }};
 
 #endif

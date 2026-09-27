@@ -1379,6 +1379,43 @@ static void selftest2(void)
            "a native check -> the state image + LVN_ITEMCHANGED" );
     check( query_has( ctl[ID_LVICON], "\"entry\":\"listview.icon\"" ) && query_has( ctl[ID_LVICON], "\"icons\":[0,1,2]" ) &&
            query_has( ctl[ID_LVICON], "\"imageCount\":3" ), "the icon view and its image list reach the native grid" );
+    check( query_has( ctl[ID_LVICON], "\"0\":\"uttype:com.apple.application-bundle\"" ) &&
+           query_has( ctl[ID_LVICON], "\"1\":\"sf:info.circle.fill;palette=white,systemBlue\"" ) &&
+           query_has( ctl[ID_LVICON], "\"2\":\"nsimage:NSCaution\"" ),
+           "wine's stock icons in an image list show as the macOS ones (known by their pixels)" );
+    /* stock icons as the macOS ones: known by where they came from, or by their pixels */
+    {
+        HICON stock = LoadIconW( NULL, (LPCWSTR)IDI_INFORMATION ), copy, own;
+        ICONINFO info;
+        BYTE and_bits[32 * 32 / 8], xor_bits[32 * 32 * 4];
+        int k;
+
+        check( query_has( ctl[ID_ICON], "\"imageSymbol\":\"sf:info.circle.fill;palette=white,systemBlue\"" ),
+               "IDI_INFORMATION shows as the macOS info symbol" );
+        GetIconInfo( stock, &info );
+        copy = CreateIconIndirect( &info );
+        DeleteObject( info.hbmColor );
+        DeleteObject( info.hbmMask );
+        SendMessageW( ctl[ID_ICON], STM_SETICON, (WPARAM)LoadIconW( NULL, (LPCWSTR)IDI_WARNING ), 0 );
+        pump( 200 );
+        check( query_has( ctl[ID_ICON], "\"imageSymbol\":\"nsimage:NSCaution\"" ), "STM_SETICON IDI_WARNING -> the macOS caution icon" );
+        SendMessageW( ctl[ID_ICON], STM_SETICON, (WPARAM)copy, 0 );
+        pump( 200 );
+        check( query_has( ctl[ID_ICON], "\"imageSymbol\":\"sf:info.circle.fill;palette=white,systemBlue\"" ),
+               "a copy of IDI_INFORMATION (no resource behind it) is known by its pixels" );
+        /* the app's own artwork stays */
+        memset( and_bits, 0, sizeof(and_bits) );
+        for (k = 0; k < 32 * 32; k++) *(DWORD *)(xor_bits + k * 4) = 0xff000000 | (k * 2654435761u >> 8);
+        own = CreateIcon( NULL, 32, 32, 1, 32, and_bits, xor_bits );
+        SendMessageW( ctl[ID_ICON], STM_SETICON, (WPARAM)own, 0 );
+        pump( 200 );
+        check( query_has( ctl[ID_ICON], "\"imageWidth\":32" ) && query_lacks( ctl[ID_ICON], "\"imageSymbol\":" ),
+               "an app's own icon keeps its artwork" );
+        SendMessageW( ctl[ID_ICON], STM_SETICON, (WPARAM)stock, 0 );
+        pump( 200 );
+        DestroyIcon( copy );
+        DestroyIcon( own );
+    }
     {
         LVITEMW item = { 0 };
         item.pszText = (WCHAR *)L"Information";

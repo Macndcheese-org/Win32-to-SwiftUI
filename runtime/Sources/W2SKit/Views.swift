@@ -451,7 +451,9 @@ struct StaticImage: View {
     }
 
     func makeImage() -> NSImage? {
-        guard let w = snap.imageWidth, let h = snap.imageHeight, let b64 = snap.imageBGRA else { return nil }
+        guard let w = snap.imageWidth, let h = snap.imageHeight else { return nil }
+        if let spec = snap.imageSymbol { return Icons.image(spec, size: NSSize(width: w, height: h)) }
+        guard let b64 = snap.imageBGRA else { return nil }
         return bgraImage(b64, width: w, height: h)
     }
 }

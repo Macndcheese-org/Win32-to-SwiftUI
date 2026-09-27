@@ -4,7 +4,7 @@ import os
 import re
 from collections import defaultdict
 
-from maplib import DISPOSITIONS, IDENT, ROOT, aslist, inventories, load_map, snippets, vkey
+from maplib import DISPOSITIONS, IDENT, ROOT, aslist, icon_spec, inventories, load_map, snippets, vkey
 
 KIND_TITLES = [("control", "Controls"), ("dialog", "Dialogs"), ("menu", "Menus"), ("system", "System UI")]
 RUNTIME_LABEL = {"swiftui": "SwiftUI", "appkit": "AppKit", "existing": "already native", "not_translated": "stays wine"}
@@ -220,6 +220,15 @@ def main():
         for k, d in m[sect].items():
             how, t = disp_text(d)
             L.append(f"| `{k}` | {how} | {t} |")
+    L.append("")
+
+    L.append("## Stock icons\n")
+    L.append("wine's own icons, shown as the macOS image with the same meaning (runtime: icons.c, Icons.swift).\n")
+    L.append("| Icon | Also | macOS image |")
+    L.append("|---|---|---|")
+    for k, d in m["icons"].items():
+        also = ", ".join(f"`{a}`" for a in aslist(d.get("aka")))
+        L.append(f"| `{k}` | {also} | `{icon_spec(d)}`{' - ' + cell(d['note']) if d.get('note') else ''} |")
     L.append("")
 
     # SwiftUI that nothing maps to: ideas for improvising
