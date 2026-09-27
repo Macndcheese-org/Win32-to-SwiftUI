@@ -182,9 +182,17 @@ enum Debug {
     static func handle(handle: UInt64, op: [String: Any]) -> String {
         switch op["op"] as? String {
         case "query":
+            if handle == 0 {
+                // the open alert or panel
+                guard let request = Requests.latestOpen() else { return "{\"error\":\"no open request\"}" }
+                var out = request.query?() ?? [:]
+                out["open"] = true
+                return W2S.json(out)
+            }
             guard let host = W2S.control(handle) else { return "{\"error\":\"no control\"}" }
             let snap = host.model.snap
-            var out: [String: Any] = ["entry": host.entry, "attached": host.hosting?.superview != nil]
+            var out: [String: Any] = ["entry": host.entry, "attached": host.hosting?.superview != nil,
+                                      "os": W2S.osVersion.major]
             if let v = snap.text { out["text"] = v }
             if let v = snap.checked { out["checked"] = v }
             if let v = snap.selection { out["selection"] = v }

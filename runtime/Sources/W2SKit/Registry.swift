@@ -11,6 +11,7 @@ struct Snapshot: Decodable, Equatable {
     struct Column: Decodable, Equatable { var title: String; var width: Int?; var index: Int?; var align: String? }
 
     var entry: String?
+    var ack: UInt64?            // the last native event the PE side has taken
     var text: String?
     var enabled: Bool?
     var fontPx: Double?
@@ -81,6 +82,10 @@ final class ControlHost {
     var model: ControlModel!
     var hosting: NSView?
     var pending: [[String: Any]] = []       // guarded by W2S.lock
+    private var seq: UInt64 = 0             // guarded by W2S.lock
+    var published: String?                 // guarded by W2S.lock: for the entry's answers
+    var publishedVersion: UInt64 = 0        // guarded by W2S.lock
+    var owned: AnyObject?                   // main thread: what the view keeps alive (a menu bar)
 
     init(handle: UInt64, entry: String, hostView: UnsafeMutableRawPointer, postWake: PostWake?) {
         self.handle = handle
@@ -89,23 +94,69 @@ final class ControlHost {
         self.postWake = postWake
     }
 
+    /// The sequence number of the last event sent (snapshots below it are stale).
+    var emittedSeq: UInt64 {
+        W2S.lock.lock()
+        defer { W2S.lock.unlock() }
+        return seq
+    }
+
     /// Queue a native event for the Win32 side and wake the control's thread.
     func emit(_ event: [String: Any]) {
+        var event = event
         W2S.lock.lock()
+        seq += 1
+        event["n"] = seq
         pending.append(event)
         W2S.lock.unlock()
         postWake?(hostView, 0)
+    }
+
+    /// Main thread: what the Win32 control answers its `answers` queries from.
+    func publish(_ state: [String: Any]) {
+        let text = W2S.json(state)
+        W2S.lock.lock()
+        if text != published {
+            published = text
+            publishedVersion += 1
+        }
+        W2S.lock.unlock()
+    }
+
+    /// Main thread: points per Win32 pixel, from the host view's height.
+    var scale: CGFloat {
+        guard let view = hosting, let px = model.snap.heightPx, px > 0, view.bounds.height > 0 else { return 1 }
+        return view.bounds.height / CGFloat(px)
     }
 }
 
 final class Request {
     let id: UInt64
     var result: String?                     // guarded by W2S.lock
+    var events: [[String: Any]] = []        // guarded by W2S.lock: raised while open
     var inject: ((Any) -> Void)?            // main thread: tests drive the open panel/alert
+    var update: (([String: Any]) -> Void)?  // main thread: the Win32 side changes the open panel
+    var query: (() -> [String: Any])?       // main thread: tests read the open panel
     init(id: UInt64) { self.id = id }
+
+    /// Tell the Win32 thread waiting on this panel that something happened.
+    func emit(_ event: [String: Any]) {
+        W2S.lock.lock()
+        events.append(event)
+        W2S.lock.unlock()
+    }
 }
 
 enum W2S {
+    static let protocolVersion: UInt32 = 2
+
+    /// The running macOS; an app linked against an SDK older than 26 is told
+    /// 16 for 26 (the version compatibility shim), so 16 means 26.
+    static let osVersion: (major: Int, minor: Int) = {
+        let v = ProcessInfo.processInfo.operatingSystemVersion
+        return (v.majorVersion == 16 ? 26 : v.majorVersion, v.minorVersion)
+    }()
+
     static let lock = NSLock()
     static var controls: [UInt64: ControlHost] = [:]
     static var requests: [UInt64: Request] = [:]

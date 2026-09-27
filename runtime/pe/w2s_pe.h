@@ -60,19 +60,21 @@ struct w2s_event
 {
     char type[32];
     BOOL has_value;
-    double value;
+    double value;           /* integers up to 2^53 are exact: tree item handles fit */
     WCHAR *string;          /* HeapAlloc'd, or NULL */
     int *array;             /* HeapAlloc'd, or NULL */
     int array_count;
+    UINT64 seq;             /* "n": the native side's sequence number */
 };
 
-/* parses [{"t":..,"v":..,"s":..,"a":[..]}, ...]; returns the count, events HeapAlloc'd */
+/* parses [{"t":..,"v":..,"s":..,"a":[..],"n":..}, ...]; returns the count, events HeapAlloc'd */
 int json_parse_events( const char *text, struct w2s_event **events );
 void json_free_events( struct w2s_event *events, int count );
 /* reads one field of a flat JSON object (for results); NULL/FALSE when missing */
 BOOL json_get_num( const char *text, const char *key, double *value );
 WCHAR *json_get_str( const char *text, const char *key );          /* HeapAlloc'd */
 int json_get_str_array( const char *text, const char *key, WCHAR ***strings ); /* HeapAlloc'd */
+int json_get_int_array( const char *text, const char *key, int **values );     /* HeapAlloc'd */
 
 WCHAR *strdupW( const WCHAR *s );
 char *utf8_from_wide( const WCHAR *s, int len );                   /* HeapAlloc'd */
@@ -80,6 +82,7 @@ WCHAR *wide_from_utf8( const char *s, int len );                   /* HeapAlloc'
 
 /* main.c */
 extern UINT w2s_wake_message;
+extern UINT w2s_os_major, w2s_os_minor;    /* the running macOS */
 BOOL w2s_get_host( HWND hwnd, struct w2s_host *host );
 void w2s_release_host( HWND hwnd, const struct w2s_host *host );
 
@@ -91,6 +94,12 @@ struct w2s_kind
     const char *entry;      /* map entry id */
     void (*snapshot)( struct w2s_control *ctl, struct json *j );
     void (*apply)( struct w2s_control *ctl, const struct w2s_event *ev );
+    /* answers one of the entry's `answers` queries from the native view;
+     * FALSE lets the Win32 control answer (the native view isn't in sync) */
+    BOOL (*answer)( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM lparam, LRESULT *ret );
+    /* kinds of one family share their native view, so a style change between
+     * them (BS_PUSHBUTTON <-> BS_DEFPUSHBUTTON) needs no new view; NULL: entry */
+    const char *family;
 };
 
 struct w2s_control
@@ -99,6 +108,8 @@ struct w2s_control
     const struct w2s_kind *kind;
     const UINT *state_in;
     unsigned int state_in_count;
+    const UINT *answers;
+    unsigned int answers_count;
     struct w2s_host host;
     UINT64 handle;
     WNDPROC orig;
@@ -106,15 +117,35 @@ struct w2s_control
     BOOL active;            /* clipped and without a non-client area: the native view stands in */
     int applying;
     int snapshotting;       /* building a snapshot sends queries to the control */
+    UINT64 ack;             /* highest native event sequence number taken */
+    void *data;             /* the kind's own state, HeapFree'd when the view goes */
+    char *native;           /* what the native view published for answers, or NULL */
+    UINT64 native_version;
+    UINT native_size;
+    struct w2s_control *follower;   /* pushed along with this one (a property sheet's sidebar) */
 };
 
 const struct w2s_kind *w2s_select_kind( HWND hwnd );
+struct w2s_control *w2s_control_from_hwnd( HWND hwnd );
+BOOL w2s_attach( HWND hwnd, const struct w2s_kind *kind );
 void w2s_common_snapshot( struct w2s_control *ctl, struct json *j );
 void w2s_push( struct w2s_control *ctl, BOOL force );
+const char *w2s_native_state( struct w2s_control *ctl, BOOL *changed );
 void w2s_notify_parent_command( HWND hwnd, UINT code );
 LRESULT w2s_notify_parent( HWND hwnd, UINT code, NMHDR *hdr );
 
 /* dialogs.c */
+struct w2s_request_handler
+{
+    /* the panel raised an event (a task dialog's radio button, a submenu opening) */
+    void (*event)( struct w2s_request_handler *handler, UINT64 id, const struct w2s_event *ev );
+    /* every turn of the modal loop, about every 30 ms */
+    void (*idle)( struct w2s_request_handler *handler, UINT64 id );
+};
+
 BOOL w2s_run_request( const char *kind, HWND owner, const char *json, char **result );
+BOOL w2s_run_request_ex( const char *kind, HWND owner, const char *json, struct w2s_request_handler *handler,
+                         char **result );
+void w2s_request_update( UINT64 id, const char *json );
 
 #endif

@@ -40,13 +40,59 @@ static BOOL CALLBACK disable_proc( HWND hwnd, LPARAM lparam )
     return TRUE;
 }
 
+/* one poll: the result (done), the events raised meanwhile, or nothing */
+static char *poll_request( UINT64 id, BOOL *done, UINT32 *len )
+{
+    struct w2s_request_poll_params poll;
+    char small[4096], *buf;
+
+    poll.id = id;
+    poll.buffer = small;
+    poll.size = sizeof(small);
+    poll.len = 0;
+    poll.done = 0;
+    w2s_call( unix_w2s_request_poll, &poll );
+    while (poll.len > poll.size)
+    {
+        char *big = HeapAlloc( GetProcessHeap(), 0, poll.len );
+        poll.buffer = big;
+        poll.size = poll.len;
+        poll.len = 0;
+        poll.done = 0;
+        w2s_call( unix_w2s_request_poll, &poll );
+        if (poll.len <= poll.size)
+        {
+            *done = poll.done;
+            *len = poll.len;
+            return big;
+        }
+        HeapFree( GetProcessHeap(), 0, big );   /* it grew meanwhile */
+    }
+    *done = poll.done;
+    *len = poll.len;
+    buf = HeapAlloc( GetProcessHeap(), 0, poll.len + 1 );
+    memcpy( buf, small, poll.len );
+    buf[poll.len] = 0;
+    return buf;
+}
+
+void w2s_request_update( UINT64 id, const char *json )
+{
+    struct w2s_request_update_params params = { id, json, strlen( json ) };
+    w2s_call( unix_w2s_request_update, &params );
+}
+
 BOOL w2s_run_request( const char *kind, HWND owner, const char *json, char **result )
 {
+    return w2s_run_request_ex( kind, owner, json, NULL, result );
+}
+
+BOOL w2s_run_request_ex( const char *kind, HWND owner, const char *json, struct w2s_request_handler *handler,
+                         char **result )
+{
     struct w2s_request_start_params start;
-    struct w2s_request_poll_params poll;
     struct w2s_host owner_host = { 0 };
     struct thread_windows disabled = { 0 };
-    char small[4096];
     BOOL have_host = FALSE;
     MSG msg;
     int i;
@@ -72,30 +118,26 @@ BOOL w2s_run_request( const char *kind, HWND owner, const char *json, char **res
 
     for (;;)
     {
-        poll.id = start.id;
-        poll.buffer = small;
-        poll.size = sizeof(small);
-        poll.len = 0;
-        poll.done = 0;
-        w2s_call( unix_w2s_request_poll, &poll );
-        if (poll.done)
+        BOOL done;
+        UINT32 len;
+        char *text = poll_request( start.id, &done, &len );
+
+        if (done)
         {
-            if (poll.len > poll.size)
-            {
-                char *big = HeapAlloc( GetProcessHeap(), 0, poll.len );
-                poll.buffer = big;
-                poll.size = poll.len;
-                w2s_call( unix_w2s_request_poll, &poll );
-                *result = big;
-            }
-            else
-            {
-                *result = HeapAlloc( GetProcessHeap(), 0, poll.len + 1 );
-                memcpy( *result, small, poll.len );
-                (*result)[poll.len] = 0;
-            }
+            *result = text;
             break;
         }
+        if (len && handler && handler->event)
+        {
+            struct w2s_event *events;
+            int count = json_parse_events( text, &events );
+            TRACE( "request %s events %s\n", kind, text );
+            for (i = 0; i < count; i++) handler->event( handler, start.id, &events[i] );
+            json_free_events( events, count );
+        }
+        HeapFree( GetProcessHeap(), 0, text );
+        if (handler && handler->idle) handler->idle( handler, start.id );
+
         MsgWaitForMultipleObjectsEx( 0, NULL, 30, QS_ALLINPUT, MWMO_INPUTAVAILABLE );
         while (PeekMessageW( &msg, 0, 0, 0, PM_REMOVE ))
         {
