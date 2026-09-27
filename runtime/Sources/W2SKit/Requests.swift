@@ -569,6 +569,10 @@ enum Debug {
             W2S.lock.unlock()
             if let v = snap.rows { out["rowCount"] = v.count }
             if let v = snap.columns { out["columns"] = v.filter { ($0.width ?? 1) > 0 }.map { $0.title } }
+            if host.entry == "tab", let attach = host.owned as? WindowSidebarAttach {
+                out["windowSidebar"] = attach.controller != nil
+                out["sidebarCollapsed"] = attach.collapsed() ?? false
+            }
             if let hosting = host.hosting {
                 out["frame"] = [hosting.frame.origin.x, hosting.frame.origin.y, hosting.frame.width, hosting.frame.height]
                 out["hidden"] = hosting.superview?.isHidden ?? true
@@ -601,6 +605,13 @@ enum Debug {
                 return "{\"ok\":true}"
             }
             guard let host = W2S.control(handle) else { return "{\"error\":\"no control\"}" }
+            if event["t"] as? String == "sidebarCollapse" {
+                // tests: collapse or expand the window sidebar (window chrome only,
+                // wine's content doesn't move, so nothing is reported to Win32)
+                (host.owned as? WindowSidebarAttach)?
+                    .setCollapsed((event["v"] as? NSNumber)?.boolValue ?? false)
+                return "{\"ok\":true}"
+            }
             if event["t"] as? String == "realClick" {
                 // a mouse click at the view's centre through AppKit, as the mouse makes one:
                 // winemac's routing, hit-testing and the SwiftUI control's own tracking

@@ -11,7 +11,7 @@ enum ControlViews {
     // map: progress trackbar tab static.frame statusbar edit.multiline combobox.editable treeview
     // map: updown datetime monthcal tooltip (as .help on every control: HelpText)
     // map: listview.checkboxes listview.icon
-    // map: propsheet propsheet.wizard (modes of the sheet's tab control: TabSidebar, WizardSteps)
+    // map: propsheet propsheet.wizard (modes of the sheet's tab control: WindowSidebar, WizardSteps)
     static let entries: Set<String> = [
         "button.push", "button.default", "button.checkbox", "button.pushlike", "button.radio", "button.groupbox",
         "button.3state", "button.split", "button.commandlink",
@@ -1569,8 +1569,10 @@ struct TabStrip: View {
     @ObservedObject var model: ControlModel
 
     var body: some View {
-        if model.snap.mode == "sidebar" {
-            TabSidebar(model: model)
+        if model.snap.mode == "sidebar" || model.snap.mode == "window" {
+            // the sidebar is a real window sidebar, outside wine's content:
+            // nothing is drawn here
+            EmptyView()
         } else if model.snap.mode == "wizard" {
             WizardSteps(model: model)
         } else {
@@ -1613,126 +1615,31 @@ struct TabStrip: View {
     }
 }
 
-/// map: propsheet (more than 5 pages, macOS 13+): the System Settings sidebar.
-/// The sheet's tab control told wine's propsheet to lay the pages out to the
-/// right of it (TCM_ADJUSTRECT), so only the sidebar is drawn here: a real
-/// List(selection:) in the sidebar style (native row height, rounded
-/// selection, accent colour, keyboard) on the sidebar material. On macOS 26+
-/// it floats like System Settings (8 pt in from the top, left and bottom,
-/// 12 pt rounded corners); before that it is flush with a hairline separator.
-struct TabSidebar: View {
+/// map: propsheet (more than 5 pages, macOS 13+): the window's native sidebar.
+/// This is not drawn in the tab control's in-window view (EmptyView above):
+/// it is hosted as the sidebar of the window's split view (WindowSidebarAttach),
+/// a real List in the sidebar style (native row height, rounded selection,
+/// accent colour, keyboard) on the system sidebar material. Plain rows, no
+/// icons: Win32 pages have none. Selecting a row emits the same "select" event
+/// the tab strip emits.
+struct WindowSidebar: View {
     @ObservedObject var model: ControlModel
 
     var body: some View {
-        GeometryReader { geo in
-            let items = model.snap.items ?? []
-            let scale = geo.size.width / CGFloat(max(1, model.snap.widthPx ?? Double(geo.size.width)))
-            let width = CGFloat(model.snap.sidebarPx ?? 180) * (scale.isFinite && scale > 0 ? scale : 1)
-            let symbols = SidebarIcon.symbols(for: items.map { stripMnemonic($0) })
-            let selection = Binding<Int?>(
-                get: { model.snap.selection.flatMap { $0 >= 0 ? $0 : nil } },
-                set: { i in
-                    guard let i = i, i != model.snap.selection else { return }
-                    model.snap.selection = i
-                    model.emit(["t": "select", "v": i])
-                })
-            let list = List(selection: selection) {
-                ForEach(items.indices, id: \.self) { i in
-                    sidebarRow(i, title: stripMnemonic(items[i]), symbol: symbols?[i] ?? nil)
-                }
-            }
-            .listStyle(.sidebar)
-            .modifier(HideScrollBackground())
-            Group {
-                if #available(macOS 26, *) {
-                    HStack(spacing: 0) {
-                        list
-                            .frame(width: width)
-                            .background(SidebarBackground())
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                            .padding(.top, 8)
-                            .padding(.leading, 8)
-                            .padding(.bottom, 8)
-                        Spacer(minLength: 0)
-                    }
-                } else {
-                    HStack(spacing: 0) {
-                        list
-                            .frame(width: width)
-                            .background(SidebarBackground())
-                        Rectangle()
-                            .fill(Color(nsColor: .separatorColor))
-                            .frame(width: 1)
-                        Spacer(minLength: 0)
-                    }
-                }
+        let items = model.snap.items ?? []
+        let selection = Binding<Int?>(
+            get: { model.snap.selection.flatMap { $0 >= 0 ? $0 : nil } },
+            set: { i in
+                guard let i = i, i != model.snap.selection else { return }
+                model.snap.selection = i
+                model.emit(["t": "select", "v": i])
+            })
+        List(selection: selection) {
+            ForEach(items.indices, id: \.self) { i in
+                Text(stripMnemonic(items[i])).tag(Optional(i))
             }
         }
-    }
-
-    @ViewBuilder
-    func sidebarRow(_ i: Int, title: String, symbol: String?) -> some View {
-        if let symbol = symbol {
-            Label(title, systemImage: symbol).tag(Optional(i))
-        } else {
-            Text(title).tag(Optional(i))
-        }
-    }
-}
-
-/// The sidebar material behind the rows (NSVisualEffectView, .sidebar).
-struct SidebarBackground: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .sidebar
-        view.state = .active
-        view.blendingMode = .behindWindow
-        return view
-    }
-
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
-}
-
-/// Hides a List's own background over the material behind it (macOS 13+);
-/// on 12 the list draws its own background.
-struct HideScrollBackground: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(macOS 13, *) {
-            content.scrollContentBackground(.hidden)
-        } else {
-            content
-        }
-    }
-}
-
-/// Optional SF Symbols in the sidebar rows, only when every page title is a
-/// known settings page (English or French); otherwise none at all. Every name
-/// below exists at the macOS 12 floor (name_availability.plist, year <=
-/// 2021.1): flask (Staging's lab flask) is 2023-only, so Staging uses
-/// testtube.2 (2021) instead.
-enum SidebarIcon {
-    static func symbols(for titles: [String]) -> [String?]? {
-        var out: [String?] = []
-        for title in titles {
-            guard let symbol = symbol(for: title) else { return nil }
-            out.append(symbol)
-        }
-        return out
-    }
-
-    static func symbol(for title: String) -> String? {
-        switch title {
-        case "General", "Général": return "gearshape"
-        case "Graphics", "Affichage", "Display": return "display"
-        case "Audio", "Sound", "Son": return "speaker.wave.2"
-        case "Drives", "Lecteurs": return "internaldrive"
-        case "Libraries", "Bibliothèques": return "books.vertical"
-        case "Applications": return "square.grid.2x2"
-        case "Desktop Integration", "Intégration avec le bureau": return "menubar.dock.rectangle"
-        case "About", "À propos": return "info.circle"
-        case "Staging": return "testtube.2"
-        default: return nil
-        }
+        .listStyle(.sidebar)
     }
 }
 
