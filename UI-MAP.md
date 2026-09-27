@@ -1037,7 +1037,7 @@ SwiftUI's Slider is horizontal only; rotating it breaks hit-testing and accessib
 
 - Windows: `msctls_updown32` UDS_SETBUDDYINT, UDS_AUTOBUDDY
 - Replaces visual parts: SPIN/SPNP_UP, SPIN/SPNP_DOWN, SPIN/SPNP_UPHORZ, SPIN/SPNP_DOWNHORZ
-- Windows → view: UDM_SETPOS32, UDM_SETRANGE32, UDM_SETBUDDY, UDM_SETACCEL, UDM_SETBASE
+- Windows → view: UDM_SETPOS32, UDM_SETRANGE32, UDM_SETPOS, UDM_SETRANGE, UDM_SETBUDDY, UDM_SETACCEL, UDM_SETBASE
 - View → Windows: step: WM_NOTIFY/UDN_DELTAPOS (the app may veto) then WM_VSCROLL
 
 **SwiftUI, macOS 12+**
@@ -1049,7 +1049,7 @@ HStack(spacing: 4) {
 }
 ```
 
-With a buddy edit (UDS_AUTOBUDDY / UDM_SETBUDDY) the pair becomes one field plus stepper, the macOS arrangement. Without a buddy, only the Stepper. UDM_SETBASE 16 uses a hexadecimal format.
+With a buddy edit (UDS_AUTOBUDDY / UDM_SETBUDDY) the pair becomes one field plus stepper, the macOS arrangement. Without a buddy, only the Stepper. UDM_SETBASE 16 uses a hexadecimal format. The buddy is a window of its own and is translated by its own entry (edit.number), so the up-down itself hosts only the Stepper, next to it. A step is a click on that arrow through the control's own mouse handling, so acceleration, wrapping, reversed ranges, the UDN_DELTAPOS veto and the buddy text stay wine's.
 
 ### Date and time picker
 <a id="datetime"></a>`datetime` · SwiftUI · Liquid Glass: automatic on 26+
@@ -1065,7 +1065,7 @@ With a buddy edit (UDS_AUTOBUDDY / UDM_SETBUDDY) the pair becomes one field plus
 DatePicker(title, selection: $date, displayedComponents: .date).datePickerStyle(.compact).labelsHidden()
 ```
 
-.compact is the macOS field that opens a calendar popover, the same thing as the Win32 field with its drop-down calendar. Custom formats (DTM_SETFORMAT) that the system formats can't express keep the system format; the value is still exact.
+.compact is the macOS field that opens a calendar popover, the same thing as the Win32 field with its drop-down calendar. Custom formats (DTM_SETFORMAT) that the system formats can't express keep the system format; the value is still exact. Dates travel as SYSTEMTIME fields, local and Gregorian whatever the user's calendar. The picker shows the date or the time; a change keeps the other part. DTM_SETSYSTEMTIME doesn't notify, so a native change adds DTN_DATETIMECHANGE as a user's would.
 
 ### Month calendar
 <a id="monthcal"></a>`monthcal` · SwiftUI · Liquid Glass: —
@@ -1079,6 +1079,8 @@ DatePicker(title, selection: $date, displayedComponents: .date).datePickerStyle(
 ```swift
 DatePicker(title, selection: $date, displayedComponents: .date).datePickerStyle(.graphical).labelsHidden()
 ```
+
+A day chosen natively is MCM_SETCURSEL followed by MCN_SELCHANGE and MCN_SELECT, as a click raises them. MCS_MULTISELECT calendars stay wine's until NSDatePicker's range mode (see the flag) is wired up.
 
 ### Hotkey control
 <a id="hotkey"></a>`hotkey` · SwiftUI · Liquid Glass: automatic on 26+

@@ -61,7 +61,7 @@ static const UINT w2s_state_scrollbar[] = { SBM_SETSCROLLINFO, SBM_SETPOS, SBM_S
 static const UINT w2s_state_progress[] = { PBM_SETPOS, PBM_DELTAPOS, PBM_STEPIT, PBM_SETRANGE, PBM_SETRANGE32, PBM_SETSTATE, PBM_SETMARQUEE, PBM_SETBARCOLOR };
 static const UINT w2s_state_trackbar[] = { TBM_SETPOS, TBM_SETRANGE, TBM_SETRANGEMIN, TBM_SETRANGEMAX, TBM_SETTICFREQ, TBM_SETTIC, TBM_CLEARTICS, TBM_SETLINESIZE, TBM_SETPAGESIZE };
 static const UINT w2s_state_trackbar_vertical[] = { 0 };
-static const UINT w2s_state_updown[] = { UDM_SETPOS32, UDM_SETRANGE32, UDM_SETBUDDY, UDM_SETACCEL, UDM_SETBASE };
+static const UINT w2s_state_updown[] = { UDM_SETPOS32, UDM_SETRANGE32, UDM_SETPOS, UDM_SETRANGE, UDM_SETBUDDY, UDM_SETACCEL, UDM_SETBASE };
 static const UINT w2s_state_datetime[] = { DTM_SETSYSTEMTIME, DTM_SETRANGE, DTM_SETFORMATA, DTM_SETFORMATW, DTM_SETMCCOLOR };
 static const UINT w2s_state_monthcal[] = { MCM_SETCURSEL, MCM_SETRANGE, MCM_SETTODAY, MCM_SETFIRSTDAYOFWEEK };
 static const UINT w2s_state_hotkey[] = { HKM_SETHOTKEY, HKM_SETRULES };
@@ -146,7 +146,7 @@ static const struct w2s_map_entry w2s_map_entries[] =
     { "progress", w2s_state_progress, 8, NULL, 0 },
     { "trackbar", w2s_state_trackbar, 9, NULL, 0 },
     { "trackbar.vertical", w2s_state_trackbar_vertical, 0, NULL, 0 },
-    { "updown", w2s_state_updown, 5, NULL, 0 },
+    { "updown", w2s_state_updown, 7, NULL, 0 },
     { "datetime", w2s_state_datetime, 5, NULL, 0 },
     { "monthcal", w2s_state_monthcal, 4, NULL, 0 },
     { "hotkey", w2s_state_hotkey, 2, NULL, 0 },

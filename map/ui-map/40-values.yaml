@@ -73,12 +73,15 @@ entries:
             Stepper(title, value: $intValue, in: 0...100).labelsHidden()
           }
     glass: automatic
-    state_in: [UDM_SETPOS32, UDM_SETRANGE32, UDM_SETBUDDY, UDM_SETACCEL, UDM_SETBASE]
+    state_in: [UDM_SETPOS32, UDM_SETRANGE32, UDM_SETPOS, UDM_SETRANGE, UDM_SETBUDDY, UDM_SETACCEL, UDM_SETBASE]
     events_out: {step: WM_NOTIFY/UDN_DELTAPOS (the app may veto) then WM_VSCROLL}
     notes: >-
       With a buddy edit (UDS_AUTOBUDDY / UDM_SETBUDDY) the pair becomes one field plus
       stepper, the macOS arrangement. Without a buddy, only the Stepper. UDM_SETBASE 16 uses
-      a hexadecimal format.
+      a hexadecimal format. The buddy is a window of its own and is translated by its own
+      entry (edit.number), so the up-down itself hosts only the Stepper, next to it. A step
+      is a click on that arrow through the control's own mouse handling, so acceleration,
+      wrapping, reversed ranges, the UDN_DELTAPOS veto and the buddy text stay wine's.
 
   - id: datetime
     kind: control
@@ -94,7 +97,10 @@ entries:
     notes: >-
       .compact is the macOS field that opens a calendar popover, the same thing as the
       Win32 field with its drop-down calendar. Custom formats (DTM_SETFORMAT) that the
-      system formats can't express keep the system format; the value is still exact.
+      system formats can't express keep the system format; the value is still exact. Dates
+      travel as SYSTEMTIME fields, local and Gregorian whatever the user's calendar. The
+      picker shows the date or the time; a change keeps the other part. DTM_SETSYSTEMTIME
+      doesn't notify, so a native change adds DTN_DATETIMECHANGE as a user's would.
 
   - id: monthcal
     kind: control
@@ -107,6 +113,10 @@ entries:
     glass: none
     state_in: [MCM_SETCURSEL, MCM_SETRANGE, MCM_SETTODAY, MCM_SETFIRSTDAYOFWEEK]
     events_out: {select: WM_NOTIFY/MCN_SELCHANGE then MCN_SELECT}
+    notes: >-
+      A day chosen natively is MCM_SETCURSEL followed by MCN_SELCHANGE and MCN_SELECT, as a
+      click raises them. MCS_MULTISELECT calendars stay wine's until NSDatePicker's range
+      mode (see the flag) is wired up.
 
   - id: hotkey
     kind: control

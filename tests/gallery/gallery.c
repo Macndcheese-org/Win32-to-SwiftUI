@@ -32,7 +32,7 @@ static HWND ctl[ID_LAST];
 static HWND main_window;
 static int got_command[ID_LAST][16];   /* [id][notification code & 15] */
 static int got_hscroll, got_tabchange, got_lvchanged, got_dropdown, got_status_click = -1;
-static int got_expanding, got_treesel;
+static int got_expanding, got_treesel, got_deltapos, got_vscroll, got_datechange, got_mcselchange, got_mcselect;
 static HTREEITEM tree_fruits, tree_apple, tree_pear, tree_veg;
 static BOOL in_selftest;
 
@@ -216,6 +216,17 @@ static void create_controls2(void)
         ins.item.pszText = (WCHAR *)L"Pear";
         tree_pear = (HTREEITEM)SendMessageW( ctl[ID_TREE], TVM_INSERTITEMW, 0, (LPARAM)&ins );
     }
+    make( L"Edit", L"5", ES_NUMBER | WS_BORDER | WS_TABSTOP, 916, 112, 80, 22, ID_UDEDIT );
+    make( UPDOWN_CLASSW, NULL, UDS_AUTOBUDDY | UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS, 0, 0, 0, 0, ID_UPDOWN );
+    SendMessageW( ctl[ID_UPDOWN], UDM_SETRANGE32, 0, 100 );
+    SendMessageW( ctl[ID_UPDOWN], UDM_SETPOS32, 0, 5 );
+    {
+        SYSTEMTIME st = { 2024, 5, 5, 17, 9, 30, 0, 0 };
+        make( DATETIMEPICK_CLASSW, NULL, DTS_SHORTDATECENTURYFORMAT | WS_TABSTOP, 916, 142, 180, 24, ID_DATETIME );
+        SendMessageW( ctl[ID_DATETIME], DTM_SETSYSTEMTIME, GDT_VALID, (LPARAM)&st );
+        make( MONTHCAL_CLASSW, NULL, WS_BORDER | WS_TABSTOP, 916, 330, 208, 160, ID_MONTHCAL );
+        SendMessageW( ctl[ID_MONTHCAL], MCM_SETCURSEL, 0, (LPARAM)&st );
+    }
     make( L"Static", NULL, SS_ETCHEDFRAME, 724, 112, 120, 60, ID_FRAME );
     make( L"Static", NULL, SS_GRAYRECT, 852, 112, 40, 60, ID_RECT );
 
@@ -279,6 +290,9 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     case WM_HSCROLL:
         if ((HWND)lparam == ctl[ID_TRACK]) got_hscroll++;
         return 0;
+    case WM_VSCROLL:
+        if ((HWND)lparam == ctl[ID_UPDOWN]) got_vscroll++;
+        return 0;
     case WM_NOTIFY:
     {
         NMHDR *hdr = (NMHDR *)lparam;
@@ -300,6 +314,10 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
             }
         }
         if (hdr->hwndFrom == ctl[ID_TREE] && hdr->code == TVN_SELCHANGEDW) got_treesel++;
+        if (hdr->hwndFrom == ctl[ID_UPDOWN] && hdr->code == UDN_DELTAPOS) got_deltapos++;
+        if (hdr->hwndFrom == ctl[ID_DATETIME] && hdr->code == DTN_DATETIMECHANGE) got_datechange++;
+        if (hdr->hwndFrom == ctl[ID_MONTHCAL] && hdr->code == MCN_SELCHANGE) got_mcselchange++;
+        if (hdr->hwndFrom == ctl[ID_MONTHCAL] && hdr->code == MCN_SELECT) got_mcselect++;
         if (hdr->hwndFrom == ctl[ID_STATUS] && hdr->code == NM_CLICK)
             got_status_click = (int)((NMMOUSE *)lparam)->dwItemSpec;
         if (hdr->hwndFrom == ctl[ID_SPLIT] && hdr->code == BCN_DROPDOWN)
@@ -529,6 +547,43 @@ static void selftest2(void)
         check( (HTREEITEM)SendMessageW( tree, TVM_GETNEXTITEM, TVGN_CARET, 0 ) == tree_apple && got_treesel > 0,
                "native selection -> TVM_GETNEXTITEM(TVGN_CARET) + TVN_SELCHANGED" );
     }
+
+    /* up-down with its buddy edit */
+    SendMessageW( ctl[ID_UPDOWN], UDM_SETPOS32, 0, 42 );
+    pump( 150 );
+    check( query_has( ctl[ID_UPDOWN], "\"value\":42" ) && query_has( ctl[ID_UDEDIT], "\"text\":\"42\"" ),
+           "UDM_SETPOS32 reaches the native stepper and the buddy field" );
+    inject( ctl[ID_UPDOWN], "{\"t\":\"step\",\"v\":1}" );
+    pump( 200 );
+    GetWindowTextW( ctl[ID_UDEDIT], text, ARRAYSIZE(text) );
+    check( SendMessageW( ctl[ID_UPDOWN], UDM_GETPOS32, 0, 0 ) == 43 && !wcscmp( text, L"43" ) &&
+           got_deltapos > 0 && got_vscroll > 0, "native step -> UDN_DELTAPOS, position 43, buddy text, WM_VSCROLL" );
+
+    /* date and time picker */
+    {
+        SYSTEMTIME st = { 2023, 12, 0, 24, 18, 0, 0, 0 };
+        SendMessageW( ctl[ID_DATETIME], DTM_SETSYSTEMTIME, GDT_VALID, (LPARAM)&st );
+        pump( 150 );
+        check( query_has( ctl[ID_DATETIME], "\"date\":[2023,12,24,18,0,0]" ), "DTM_SETSYSTEMTIME reaches the native date picker" );
+        inject( ctl[ID_DATETIME], "{\"t\":\"date\",\"a\":[2025,1,2,0,0,0]}" );
+        pump( 200 );
+        SendMessageW( ctl[ID_DATETIME], DTM_GETSYSTEMTIME, 0, (LPARAM)&st );
+        check( st.wYear == 2025 && st.wMonth == 1 && st.wDay == 2 && st.wHour == 18 && got_datechange > 0,
+               "native date -> DTM_GETSYSTEMTIME (time kept) + DTN_DATETIMECHANGE" );
+    }
+
+    /* month calendar */
+    {
+        SYSTEMTIME st = { 2024, 2, 0, 29, 0, 0, 0, 0 };
+        SendMessageW( ctl[ID_MONTHCAL], MCM_SETCURSEL, 0, (LPARAM)&st );
+        pump( 150 );
+        check( query_has( ctl[ID_MONTHCAL], "\"date\":[2024,2,29," ), "MCM_SETCURSEL reaches the native calendar" );
+        inject( ctl[ID_MONTHCAL], "{\"t\":\"date\",\"a\":[2024,3,3]}" );
+        pump( 200 );
+        SendMessageW( ctl[ID_MONTHCAL], MCM_GETCURSEL, 0, (LPARAM)&st );
+        check( st.wMonth == 3 && st.wDay == 3 && got_mcselchange > 0 && got_mcselect > 0,
+               "native day -> MCM_GETCURSEL + MCN_SELCHANGE + MCN_SELECT" );
+    }
 }
 
 static int selftest(void)
@@ -537,7 +592,7 @@ static int selftest(void)
                                ID_SEP, ID_ICON, ID_EDIT, ID_PASSWORD, ID_NUMBER, ID_READONLY, ID_COMBO, ID_LIST,
                                ID_MULTI, ID_REPORT, ID_LVLIST, ID_PROGRESS, ID_TRACK, ID_TAB,
                                ID_3STATE, ID_SPLIT, ID_CMDLINK, ID_FRAME, ID_RECT, ID_STATUS, ID_MLEDIT,
-                               ID_ECOMBO, ID_TREE };
+                               ID_ECOMBO, ID_TREE, ID_UDEDIT, ID_UPDOWN, ID_DATETIME, ID_MONTHCAL };
     HMODULE w2s = GetModuleHandleW( L"win32swiftui.dll" );
     WCHAR text[256], file[MAX_PATH] = L"";
     OPENFILENAMEW ofn = { sizeof(ofn) };

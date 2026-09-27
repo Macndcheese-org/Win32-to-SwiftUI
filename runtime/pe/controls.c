@@ -1047,6 +1047,147 @@ static void trackbar_apply( struct w2s_control *ctl, const struct w2s_event *ev 
 
 static const struct w2s_kind kind_trackbar = { "trackbar", trackbar_snapshot, trackbar_apply };
 
+/* ---------- Up-down, date and time ---------- */
+
+static void updown_snapshot( struct w2s_control *ctl, struct json *j )
+{
+    int lo = 0, hi = 0;
+    BOOL error = FALSE;
+
+    json_int( j, "value", SendMessageW( ctl->hwnd, UDM_GETPOS32, 0, (LPARAM)&error ) );
+    SendMessageW( ctl->hwnd, UDM_GETRANGE32, (WPARAM)&lo, (LPARAM)&hi );
+    json_int( j, "min", lo );
+    json_int( j, "max", hi );
+    json_bool( j, "buddy", SendMessageW( ctl->hwnd, UDM_GETBUDDY, 0, 0 ) != 0 );
+}
+
+/* A click on that arrow, through the control's own mouse handling: the
+ * acceleration, wrapping, reversed ranges, the UDN_DELTAPOS veto, the buddy's
+ * text and WM_VSCROLL all stay the up-down control's. */
+static void updown_apply( struct w2s_control *ctl, const struct w2s_event *ev )
+{
+    DWORD style = GetWindowLongW( ctl->hwnd, GWL_STYLE );
+    BOOL up = ev->value > 0;
+    RECT rc;
+    LPARAM pt;
+
+    if (strcmp( ev->type, "step" ) || !ev->has_value) return;
+    GetClientRect( ctl->hwnd, &rc );
+    if (style & UDS_HORZ) pt = MAKELPARAM( up ? rc.right * 3 / 4 : rc.right / 4, rc.bottom / 2 );
+    else pt = MAKELPARAM( rc.right / 2, up ? rc.bottom / 4 : rc.bottom * 3 / 4 );
+    SendMessageW( ctl->hwnd, WM_LBUTTONDOWN, MK_LBUTTON, pt );
+    SendMessageW( ctl->hwnd, WM_LBUTTONUP, 0, pt );
+}
+
+static const struct w2s_kind kind_updown = { "updown", updown_snapshot, updown_apply };
+
+/* dates travel as [year, month, day, hour, minute, second], local and Gregorian like SYSTEMTIME */
+static void json_systemtime( struct json *j, const char *key, const SYSTEMTIME *st )
+{
+    json_arr_begin( j, key );
+    json_int( j, NULL, st->wYear );
+    json_int( j, NULL, st->wMonth );
+    json_int( j, NULL, st->wDay );
+    json_int( j, NULL, st->wHour );
+    json_int( j, NULL, st->wMinute );
+    json_int( j, NULL, st->wSecond );
+    json_arr_end( j );
+}
+
+static void json_date_range( struct json *j, DWORD which, const SYSTEMTIME *range )
+{
+    if (which & GDTR_MIN) json_systemtime( j, "dateMin", &range[0] );
+    if (which & GDTR_MAX) json_systemtime( j, "dateMax", &range[1] );
+}
+
+static void datetime_snapshot( struct w2s_control *ctl, struct json *j )
+{
+    DWORD style = GetWindowLongW( ctl->hwnd, GWL_STYLE );
+    SYSTEMTIME st, range[2];
+    BOOL valid = SendMessageW( ctl->hwnd, DTM_GETSYSTEMTIME, 0, (LPARAM)&st ) == GDT_VALID;
+
+    if (!valid) GetLocalTime( &st );    /* DTS_SHOWNONE unchecked: the picker still shows a date */
+    json_systemtime( j, "date", &st );
+    json_bool( j, "dateValid", valid );
+    memset( range, 0, sizeof(range) );
+    json_date_range( j, (DWORD)SendMessageW( ctl->hwnd, DTM_GETRANGE, 0, (LPARAM)range ), range );
+    json_bool( j, "showNone", (style & DTS_SHOWNONE) != 0 );
+    json_bool( j, "timeOnly", (style & DTS_TIMEFORMAT) == DTS_TIMEFORMAT );
+    json_bool( j, "upDown", (style & DTS_UPDOWN) != 0 );
+}
+
+/* DTM_SETSYSTEMTIME doesn't notify; a user's change does */
+static void datetime_apply( struct w2s_control *ctl, const struct w2s_event *ev )
+{
+    DWORD style = GetWindowLongW( ctl->hwnd, GWL_STYLE );
+    NMDATETIMECHANGE nm = { { 0 } };
+    SYSTEMTIME st;
+
+    if (SendMessageW( ctl->hwnd, DTM_GETSYSTEMTIME, 0, (LPARAM)&st ) != GDT_VALID) GetLocalTime( &st );
+    if (!strcmp( ev->type, "none" ))
+    {
+        if (!(style & DTS_SHOWNONE)) return;
+        SendMessageW( ctl->hwnd, DTM_SETSYSTEMTIME, GDT_NONE, (LPARAM)&st );
+        nm.dwFlags = GDT_NONE;
+    }
+    else if (!strcmp( ev->type, "date" ) && ev->array_count >= 3)
+    {
+        /* the picker shows either the date or the time: the rest stays */
+        if ((style & DTS_TIMEFORMAT) == DTS_TIMEFORMAT)
+        {
+            if (ev->array_count < 6) return;
+            st.wHour = ev->array[3];
+            st.wMinute = ev->array[4];
+            st.wSecond = ev->array[5];
+        }
+        else
+        {
+            st.wYear = ev->array[0];
+            st.wMonth = ev->array[1];
+            st.wDay = ev->array[2];
+        }
+        st.wMilliseconds = 0;
+        if (!SendMessageW( ctl->hwnd, DTM_SETSYSTEMTIME, GDT_VALID, (LPARAM)&st )) return;
+        SendMessageW( ctl->hwnd, DTM_GETSYSTEMTIME, 0, (LPARAM)&st );     /* with its day of the week */
+        nm.dwFlags = GDT_VALID;
+    }
+    else return;
+    nm.st = st;
+    w2s_notify_parent( ctl->hwnd, DTN_DATETIMECHANGE, &nm.nmhdr );
+}
+
+static const struct w2s_kind kind_datetime = { "datetime", datetime_snapshot, datetime_apply };
+
+static void monthcal_snapshot( struct w2s_control *ctl, struct json *j )
+{
+    SYSTEMTIME st, range[2];
+
+    if (!SendMessageW( ctl->hwnd, MCM_GETCURSEL, 0, (LPARAM)&st )) GetLocalTime( &st );
+    st.wHour = st.wMinute = st.wSecond = 0;
+    json_systemtime( j, "date", &st );
+    memset( range, 0, sizeof(range) );
+    json_date_range( j, (DWORD)SendMessageW( ctl->hwnd, MCM_GETRANGE, 0, (LPARAM)range ), range );
+}
+
+/* a click on a day: the selection changes, then it is chosen */
+static void monthcal_apply( struct w2s_control *ctl, const struct w2s_event *ev )
+{
+    NMSELCHANGE nm = { { 0 } };
+    SYSTEMTIME st = { 0 };
+
+    if (strcmp( ev->type, "date" ) || ev->array_count < 3) return;
+    st.wYear = ev->array[0];
+    st.wMonth = ev->array[1];
+    st.wDay = ev->array[2];
+    if (!SendMessageW( ctl->hwnd, MCM_SETCURSEL, 0, (LPARAM)&st )) return;
+    SendMessageW( ctl->hwnd, MCM_GETCURSEL, 0, (LPARAM)&st );
+    nm.stSelStart = nm.stSelEnd = st;
+    w2s_notify_parent( ctl->hwnd, MCN_SELCHANGE, &nm.nmhdr );
+    w2s_notify_parent( ctl->hwnd, MCN_SELECT, &nm.nmhdr );
+}
+
+static const struct w2s_kind kind_monthcal = { "monthcal", monthcal_snapshot, monthcal_apply };
+
 /* ---------- Tab ---------- */
 
 static void tab_snapshot( struct w2s_control *ctl, struct json *j )
@@ -1254,6 +1395,14 @@ const struct w2s_kind *w2s_select_kind( HWND hwnd )
         return NULL;
     }
     if (is_class( name, STATUSCLASSNAMEW )) return &kind_statusbar;
+    if (is_class( name, UPDOWN_CLASSW )) return &kind_updown;
+    if (is_class( name, DATETIMEPICK_CLASSW )) return &kind_datetime;
+    if (is_class( name, MONTHCAL_CLASSW ))
+    {
+        /* a range of days: NSDatePicker's range mode, not translated yet */
+        if (style & MCS_MULTISELECT) return NULL;
+        return &kind_monthcal;
+    }
     if (is_class( name, WC_TREEVIEWW ))
     {
         /* check boxes are state images the native rows don't show yet */

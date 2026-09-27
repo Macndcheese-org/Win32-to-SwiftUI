@@ -68,6 +68,15 @@ struct Snapshot: Codable, Equatable {
     var marquee: Bool?
     var state: Int?
     var ticks: Int?
+    var buddy: Bool?            // up-down
+    // date and time: [year, month, day, hour, minute, second], local, Gregorian
+    var date: [Int]?
+    var dateMin: [Int]?
+    var dateMax: [Int]?
+    var dateValid: Bool?
+    var showNone: Bool?
+    var timeOnly: Bool?
+    var upDown: Bool?
     // tree view
     var nodes: [TreeNode]?
     var sidebar: Bool?

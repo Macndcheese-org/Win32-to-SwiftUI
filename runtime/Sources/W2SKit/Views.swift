@@ -9,6 +9,7 @@ enum ControlViews {
     // map: static.text static.separator static.image edit.single edit.password edit.number edit.readonly
     // map: combobox.dropdownlist listbox.single listbox.multi listview.list listview.report
     // map: progress trackbar tab static.frame statusbar edit.multiline combobox.editable treeview
+    // map: updown datetime monthcal
     static let entries: Set<String> = [
         "button.push", "button.default", "button.checkbox", "button.pushlike", "button.radio", "button.groupbox",
         "button.3state", "button.split", "button.commandlink",
@@ -16,7 +17,7 @@ enum ControlViews {
         "edit.single", "edit.password", "edit.number", "edit.readonly",
         "combobox.dropdownlist", "listbox.single", "listbox.multi", "listview.list", "listview.report",
         "progress", "trackbar", "tab", "static.frame", "statusbar", "edit.multiline", "combobox.editable",
-        "treeview",
+        "treeview", "updown", "datetime", "monthcal",
     ]
 
     static func supports(_ entry: String) -> Bool { entries.contains(entry) }
@@ -136,6 +137,15 @@ struct ControlRoot: View {
             TrackBar(model: model)
         case "tab":
             TabStrip(model: model)
+        case "updown":
+            Stepper("", onIncrement: { model.emit(["t": "step", "v": 1]) },
+                    onDecrement: { model.emit(["t": "step", "v": -1]) })
+                .labelsHidden()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case "datetime":
+            DateTimePicker(model: model, graphical: false)
+        case "monthcal":
+            DateTimePicker(model: model, graphical: true)
         default:
             EmptyView()
         }
@@ -1281,6 +1291,93 @@ struct StatusBar: View {
                 .help(pane.tip ?? "")
                 .gesture(TapGesture(count: 2).onEnded { model.emit(["t": "dblclick", "v": index]) }
                     .exclusively(before: TapGesture().onEnded { model.emit(["t": "click", "v": index]) }))
+        }
+    }
+}
+
+// MARK: - date and time (map: datetime, monthcal)
+
+/// SYSTEMTIME is local and Gregorian, whatever calendar the user reads dates in.
+enum W2SDate {
+    static let calendar: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = .current
+        return c
+    }()
+
+    static func date(_ c: [Int]?) -> Date? {
+        guard let c = c, c.count >= 3 else { return nil }
+        var parts = DateComponents()
+        parts.year = c[0]
+        parts.month = c[1]
+        parts.day = c[2]
+        parts.hour = c.count > 3 ? c[3] : 0
+        parts.minute = c.count > 4 ? c[4] : 0
+        parts.second = c.count > 5 ? c[5] : 0
+        return calendar.date(from: parts)
+    }
+
+    static func components(_ date: Date) -> [Int] {
+        let c = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+        return [c.year ?? 1601, c.month ?? 1, c.day ?? 1, c.hour ?? 0, c.minute ?? 0, c.second ?? 0]
+    }
+
+    static func range(_ low: [Int]?, _ high: [Int]?) -> ClosedRange<Date> {
+        let lo = date(low) ?? .distantPast, hi = date(high) ?? .distantFuture
+        return lo <= hi ? lo...hi : hi...lo
+    }
+}
+
+/// datetime: the compact field that opens a calendar (the Win32 field with its
+/// drop-down); a stepper field for DTS_UPDOWN and DTS_TIMEFORMAT; a check box
+/// before it for DTS_SHOWNONE. monthcal: the graphical calendar.
+struct DateTimePicker: View {
+    @ObservedObject var model: ControlModel
+    let graphical: Bool
+
+    var body: some View {
+        let snap = model.snap
+        let shown = W2SDate.date(snap.date) ?? Date()
+        let valid = snap.dateValid ?? true
+        let selection = Binding<Date>(
+            get: { shown },
+            set: { new in
+                let c = W2SDate.components(new)
+                guard c != model.snap.date else { return }
+                model.snap.date = c
+                model.snap.dateValid = true
+                model.emit(["t": "date", "a": c])
+            })
+        HStack(spacing: 4) {
+            if snap.showNone ?? false {
+                Toggle("", isOn: Binding(
+                    get: { valid },
+                    set: { on in
+                        model.snap.dateValid = on
+                        let event: [String: Any] = on ? ["t": "date", "a": W2SDate.components(shown)] : ["t": "none"]
+                        model.emit(event)
+                    }))
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
+            }
+            picker(selection, in: W2SDate.range(snap.dateMin, snap.dateMax))
+                .labelsHidden()
+                .disabled(!valid)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: graphical ? .center : .leading)
+    }
+
+    @ViewBuilder
+    func picker(_ selection: Binding<Date>, in range: ClosedRange<Date>) -> some View {
+        if graphical {
+            DatePicker("", selection: selection, in: range, displayedComponents: .date).datePickerStyle(.graphical)
+        } else if model.snap.timeOnly ?? false {
+            DatePicker("", selection: selection, in: range, displayedComponents: .hourAndMinute)
+                .datePickerStyle(.stepperField)
+        } else if model.snap.upDown ?? false {
+            DatePicker("", selection: selection, in: range, displayedComponents: .date).datePickerStyle(.stepperField)
+        } else {
+            DatePicker("", selection: selection, in: range, displayedComponents: .date).datePickerStyle(.compact)
         }
     }
 }
