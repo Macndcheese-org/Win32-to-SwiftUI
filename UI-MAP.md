@@ -775,7 +775,7 @@ The text comes from LVN_GETEMPTYMARKUP; macOS 14 has the dedicated empty-state v
 
 - Windows: `SysTreeView32`
 - Replaces visual parts: TREEVIEW/TVP_TREEITEM, TREEVIEW/TVP_GLYPH, TREEVIEW/TVP_HOTGLYPH, TREEVIEW/TVP_BRANCH
-- Windows → view: TVM_INSERTITEM, TVM_DELETEITEM, TVM_SETITEM, TVM_EXPAND, TVM_SELECTITEM, TVM_ENSUREVISIBLE, TVM_SETIMAGELIST
+- Windows → view: TVM_INSERTITEM, TVM_DELETEITEM, TVM_SETITEM, TVM_EXPAND, TVM_SELECTITEM, TVM_ENSUREVISIBLE, TVM_SETIMAGELIST, TVM_SORTCHILDREN, TVM_SORTCHILDRENCB
 - View → Windows: select: WM_NOTIFY/TVN_SELCHANGING then TVN_SELCHANGED; expand: TVN_ITEMEXPANDING then TVN_ITEMEXPANDED; activate: NM_DBLCLK; menu: NM_RCLICK; rename: TVN_BEGINLABELEDIT/TVN_ENDLABELEDIT
 
 **SwiftUI, macOS 12+**
@@ -792,7 +792,7 @@ List(selection: $selection) {
 }.listStyle(.sidebar)
 ```
 
-Rows are DisclosureGroup(isExpanded:) rather than List(children:), because apps fill a node's children only when TVN_ITEMEXPANDING arrives (file browsers do this), so the bridge must see the expansion before the children exist. .sidebar is the Finder-sidebar look; a tree inside a dialog uses .bordered.
+Rows are DisclosureGroup(isExpanded:) rather than List(children:), because apps fill a node's children only when TVN_ITEMEXPANDING arrives (file browsers do this), so the bridge must see the expansion before the children exist. .sidebar is the Finder-sidebar look; a tree inside a dialog uses .bordered. A native expansion is what a click on the node's button does: TVN_ITEMEXPANDING (the app may veto or insert the children), TVM_EXPAND, TVN_ITEMEXPANDED; a node's HTREEITEM is its id. TVS_CHECKBOXES trees stay wine's until the rows show state images.
 
 ### Stand-alone header control
 <a id="header"></a>`header` · SwiftUI · Liquid Glass: —

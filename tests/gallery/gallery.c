@@ -32,6 +32,8 @@ static HWND ctl[ID_LAST];
 static HWND main_window;
 static int got_command[ID_LAST][16];   /* [id][notification code & 15] */
 static int got_hscroll, got_tabchange, got_lvchanged, got_dropdown, got_status_click = -1;
+static int got_expanding, got_treesel;
+static HTREEITEM tree_fruits, tree_apple, tree_pear, tree_veg;
 static BOOL in_selftest;
 
 /* comctl32 v6 for the controls only it has */
@@ -195,6 +197,25 @@ static void create_controls2(void)
     SendMessageW( ctl[ID_ECOMBO], CB_ADDSTRING, 0, (LPARAM)L"Green" );
     SendMessageW( ctl[ID_ECOMBO], CB_ADDSTRING, 0, (LPARAM)L"Blue" );
     SendMessageW( ctl[ID_ECOMBO], CB_SETCURSEL, 1, 0 );
+    make( WC_TREEVIEWW, NULL, TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT | TVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,
+          724, 330, 180, 160, ID_TREE );
+    {
+        TVINSERTSTRUCTW ins = { TVI_ROOT, TVI_LAST };
+        ins.item.mask = TVIF_TEXT;
+        ins.item.pszText = (WCHAR *)L"Fruits";
+        tree_fruits = (HTREEITEM)SendMessageW( ctl[ID_TREE], TVM_INSERTITEMW, 0, (LPARAM)&ins );
+        /* filled when it is first expanded, as file browsers do */
+        ins.item.mask = TVIF_TEXT | TVIF_CHILDREN;
+        ins.item.cChildren = 1;
+        ins.item.pszText = (WCHAR *)L"Vegetables";
+        tree_veg = (HTREEITEM)SendMessageW( ctl[ID_TREE], TVM_INSERTITEMW, 0, (LPARAM)&ins );
+        ins.hParent = tree_fruits;
+        ins.item.mask = TVIF_TEXT;
+        ins.item.pszText = (WCHAR *)L"Apple";
+        tree_apple = (HTREEITEM)SendMessageW( ctl[ID_TREE], TVM_INSERTITEMW, 0, (LPARAM)&ins );
+        ins.item.pszText = (WCHAR *)L"Pear";
+        tree_pear = (HTREEITEM)SendMessageW( ctl[ID_TREE], TVM_INSERTITEMW, 0, (LPARAM)&ins );
+    }
     make( L"Static", NULL, SS_ETCHEDFRAME, 724, 112, 120, 60, ID_FRAME );
     make( L"Static", NULL, SS_GRAYRECT, 852, 112, 40, 60, ID_RECT );
 
@@ -263,6 +284,22 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         NMHDR *hdr = (NMHDR *)lparam;
         if (hdr->hwndFrom == ctl[ID_TAB] && hdr->code == TCN_SELCHANGE) got_tabchange++;
         if (hdr->hwndFrom == ctl[ID_REPORT] && hdr->code == LVN_ITEMCHANGED) got_lvchanged++;
+        if (hdr->hwndFrom == ctl[ID_TREE] && hdr->code == TVN_ITEMEXPANDINGW)
+        {
+            NMTREEVIEWW *nm = (NMTREEVIEWW *)lparam;
+            got_expanding++;
+            if (nm->action == TVE_EXPAND && nm->itemNew.hItem == tree_veg &&
+                !SendMessageW( hdr->hwndFrom, TVM_GETNEXTITEM, TVGN_CHILD, (LPARAM)tree_veg ))
+            {
+                TVINSERTSTRUCTW ins = { tree_veg, TVI_LAST };
+                ins.item.mask = TVIF_TEXT;
+                ins.item.pszText = (WCHAR *)L"Carrot";
+                SendMessageW( hdr->hwndFrom, TVM_INSERTITEMW, 0, (LPARAM)&ins );
+                ins.item.pszText = (WCHAR *)L"Leek";
+                SendMessageW( hdr->hwndFrom, TVM_INSERTITEMW, 0, (LPARAM)&ins );
+            }
+        }
+        if (hdr->hwndFrom == ctl[ID_TREE] && hdr->code == TVN_SELCHANGEDW) got_treesel++;
         if (hdr->hwndFrom == ctl[ID_STATUS] && hdr->code == NM_CLICK)
             got_status_click = (int)((NMMOUSE *)lparam)->dwItemSpec;
         if (hdr->hwndFrom == ctl[ID_SPLIT] && hdr->code == BCN_DROPDOWN)
@@ -462,6 +499,36 @@ static void selftest2(void)
     check( SendMessageW( ctl[ID_ECOMBO], CB_GETCURSEL, 0, 0 ) == 2 && !wcscmp( text, L"Blue" ) &&
            got_command[ID_ECOMBO][CBN_SELCHANGE] > 0 && got_command[ID_ECOMBO][CBN_DROPDOWN] > 0,
            "native choice -> CB_GETCURSEL, the edit text, CBN_SELCHANGE; opening -> CBN_DROPDOWN" );
+
+    /* tree view */
+    {
+        char event[128], needle[64];
+        HWND tree = ctl[ID_TREE];
+
+        check( query_has( tree, "\"text\":\"Vegetables\",\"kids\":true" ) || query_has( tree, "\"kids\":true" ),
+               "the tree's nodes reach the native outline" );
+        SendMessageW( tree, TVM_EXPAND, TVE_EXPAND, (LPARAM)tree_fruits );
+        SendMessageW( tree, TVM_SELECTITEM, TVGN_CARET, (LPARAM)tree_pear );
+        pump( 150 );
+        snprintf( needle, sizeof(needle), "\"selection\":%lld", (long long)(INT_PTR)tree_pear );
+        check( query_has( tree, "\"Apple\"" ) && query_has( tree, needle ),
+               "TVM_EXPAND and TVM_SELECTITEM reach the native outline" );
+        snprintf( event, sizeof(event), "{\"t\":\"expand\",\"v\":%lld}", (long long)(INT_PTR)tree_veg );
+        inject( tree, event );
+        pump( 250 );
+        check( got_expanding > 0 && (SendMessageW( tree, TVM_GETITEMSTATE, (WPARAM)tree_veg, TVIS_EXPANDED ) & TVIS_EXPANDED) &&
+               query_has( tree, "\"Carrot\"" ), "native expansion -> TVN_ITEMEXPANDING first, then the children appear" );
+        got_expanding = 0;
+        snprintf( event, sizeof(event), "{\"t\":\"collapse\",\"v\":%lld}", (long long)(INT_PTR)tree_veg );
+        inject( tree, event );
+        snprintf( event, sizeof(event), "{\"t\":\"select\",\"v\":%lld}", (long long)(INT_PTR)tree_apple );
+        inject( tree, event );
+        pump( 250 );
+        check( got_expanding > 0 && !(SendMessageW( tree, TVM_GETITEMSTATE, (WPARAM)tree_veg, TVIS_EXPANDED ) & TVIS_EXPANDED),
+               "native collapse -> TVN_ITEMEXPANDING, collapsed" );
+        check( (HTREEITEM)SendMessageW( tree, TVM_GETNEXTITEM, TVGN_CARET, 0 ) == tree_apple && got_treesel > 0,
+               "native selection -> TVM_GETNEXTITEM(TVGN_CARET) + TVN_SELCHANGED" );
+    }
 }
 
 static int selftest(void)
@@ -470,7 +537,7 @@ static int selftest(void)
                                ID_SEP, ID_ICON, ID_EDIT, ID_PASSWORD, ID_NUMBER, ID_READONLY, ID_COMBO, ID_LIST,
                                ID_MULTI, ID_REPORT, ID_LVLIST, ID_PROGRESS, ID_TRACK, ID_TAB,
                                ID_3STATE, ID_SPLIT, ID_CMDLINK, ID_FRAME, ID_RECT, ID_STATUS, ID_MLEDIT,
-                               ID_ECOMBO };
+                               ID_ECOMBO, ID_TREE };
     HMODULE w2s = GetModuleHandleW( L"win32swiftui.dll" );
     WCHAR text[256], file[MAX_PATH] = L"";
     OPENFILENAMEW ofn = { sizeof(ofn) };

@@ -8,7 +8,7 @@ enum ControlViews {
     // map: button.3state button.split button.commandlink
     // map: static.text static.separator static.image edit.single edit.password edit.number edit.readonly
     // map: combobox.dropdownlist listbox.single listbox.multi listview.list listview.report
-    // map: progress trackbar tab static.frame statusbar edit.multiline combobox.editable
+    // map: progress trackbar tab static.frame statusbar edit.multiline combobox.editable treeview
     static let entries: Set<String> = [
         "button.push", "button.default", "button.checkbox", "button.pushlike", "button.radio", "button.groupbox",
         "button.3state", "button.split", "button.commandlink",
@@ -16,6 +16,7 @@ enum ControlViews {
         "edit.single", "edit.password", "edit.number", "edit.readonly",
         "combobox.dropdownlist", "listbox.single", "listbox.multi", "listview.list", "listview.report",
         "progress", "trackbar", "tab", "static.frame", "statusbar", "edit.multiline", "combobox.editable",
+        "treeview",
     ]
 
     static func supports(_ entry: String) -> Bool { entries.contains(entry) }
@@ -125,6 +126,8 @@ struct ControlRoot: View {
             ListBoxView(model: model, multi: entry == "listbox.multi")
         case "listview.list":
             ListBoxView(model: model, multi: !(snap.single ?? false), fromRows: true)
+        case "treeview":
+            TreeList(model: model)
         case "listview.report":
             ReportView(model: model, scale: metrics.scale)
         case "progress":
@@ -1116,6 +1119,70 @@ struct ReportFallback: View {
             .modifier(DoubleClickRows(model: model))
         }
         .border(Color(nsColor: .separatorColor))
+    }
+}
+
+// MARK: - tree (map: treeview)
+
+/// Rows are DisclosureGroup(isExpanded:) rather than List(children:): apps
+/// fill a node's children on TVN_ITEMEXPANDING, so the expansion goes to Win32
+/// first and the children arrive with the next snapshot. The node shows open
+/// at once (and closes again if the app vetoes).
+struct TreeList: View {
+    @ObservedObject var model: ControlModel
+
+    var body: some View {
+        let list = List(selection: Binding<Int?>(
+            get: { model.snap.selection.flatMap { $0 != 0 ? $0 : nil } },
+            set: { id in
+                guard let id = id, id != model.snap.selection else { return }
+                model.snap.selection = id
+                model.emit(["t": "select", "v": id])
+            })) {
+            TreeRows(model: model, nodes: model.snap.nodes ?? [])
+        }
+        .modifier(DoubleClickRows(model: model))
+        if model.snap.sidebar ?? false {
+            list.listStyle(.sidebar)
+        } else {
+            list.listStyle(.bordered)
+        }
+    }
+}
+
+struct TreeRows: View {
+    @ObservedObject var model: ControlModel
+    let nodes: [Snapshot.TreeNode]
+
+    var body: some View {
+        ForEach(nodes) { node in
+            if node.kids ?? false {
+                DisclosureGroup(isExpanded: Binding(
+                    get: { node.open ?? false },
+                    set: { open in
+                        guard open != (node.open ?? false) else { return }
+                        model.snap.nodes = TreeRows.setting(node.id, open: open, in: model.snap.nodes ?? [])
+                        model.emit(["t": open ? "expand" : "collapse", "v": node.id])
+                    })) {
+                    // the recursion goes through AnyView so the view type stays finite
+                    AnyView(TreeRows(model: model, nodes: node.children ?? []))
+                } label: {
+                    Text(node.text).lineLimit(1)
+                }
+                .tag(Optional(node.id))     // the selection is Int? (as the list boxes')
+            } else {
+                Text(node.text).lineLimit(1).tag(Optional(node.id))
+            }
+        }
+    }
+
+    static func setting(_ id: Int, open: Bool, in nodes: [Snapshot.TreeNode]) -> [Snapshot.TreeNode] {
+        nodes.map { node in
+            var node = node
+            if node.id == id { node.open = open }
+            else if let children = node.children { node.children = setting(id, open: open, in: children) }
+            return node
+        }
     }
 }
 

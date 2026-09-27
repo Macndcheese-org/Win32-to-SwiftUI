@@ -39,7 +39,7 @@ struct json
     char *buf;
     size_t len, cap;
     int depth;
-    BOOL first[16];
+    BOOL first[128];        /* a tree view nests two levels per tree level */
 };
 
 void json_init( struct json *j );

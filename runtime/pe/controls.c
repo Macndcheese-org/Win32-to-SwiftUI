@@ -878,6 +878,128 @@ static void listview_apply( struct w2s_control *ctl, const struct w2s_event *ev 
 static const struct w2s_kind kind_listview_list = { "listview.list", listview_snapshot, listview_apply };
 static const struct w2s_kind kind_listview_report = { "listview.report", listview_snapshot, listview_apply };
 
+/* ---------- TreeView ---------- */
+
+/* Each node carries its HTREEITEM as id (stable while it exists; the tree
+ * control checks handles it is given). Children are listed only under open
+ * nodes, the others just say whether they have any: apps fill a node's
+ * children on TVN_ITEMEXPANDING, so the native view asks for an expansion
+ * before the children exist. */
+#define MAX_TREE_NODES 5000
+#define MAX_TREE_DEPTH 50
+
+static void tree_nodes( HWND hwnd, HTREEITEM item, struct json *j, int depth, int *budget )
+{
+    for (; item && *budget > 0; item = (HTREEITEM)SendMessageW( hwnd, TVM_GETNEXTITEM, TVGN_NEXT, (LPARAM)item ))
+    {
+        TVITEMW it = { TVIF_TEXT | TVIF_STATE | TVIF_CHILDREN | TVIF_HANDLE };
+        WCHAR text[260];
+        HTREEITEM child;
+        BOOL open;
+
+        text[0] = 0;
+        it.hItem = item;
+        it.pszText = text;
+        it.cchTextMax = ARRAYSIZE(text);
+        it.stateMask = TVIS_EXPANDED;
+        SendMessageW( hwnd, TVM_GETITEMW, 0, (LPARAM)&it );
+        if (it.pszText != text) lstrcpynW( text, it.pszText && it.pszText != LPSTR_TEXTCALLBACKW ? it.pszText : L"", ARRAYSIZE(text) );
+        (*budget)--;
+        child = (HTREEITEM)SendMessageW( hwnd, TVM_GETNEXTITEM, TVGN_CHILD, (LPARAM)item );
+        open = (it.state & TVIS_EXPANDED) && child && depth < MAX_TREE_DEPTH;
+
+        json_obj_begin( j );
+        json_int( j, "id", (INT_PTR)item );
+        json_str( j, "text", text );
+        json_bool( j, "kids", child || it.cChildren > 0 );
+        if (open)
+        {
+            json_bool( j, "open", TRUE );
+            json_arr_begin( j, "children" );
+            tree_nodes( hwnd, child, j, depth + 1, budget );
+            json_arr_end( j );
+        }
+        json_obj_end( j );
+    }
+}
+
+static void tree_snapshot( struct w2s_control *ctl, struct json *j )
+{
+    HWND parent = GetParent( ctl->hwnd );
+    WCHAR parent_class[64] = { 0 };
+    int budget = MAX_TREE_NODES;
+    RECT rc;
+
+    json_arr_begin( j, "nodes" );
+    tree_nodes( ctl->hwnd, (HTREEITEM)SendMessageW( ctl->hwnd, TVM_GETNEXTITEM, TVGN_ROOT, 0 ), j, 0, &budget );
+    json_arr_end( j );
+    json_int( j, "selection", (INT_PTR)SendMessageW( ctl->hwnd, TVM_GETNEXTITEM, TVGN_CARET, 0 ) );
+    /* a tree along the left edge of a window is a sidebar (Finder's); in a dialog, a bordered list */
+    GetClassNameW( parent, parent_class, ARRAYSIZE(parent_class) );
+    GetWindowRect( ctl->hwnd, &rc );
+    MapWindowPoints( NULL, parent, (POINT *)&rc, 2 );
+    json_bool( j, "sidebar", wcscmp( parent_class, L"#32770" ) && rc.left <= 1 );
+}
+
+/* what a click on the node's button does: notify, let the app veto or fill
+ * the children, expand, notify */
+static void tree_expand( HWND hwnd, HTREEITEM item, BOOL expand )
+{
+    BOOL unicode = (BOOL)SendMessageW( hwnd, TVM_GETUNICODEFORMAT, 0, 0 );
+    TVITEMW it = { TVIF_HANDLE | TVIF_STATE | TVIF_CHILDREN | TVIF_PARAM };
+    NMTREEVIEWW nm = { { 0 } };
+
+    it.hItem = item;
+    it.stateMask = TVIS_EXPANDED | TVIS_EXPANDEDONCE;
+    if (!SendMessageW( hwnd, TVM_GETITEMW, 0, (LPARAM)&it )) return;
+    if (!!(it.state & TVIS_EXPANDED) == !!expand) return;
+    if (expand && it.cChildren && !(it.state & TVIS_EXPANDEDONCE))
+    {
+        /* TVM_EXPAND notifies on a first expansion by itself, as a click does */
+        SendMessageW( hwnd, TVM_EXPAND, TVE_EXPAND, (LPARAM)item );
+        return;
+    }
+    nm.action = expand ? TVE_EXPAND : TVE_COLLAPSE;
+    nm.itemNew.mask = TVIF_HANDLE | TVIF_STATE | TVIF_PARAM;
+    nm.itemNew.hItem = item;
+    nm.itemNew.state = it.state;
+    nm.itemNew.stateMask = it.stateMask;
+    nm.itemNew.lParam = it.lParam;
+    if (w2s_notify_parent( hwnd, unicode ? TVN_ITEMEXPANDINGW : TVN_ITEMEXPANDINGA, &nm.hdr )) return; /* vetoed */
+    SendMessageW( hwnd, TVM_EXPAND, expand ? TVE_EXPAND : TVE_COLLAPSE, (LPARAM)item );
+    nm.itemNew.state ^= TVIS_EXPANDED;
+    w2s_notify_parent( hwnd, unicode ? TVN_ITEMEXPANDEDW : TVN_ITEMEXPANDEDA, &nm.hdr );
+}
+
+static void tree_apply( struct w2s_control *ctl, const struct w2s_event *ev )
+{
+    HTREEITEM item = (HTREEITEM)(INT_PTR)(INT64)ev->value;
+
+    if (!ev->has_value) return;
+    if (!strcmp( ev->type, "select" ))
+    {
+        if (item != (HTREEITEM)SendMessageW( ctl->hwnd, TVM_GETNEXTITEM, TVGN_CARET, 0 ))
+            SendMessageW( ctl->hwnd, TVM_SELECTITEM, TVGN_CARET, (LPARAM)item );
+    }
+    else if (!strcmp( ev->type, "expand" )) tree_expand( ctl->hwnd, item, TRUE );
+    else if (!strcmp( ev->type, "collapse" )) tree_expand( ctl->hwnd, item, FALSE );
+    else if (!strcmp( ev->type, "activate" ))
+    {
+        NMHDR nm = { 0 };
+        TVITEMW it = { TVIF_HANDLE | TVIF_STATE | TVIF_CHILDREN };
+
+        SendMessageW( ctl->hwnd, TVM_SELECTITEM, TVGN_CARET, (LPARAM)item );
+        /* unless the app handles the double click, it toggles the node */
+        if (w2s_notify_parent( ctl->hwnd, NM_DBLCLK, &nm )) return;
+        it.hItem = item;
+        it.stateMask = TVIS_EXPANDED;
+        if (SendMessageW( ctl->hwnd, TVM_GETITEMW, 0, (LPARAM)&it ) && it.cChildren)
+            tree_expand( ctl->hwnd, item, !(it.state & TVIS_EXPANDED) );
+    }
+}
+
+static const struct w2s_kind kind_treeview = { "treeview", tree_snapshot, tree_apply };
+
 /* ---------- Progress, trackbar ---------- */
 
 static void progress_snapshot( struct w2s_control *ctl, struct json *j )
@@ -1132,6 +1254,12 @@ const struct w2s_kind *w2s_select_kind( HWND hwnd )
         return NULL;
     }
     if (is_class( name, STATUSCLASSNAMEW )) return &kind_statusbar;
+    if (is_class( name, WC_TREEVIEWW ))
+    {
+        /* check boxes are state images the native rows don't show yet */
+        if (style & TVS_CHECKBOXES) return NULL;
+        return &kind_treeview;
+    }
     if (is_class( name, PROGRESS_CLASSW )) return (style & PBS_VERTICAL) ? NULL : &kind_progress;
     if (is_class( name, TRACKBAR_CLASSW )) return (style & TBS_VERT) ? NULL : &kind_trackbar;
     if (is_class( name, WC_TABCONTROLW ))

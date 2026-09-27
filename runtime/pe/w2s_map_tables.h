@@ -45,7 +45,7 @@ static const UINT w2s_state_listview_list[] = { 0 };
 static const UINT w2s_state_listview_checkboxes[] = { LVM_SETITEMSTATE };
 static const UINT w2s_state_listview_groups[] = { LVM_ENABLEGROUPVIEW, LVM_INSERTGROUP, LVM_SETGROUPINFO };
 static const UINT w2s_state_listview_empty[] = { 0 };
-static const UINT w2s_state_treeview[] = { TVM_INSERTITEMA, TVM_INSERTITEMW, TVM_DELETEITEM, TVM_SETITEMA, TVM_SETITEMW, TVM_EXPAND, TVM_SELECTITEM, TVM_ENSUREVISIBLE, TVM_SETIMAGELIST };
+static const UINT w2s_state_treeview[] = { TVM_INSERTITEMA, TVM_INSERTITEMW, TVM_DELETEITEM, TVM_SETITEMA, TVM_SETITEMW, TVM_EXPAND, TVM_SELECTITEM, TVM_ENSUREVISIBLE, TVM_SETIMAGELIST, TVM_SORTCHILDREN, TVM_SORTCHILDRENCB };
 static const UINT w2s_state_header[] = { HDM_INSERTITEMA, HDM_INSERTITEMW, HDM_SETITEMA, HDM_SETITEMW, HDM_LAYOUT };
 static const UINT w2s_state_tab[] = { TCM_INSERTITEMA, TCM_INSERTITEMW, TCM_SETITEMA, TCM_SETITEMW, TCM_DELETEITEM, TCM_SETCURSEL, TCM_SETCURFOCUS };
 static const UINT w2s_answers_tab[] = { TCM_ADJUSTRECT, TCM_GETITEMRECT };
@@ -131,7 +131,7 @@ static const struct w2s_map_entry w2s_map_entries[] =
     { "listview.checkboxes", w2s_state_listview_checkboxes, 1, NULL, 0 },
     { "listview.groups", w2s_state_listview_groups, 3, NULL, 0 },
     { "listview.empty", w2s_state_listview_empty, 0, NULL, 0 },
-    { "treeview", w2s_state_treeview, 9, NULL, 0 },
+    { "treeview", w2s_state_treeview, 11, NULL, 0 },
     { "header", w2s_state_header, 5, NULL, 0 },
     { "tab", w2s_state_tab, 7, w2s_answers_tab, 2 },
     { "propsheet", w2s_state_propsheet, 8, NULL, 0 },

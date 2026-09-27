@@ -10,6 +10,14 @@ typealias PostWake = @convention(c) (UnsafeMutableRawPointer?, UInt64) -> Void
 struct Snapshot: Codable, Equatable {
     struct Column: Codable, Equatable { var title: String; var width: Int?; var index: Int?; var align: String? }
     struct Pane: Codable, Equatable { var text: String; var right: Int; var ownerDraw: Bool?; var tip: String? }
+    /// A tree view item; `id` is its HTREEITEM. Children are listed only under open nodes.
+    struct TreeNode: Codable, Equatable, Identifiable {
+        var id: Int
+        var text: String
+        var kids: Bool?
+        var open: Bool?
+        var children: [TreeNode]?
+    }
 
     var entry: String?
     var ack: UInt64?            // the last native event the PE side has taken
@@ -60,6 +68,9 @@ struct Snapshot: Codable, Equatable {
     var marquee: Bool?
     var state: Int?
     var ticks: Int?
+    // tree view
+    var nodes: [TreeNode]?
+    var sidebar: Bool?
     // status bar
     var panes: [Pane]?
     var simple: Bool?
