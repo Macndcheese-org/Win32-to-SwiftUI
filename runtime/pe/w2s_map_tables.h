@@ -68,7 +68,7 @@ static const UINT w2s_state_hotkey[] = { HKM_SETHOTKEY, HKM_SETRULES };
 static const UINT w2s_state_ipaddress[] = { IPM_SETADDRESS, IPM_CLEARADDRESS, IPM_SETRANGE, IPM_SETFOCUS };
 static const UINT w2s_state_syslink[] = { WM_SETTEXT, LM_SETITEM };
 static const UINT w2s_state_animate[] = { ACM_OPENA, ACM_OPENW, ACM_PLAY, ACM_STOP };
-static const UINT w2s_state_tooltip[] = { TTM_ADDTOOLA, TTM_ADDTOOLW, TTM_DELTOOLA, TTM_DELTOOLW, TTM_UPDATETIPTEXTA, TTM_UPDATETIPTEXTW, TTM_SETTITLEA, TTM_SETTITLEW, TTM_ACTIVATE, TTM_SETMAXTIPWIDTH };
+static const UINT w2s_state_tooltip[] = { TTM_ADDTOOLA, TTM_ADDTOOLW, TTM_DELTOOLA, TTM_DELTOOLW, TTM_UPDATETIPTEXTA, TTM_UPDATETIPTEXTW, TTM_SETTOOLINFOA, TTM_SETTOOLINFOW, TTM_SETTITLEA, TTM_SETTITLEW, TTM_ACTIVATE, TTM_SETMAXTIPWIDTH };
 static const UINT w2s_state_tooltip_balloon[] = { TTM_TRACKACTIVATE, TTM_TRACKPOSITION, TTM_SETTITLEA, TTM_SETTITLEW };
 static const UINT w2s_state_nativefont[] = { 0 };
 static const UINT w2s_state_messagebox[] = { 0 };
@@ -153,7 +153,7 @@ static const struct w2s_map_entry w2s_map_entries[] =
     { "ipaddress", w2s_state_ipaddress, 4, NULL, 0 },
     { "syslink", w2s_state_syslink, 2, NULL, 0 },
     { "animate", w2s_state_animate, 4, NULL, 0 },
-    { "tooltip", w2s_state_tooltip, 10, NULL, 0 },
+    { "tooltip", w2s_state_tooltip, 12, NULL, 0 },
     { "tooltip.balloon", w2s_state_tooltip_balloon, 4, NULL, 0 },
     { "nativefont", w2s_state_nativefont, 0, NULL, 0 },
     { "messagebox", w2s_state_messagebox, 0, NULL, 0 },

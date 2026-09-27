@@ -81,6 +81,7 @@ char *utf8_from_wide( const WCHAR *s, int len );                   /* HeapAlloc'
 WCHAR *wide_from_utf8( const char *s, int len );                   /* HeapAlloc'd */
 
 /* main.c */
+#define W2S_WAKE_REFRESH 1      /* w2s_wake_message wparam: send a fresh snapshot (from another thread) */
 extern UINT w2s_wake_message;
 extern UINT w2s_os_major, w2s_os_minor;    /* the running macOS */
 BOOL w2s_get_host( HWND hwnd, struct w2s_host *host );
@@ -137,11 +138,14 @@ struct w2s_control
 };
 
 const struct w2s_kind *w2s_select_kind( HWND hwnd );
+void w2s_observe_tooltip( HWND hwnd );  /* controls.c: a tooltip window was created */
+WCHAR *w2s_tool_text( HWND hwnd );      /* controls.c: its tooltip's text, HeapAlloc'd, or NULL */
 struct w2s_control *w2s_control_from_hwnd( HWND hwnd );
 BOOL w2s_attach( HWND hwnd, const struct w2s_kind *kind );
 void w2s_common_snapshot( struct w2s_control *ctl, struct json *j );
 void w2s_push( struct w2s_control *ctl, BOOL force );
 const char *w2s_native_state( struct w2s_control *ctl, BOOL *changed );
+const UINT *w2s_map_state_in( const char *entry, unsigned int *count );
 void w2s_notify_parent_command( HWND hwnd, UINT code );
 LRESULT w2s_notify_parent( HWND hwnd, UINT code, NMHDR *hdr );
 

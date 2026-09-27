@@ -96,7 +96,7 @@ static void clip_wine_drawing( struct w2s_control *ctl, BOOL clip )
 
 void w2s_common_snapshot( struct w2s_control *ctl, struct json *j )
 {
-    WCHAR text[1024];
+    WCHAR text[1024], *help;
     HFONT font = (HFONT)SendMessageW( ctl->hwnd, WM_GETFONT, 0, 0 );
     LOGFONTW lf;
     RECT rc;
@@ -113,6 +113,18 @@ void w2s_common_snapshot( struct w2s_control *ctl, struct json *j )
     GetClientRect( ctl->hwnd, &rc );
     json_int( j, "widthPx", rc.right );
     json_int( j, "heightPx", rc.bottom );
+    if ((help = w2s_tool_text( ctl->hwnd )))
+    {
+        json_str( j, "help", help );
+        HeapFree( GetProcessHeap(), 0, help );
+    }
+}
+
+const UINT *w2s_map_state_in( const char *entry, unsigned int *count )
+{
+    const struct w2s_map_entry *e = map_entry( entry );
+    *count = e ? e->state_in_count : 0;
+    return e ? e->state_in : NULL;
 }
 
 static char *build_snapshot( struct w2s_control *ctl )
@@ -402,7 +414,8 @@ static LRESULT CALLBACK subclass_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
 
     if (msg == w2s_wake_message && w2s_wake_message)
     {
-        apply_events( ctl );
+        if (wparam == W2S_WAKE_REFRESH) w2s_push( ctl, FALSE );
+        else apply_events( ctl );
         return 0;
     }
 
@@ -491,8 +504,15 @@ BOOL w2s_attach( HWND hwnd, const struct w2s_kind *kind )
 void WINAPI W2SWindowCreated( HWND hwnd )
 {
     const struct w2s_kind *kind;
+    WCHAR name[64];
 
-    if (!unix_ready || !(kind = w2s_select_kind( hwnd ))) return;
+    if (!unix_ready) return;
+    if (GetClassNameW( hwnd, name, ARRAYSIZE(name) ) && wcsstr( name, TOOLTIPS_CLASSW ))
+    {
+        w2s_observe_tooltip( hwnd );
+        return;
+    }
+    if (!(kind = w2s_select_kind( hwnd ))) return;
     w2s_attach( hwnd, kind );
 }
 

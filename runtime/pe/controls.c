@@ -1303,6 +1303,160 @@ static void status_apply( struct w2s_control *ctl, const struct w2s_event *ev )
 static const struct w2s_kind kind_statusbar =
     { "statusbar", status_snapshot, status_apply, NULL, NULL, status_region };
 
+/* ---------- Tooltips: .help on translated controls ---------- */
+
+/* A tooltip window isn't a view: wine's tooltip never shows over a native
+ * control (its mouse messages stay native), so each translated control that
+ * is a tool (TTF_IDISHWND, as apps add tools for dialog controls) gets that
+ * tool's text as .help. The tooltip windows are watched here; when their
+ * tools change, the tool controls are asked to send a fresh snapshot. */
+#define MAX_TOOLTIPS 64
+
+struct tooltip
+{
+    HWND hwnd;
+    WNDPROC orig;
+    BOOL active;            /* TTM_ACTIVATE */
+    HWND *tools;            /* the tool windows last seen, HeapAlloc'd */
+    int tool_count;
+};
+
+static const WCHAR tooltip_prop[] = L"Win32ToSwiftUI.Tooltip";
+static CRITICAL_SECTION tooltip_section;
+static CRITICAL_SECTION_DEBUG tooltip_section_debug =
+{
+    0, 0, &tooltip_section,
+    { &tooltip_section_debug.ProcessLocksList, &tooltip_section_debug.ProcessLocksList },
+    0, 0, 0
+};
+static CRITICAL_SECTION tooltip_section = { &tooltip_section_debug, -1, 0, 0, 0, 0 };
+static HWND tooltips[MAX_TOOLTIPS];
+static int tooltip_count;
+
+/* the windows an app's tools stand for (not a control's own tooltip, whose
+ * tools notify the control itself) */
+static int tool_windows( HWND tip, HWND **out )
+{
+    int count = (int)SendMessageW( tip, TTM_GETTOOLCOUNT, 0, 0 ), i, n = 0;
+    HWND *list = HeapAlloc( GetProcessHeap(), 0, max( count, 1 ) * sizeof(HWND) );
+
+    for (i = 0; i < count; i++)
+    {
+        TTTOOLINFOW ti = { sizeof(ti) };
+        ti.lpszText = NULL;     /* no copy: TTM_GETTEXT resolves the text */
+        if (!SendMessageW( tip, TTM_ENUMTOOLSW, i, (LPARAM)&ti )) continue;
+        if ((ti.uFlags & TTF_IDISHWND) && (HWND)ti.uId != ti.hwnd) list[n++] = (HWND)ti.uId;
+    }
+    *out = list;
+    return n;
+}
+
+static void refresh_tools( struct tooltip *tip )
+{
+    HWND *now;
+    int n = tool_windows( tip->hwnd, &now ), i;
+
+    /* the ones that stopped being tools lose their help */
+    for (i = 0; i < tip->tool_count; i++)
+        if (w2s_control_from_hwnd( tip->tools[i] )) PostMessageW( tip->tools[i], w2s_wake_message, W2S_WAKE_REFRESH, 0 );
+    for (i = 0; i < n; i++)
+        if (w2s_control_from_hwnd( now[i] )) PostMessageW( now[i], w2s_wake_message, W2S_WAKE_REFRESH, 0 );
+    if (tip->tools) HeapFree( GetProcessHeap(), 0, tip->tools );
+    tip->tools = now;
+    tip->tool_count = n;
+}
+
+static BOOL is_tooltip_change( UINT msg )
+{
+    unsigned int count, i;
+    const UINT *list = w2s_map_state_in( "tooltip", &count );
+
+    if (msg == TTM_SETTOOLINFOA || msg == TTM_SETTOOLINFOW) return TRUE;
+    for (i = 0; i < count; i++) if (list[i] == msg) return TRUE;
+    return FALSE;
+}
+
+static LRESULT CALLBACK tooltip_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    struct tooltip *tip = GetPropW( hwnd, tooltip_prop );
+    LRESULT ret;
+    int i;
+
+    if (!tip) return DefWindowProcW( hwnd, msg, wparam, lparam );
+    if (msg == WM_NCDESTROY)
+    {
+        WNDPROC orig = tip->orig;
+
+        EnterCriticalSection( &tooltip_section );
+        for (i = 0; i < tooltip_count; i++) if (tooltips[i] == hwnd) tooltips[i] = tooltips[--tooltip_count];
+        LeaveCriticalSection( &tooltip_section );
+        tip->active = FALSE;
+        for (i = 0; i < tip->tool_count; i++)
+            if (w2s_control_from_hwnd( tip->tools[i] )) PostMessageW( tip->tools[i], w2s_wake_message, W2S_WAKE_REFRESH, 0 );
+        RemovePropW( hwnd, tooltip_prop );
+        if (tip->tools) HeapFree( GetProcessHeap(), 0, tip->tools );
+        HeapFree( GetProcessHeap(), 0, tip );
+        return CallWindowProcW( orig, hwnd, msg, wparam, lparam );
+    }
+    ret = CallWindowProcW( tip->orig, hwnd, msg, wparam, lparam );
+    if (msg == TTM_ACTIVATE) tip->active = wparam != 0;
+    if (is_tooltip_change( msg )) refresh_tools( tip );
+    return ret;
+}
+
+void w2s_observe_tooltip( HWND hwnd )
+{
+    struct tooltip *tip;
+
+    if (GetPropW( hwnd, tooltip_prop )) return;
+    EnterCriticalSection( &tooltip_section );
+    if (tooltip_count < MAX_TOOLTIPS) tooltips[tooltip_count++] = hwnd;
+    else hwnd = NULL;
+    LeaveCriticalSection( &tooltip_section );
+    if (!hwnd) return;
+    tip = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*tip) );
+    tip->hwnd = hwnd;
+    tip->active = TRUE;
+    SetPropW( hwnd, tooltip_prop, tip );
+    tip->orig = (WNDPROC)SetWindowLongPtrW( hwnd, GWLP_WNDPROC, (LONG_PTR)tooltip_proc );
+}
+
+WCHAR *w2s_tool_text( HWND hwnd )
+{
+    HWND list[MAX_TOOLTIPS];
+    int count, i, t;
+
+    EnterCriticalSection( &tooltip_section );
+    count = tooltip_count;
+    memcpy( list, tooltips, count * sizeof(HWND) );
+    LeaveCriticalSection( &tooltip_section );
+
+    for (t = 0; t < count; t++)
+    {
+        struct tooltip *tip = GetPropW( list[t], tooltip_prop );
+        int tools;
+
+        if (!tip || !tip->active || !IsWindow( list[t] )) continue;
+        tools = (int)SendMessageW( list[t], TTM_GETTOOLCOUNT, 0, 0 );
+        for (i = 0; i < tools; i++)
+        {
+            TTTOOLINFOW ti = { sizeof(ti) };
+            WCHAR *text;
+
+            ti.lpszText = NULL;
+            if (!SendMessageW( list[t], TTM_ENUMTOOLSW, i, (LPARAM)&ti )) continue;
+            if (!(ti.uFlags & TTF_IDISHWND) || (HWND)ti.uId != hwnd || ti.hwnd == hwnd) continue;
+            /* resolves LPSTR_TEXTCALLBACK (TTN_GETDISPINFO) and resource strings */
+            text = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, INFOTIPSIZE * sizeof(WCHAR) );
+            ti.lpszText = text;
+            SendMessageW( list[t], TTM_GETTEXTW, INFOTIPSIZE, (LPARAM)&ti );
+            if (text[0]) return text;
+            HeapFree( GetProcessHeap(), 0, text );
+        }
+    }
+    return NULL;
+}
+
 /* ---------- selection ---------- */
 
 const struct w2s_kind *w2s_select_kind( HWND hwnd )

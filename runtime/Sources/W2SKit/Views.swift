@@ -9,7 +9,7 @@ enum ControlViews {
     // map: static.text static.separator static.image edit.single edit.password edit.number edit.readonly
     // map: combobox.dropdownlist listbox.single listbox.multi listview.list listview.report
     // map: progress trackbar tab static.frame statusbar edit.multiline combobox.editable treeview
-    // map: updown datetime monthcal
+    // map: updown datetime monthcal tooltip (as .help on every control: HelpText)
     static let entries: Set<String> = [
         "button.push", "button.default", "button.checkbox", "button.pushlike", "button.radio", "button.groupbox",
         "button.3state", "button.split", "button.commandlink",
@@ -24,6 +24,20 @@ enum ControlViews {
 
     static func root(for model: ControlModel, entry: String) -> AnyView {
         AnyView(ControlRoot(model: model, entry: entry))
+    }
+}
+
+/// map: tooltip. A translated control that is a tooltip tool shows the tool's
+/// text the macOS way, after the usual hover delay.
+struct HelpText: ViewModifier {
+    let text: String?
+
+    func body(content: Content) -> some View {
+        if let text = text, !text.isEmpty {
+            content.help(text)
+        } else {
+            content
+        }
     }
 }
 
@@ -68,6 +82,7 @@ struct ControlRoot: View {
             let scale = geo.size.height / CGFloat(max(1, snap.heightPx ?? Double(geo.size.height)))
             let metrics = Metrics(snap: snap, scale: scale.isFinite && scale > 0 ? scale : 1)
             content(snap: snap, metrics: metrics)
+                .modifier(HelpText(text: snap.help))
                 .font(.system(size: metrics.fontSize))
                 .controlSize(metrics.controlSize)
                 .disabled(!(snap.enabled ?? true))

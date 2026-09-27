@@ -26,6 +26,7 @@ struct Snapshot: Codable, Equatable {
     var fontPx: Double?
     var widthPx: Double?
     var heightPx: Double?
+    var help: String?           // the text of the tooltip tool this control is
     // buttons
     var checked: Int?
     var isDefault: Bool?

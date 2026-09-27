@@ -33,6 +33,7 @@ static HWND main_window;
 static int got_command[ID_LAST][16];   /* [id][notification code & 15] */
 static int got_hscroll, got_tabchange, got_lvchanged, got_dropdown, got_status_click = -1;
 static int got_expanding, got_treesel, got_deltapos, got_vscroll, got_datechange, got_mcselchange, got_mcselect;
+static int got_dispinfo;
 static HTREEITEM tree_fruits, tree_apple, tree_pear, tree_veg;
 static BOOL in_selftest;
 
@@ -227,6 +228,20 @@ static void create_controls2(void)
         make( MONTHCAL_CLASSW, NULL, WS_BORDER | WS_TABSTOP, 916, 330, 208, 160, ID_MONTHCAL );
         SendMessageW( ctl[ID_MONTHCAL], MCM_SETCURSEL, 0, (LPARAM)&st );
     }
+    {
+        TTTOOLINFOW ti = { sizeof(ti) };
+        ctl[ID_TOOLTIP] = CreateWindowExW( WS_EX_TOPMOST, TOOLTIPS_CLASSW, NULL, WS_POPUP | TTS_ALWAYSTIP,
+                                           CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+                                           main_window, NULL, GetModuleHandleW( NULL ), NULL );
+        ti.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+        ti.hwnd = main_window;
+        ti.uId = (UINT_PTR)ctl[ID_PUSH];
+        ti.lpszText = (WCHAR *)L"Pushes the button";
+        SendMessageW( ctl[ID_TOOLTIP], TTM_ADDTOOLW, 0, (LPARAM)&ti );
+        ti.uId = (UINT_PTR)ctl[ID_CHECK];
+        ti.lpszText = LPSTR_TEXTCALLBACKW;      /* answered in WM_NOTIFY/TTN_GETDISPINFO */
+        SendMessageW( ctl[ID_TOOLTIP], TTM_ADDTOOLW, 0, (LPARAM)&ti );
+    }
     make( L"Static", NULL, SS_ETCHEDFRAME, 724, 112, 120, 60, ID_FRAME );
     make( L"Static", NULL, SS_GRAYRECT, 852, 112, 40, 60, ID_RECT );
 
@@ -315,6 +330,11 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         }
         if (hdr->hwndFrom == ctl[ID_TREE] && hdr->code == TVN_SELCHANGEDW) got_treesel++;
         if (hdr->hwndFrom == ctl[ID_UPDOWN] && hdr->code == UDN_DELTAPOS) got_deltapos++;
+        if (hdr->hwndFrom == ctl[ID_TOOLTIP] && hdr->code == TTN_GETDISPINFOW && hdr->idFrom == (UINT_PTR)ctl[ID_CHECK])
+        {
+            got_dispinfo++;
+            ((NMTTDISPINFOW *)lparam)->lpszText = (WCHAR *)L"Toggles the option";
+        }
         if (hdr->hwndFrom == ctl[ID_DATETIME] && hdr->code == DTN_DATETIMECHANGE) got_datechange++;
         if (hdr->hwndFrom == ctl[ID_MONTHCAL] && hdr->code == MCN_SELCHANGE) got_mcselchange++;
         if (hdr->hwndFrom == ctl[ID_MONTHCAL] && hdr->code == MCN_SELECT) got_mcselect++;
@@ -374,6 +394,15 @@ static BOOL query_has( HWND hwnd, const char *needle )
 {
     char *q = pQuery( hwnd );
     BOOL ok = q && strstr( q, needle );
+    if (!ok) printf( "      query: %s\n", q ? q : "(null)" );
+    pFree( q );
+    return ok;
+}
+
+static BOOL query_lacks( HWND hwnd, const char *needle )
+{
+    char *q = pQuery( hwnd );
+    BOOL ok = q && !strstr( q, needle );
     if (!ok) printf( "      query: %s\n", q ? q : "(null)" );
     pFree( q );
     return ok;
@@ -570,6 +599,24 @@ static void selftest2(void)
         SendMessageW( ctl[ID_DATETIME], DTM_GETSYSTEMTIME, 0, (LPARAM)&st );
         check( st.wYear == 2025 && st.wMonth == 1 && st.wDay == 2 && st.wHour == 18 && got_datechange > 0,
                "native date -> DTM_GETSYSTEMTIME (time kept) + DTN_DATETIMECHANGE" );
+    }
+
+    /* tooltips become .help on the controls that are tools */
+    check( query_has( ctl[ID_PUSH], "\"help\":\"Pushes the button\"" ), "a tooltip tool's text reaches its native control" );
+    check( query_has( ctl[ID_CHECK], "\"help\":\"Toggles the option\"" ) && got_dispinfo > 0,
+           "a callback tool's text comes from the app (TTN_GETDISPINFO)" );
+    {
+        TTTOOLINFOW ti = { sizeof(ti) };
+        ti.hwnd = main_window;
+        ti.uId = (UINT_PTR)ctl[ID_PUSH];
+        ti.lpszText = (WCHAR *)L"Pushes it now";
+        SendMessageW( ctl[ID_TOOLTIP], TTM_UPDATETIPTEXTW, 0, (LPARAM)&ti );
+        pump( 150 );
+        check( query_has( ctl[ID_PUSH], "\"help\":\"Pushes it now\"" ), "TTM_UPDATETIPTEXT updates the native help" );
+        SendMessageW( ctl[ID_TOOLTIP], TTM_ACTIVATE, FALSE, 0 );
+        pump( 150 );
+        check( query_lacks( ctl[ID_PUSH], "\"help\"" ), "TTM_ACTIVATE FALSE removes it" );
+        SendMessageW( ctl[ID_TOOLTIP], TTM_ACTIVATE, TRUE, 0 );
     }
 
     /* month calendar */

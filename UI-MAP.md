@@ -1162,7 +1162,7 @@ The control plays the shell's small "copying files" and "searching" AVIs; on mac
 
 - Windows: `tooltips_class32` TTS_ALWAYSTIP
 - Replaces visual parts: TOOLTIP/TTP_STANDARD, TOOLTIP/TTP_STANDARDTITLE
-- Windows → view: TTM_ADDTOOL, TTM_DELTOOL, TTM_UPDATETIPTEXT, TTM_SETTITLE, TTM_ACTIVATE, TTM_SETMAXTIPWIDTH
+- Windows → view: TTM_ADDTOOL, TTM_DELTOOL, TTM_UPDATETIPTEXT, TTM_SETTOOLINFO, TTM_SETTITLE, TTM_ACTIVATE, TTM_SETMAXTIPWIDTH
 - View → Windows: text: WM_NOTIFY/TTN_GETDISPINFO; show: TTN_SHOW; hide: TTN_POP
 
 **AppKit, macOS 12+**
@@ -1177,7 +1177,7 @@ view.toolTip = note
 Button(title, action: action).help(note)
 ```
 
-A tool that is itself a translated control gets .help(). A tool that is a plain window area (a game launcher's custom button) gets NSView.toolTip on a tracking rect, so the system tooltip appears after the usual delay.
+A tool that is itself a translated control gets .help(). A tool that is a plain window area (a game launcher's custom button) gets NSView.toolTip on a tracking rect, so the system tooltip appears after the usual delay. The runtime does the first half: the tooltip window is watched (never shown over a native control, whose mouse messages stay native), and each translated control that is a TTF_IDISHWND tool gets that tool's text, resolved by the tooltip itself (TTM_GETTEXT: TTN_GETDISPINFO callbacks, resource strings). A control's own tooltip (tools that notify the control) is left alone. Area tools keep wine's tooltip for now.
 
 ### Balloon tooltip
 <a id="tooltipballoon"></a>`tooltip.balloon` · SwiftUI · Liquid Glass: automatic on 26+
