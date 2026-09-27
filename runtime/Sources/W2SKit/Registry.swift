@@ -169,13 +169,43 @@ func bgraImage(_ base64: String, width w: Int, height h: Int) -> NSImage? {
     return NSImage(cgImage: cg, size: NSSize(width: w, height: h))
 }
 
-/// NSHostingView that lets clicks through where it draws nothing, so the
-/// Win32 content under a translated control (a tab page, a group's contents)
-/// stays clickable.
+/// NSHostingView that lets clicks through where the Win32 content under a
+/// translated control has to stay clickable (a tab page, a group's contents).
+/// SwiftUI draws its controls in the hosting view itself (no NSView each), so
+/// hitTest can't tell a button from empty space: `native` says where the view
+/// is a control, in its own coordinates. nil: everywhere.
 final class PassThroughHostingView<Content: View>: NSHostingView<Content> {
+    var native: ((NSPoint, NSSize) -> Bool)?
+
     override func hitTest(_ point: NSPoint) -> NSView? {
-        let hit = super.hitTest(point)
-        return hit === self ? nil : hit
+        guard let hit = super.hitTest(point) else { return nil }
+        // an AppKit view of its own (a text field) is always the control
+        guard hit === self, let native = native else { return hit }
+        return native(convert(point, from: superview), bounds.size) ? hit : nil
+    }
+
+    /// Where an entry's view takes clicks: decoration lets them all through, a
+    /// tab control only takes them on its tabs (strip or sidebar), not on the page.
+    static func region(for entry: String, model: ControlModel) -> ((NSPoint, NSSize) -> Bool)? {
+        switch entry {
+        case "static.text", "static.frame", "static.separator", "static.image", "button.groupbox", "progress":
+            return { _, _ in false }
+        case "tab":
+            return { [weak model] point, size in
+                guard let snap = model?.snap else { return false }
+                switch snap.mode {
+                case "wizard":
+                    return false        // the steps and header can't be clicked
+                case "sidebar":
+                    let scale = size.width / CGFloat(max(1, snap.widthPx ?? Double(size.width)))
+                    return point.x < CGFloat(snap.sidebarPx ?? 0) * scale
+                default:
+                    return point.y < 34 // the tab strip, over the top of the page (flipped)
+                }
+            }
+        default:
+            return nil
+        }
     }
 }
 

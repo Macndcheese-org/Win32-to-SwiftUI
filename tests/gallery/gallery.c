@@ -492,6 +492,8 @@ static INT_PTR CALLBACK page_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
 static const WCHAR *page_titles[] = { L"General", L"Appearance", L"Desktop & Dock", L"Displays", L"Sound",
                                       L"Keyboard shortcuts", L"Accessibility" };
 
+static INT_PTR sheet_result;     /* what PropertySheet returned */
+
 /* PSH_MODELESS: returns the sheet; otherwise runs it and returns NULL */
 static HWND property_sheet( int pages, BOOL modeless )
 {
@@ -519,6 +521,7 @@ static HWND property_sheet( int pages, BOOL modeless )
     psh.nPages = pages;
     psh.phpage = hpages;
     sheet = (HWND)PropertySheetW( &psh );
+    sheet_result = (INT_PTR)sheet;
     /* a page is created when first shown: a modeless sheet's templates must
      * outlive it (they're small; the test leaks them) */
     if (!modeless) for (i = 0; i < pages; i++) free( tmpl[i] );
@@ -907,7 +910,7 @@ static BOOL query_lacks( HWND hwnd, const char *needle )
 static void inject( HWND hwnd, const char *event )
 {
     char *r = pInject( hwnd, event );
-    if (!r || !strstr( r, "ok" )) printf( "      inject %s: %s\n", event, r ? r : "(null)" );
+    if (!r || !strstr( r, "ok" ) || strstr( event, "realClick" )) printf( "      inject %s: %s\n", event, r ? r : "(null)" );
     fflush( stdout );
     pFree( r );
 }
@@ -975,6 +978,26 @@ static void pump_until( const int *counter, int target, int ms )
 {
     DWORD end = GetTickCount() + ms;
     while (*counter < target && (int)(end - GetTickCount()) > 0) pump( 50 );
+}
+
+/* a modal property sheet's own buttons, clicked natively (winecfg's OK and Cancel) */
+static const char *modal_button_event;
+static int modal_button_id, modal_button_stuck;
+
+static void CALLBACK modal_button_click( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    HWND sheet = GetActiveWindow();
+    KillTimer( NULL, id );
+    if (sheet) inject( GetDlgItem( sheet, modal_button_id ), modal_button_event );
+}
+
+static void CALLBACK modal_button_watchdog( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    HWND sheet = GetActiveWindow();
+    KillTimer( NULL, id );
+    if (!sheet) return;
+    modal_button_stuck++;
+    PostMessageW( sheet, PSM_PRESSBUTTON, PSBTN_CANCEL, 0 );
 }
 
 static void CALLBACK panel_cancel( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
@@ -1554,6 +1577,9 @@ static int selftest(void)
     inject( ctl[ID_PUSH], "{\"t\":\"click\"}" );
     pump( 200 );
     check( got_command[ID_PUSH][BN_CLICKED] == 1, "native click -> BN_CLICKED" );
+    inject( ctl[ID_PUSH], "{\"t\":\"realClick\"}" );
+    pump( 400 );
+    check( got_command[ID_PUSH][BN_CLICKED] == 2, "a mouse click on the native button (through AppKit) -> BN_CLICKED" );
     inject( ctl[ID_CHECK], "{\"t\":\"click\"}" );
     pump( 200 );
     check( SendMessageW( ctl[ID_CHECK], BM_GETCHECK, 0, 0 ) == BST_UNCHECKED, "native check box click toggles the Win32 state" );
@@ -1620,6 +1646,23 @@ static int selftest(void)
         tab = (HWND)SendMessageW( sheet, PSM_GETTABCONTROL, 0, 0 );
         check( pIsTranslated( tab ) && query_has( tab, "\"mode\":\"strip\"" ), "a 3-page property sheet keeps the tab strip" );
         DestroyWindow( sheet );
+        pump( 200 );
+
+        /* modal, as winecfg runs its sheet: the native OK and Cancel end it, clicked
+         * with the mouse (through AppKit) */
+        modal_button_id = IDOK;
+        modal_button_event = "{\"t\":\"realClick\"}";
+        modal_button_stuck = 0;
+        SetTimer( NULL, 0, 1200, modal_button_click );
+        SetTimer( NULL, 0, 6000, modal_button_watchdog );
+        property_sheet( 7, FALSE );
+        check( !modal_button_stuck && sheet_result > 0, "a modal property sheet's native OK ends it (PropertySheet > 0)" );
+        modal_button_id = IDCANCEL;
+        modal_button_stuck = 0;
+        SetTimer( NULL, 0, 1200, modal_button_click );
+        SetTimer( NULL, 0, 6000, modal_button_watchdog );
+        property_sheet( 7, FALSE );
+        check( !modal_button_stuck && sheet_result == 0, "a modal property sheet's native Cancel ends it (PropertySheet 0)" );
         pump( 200 );
     }
 

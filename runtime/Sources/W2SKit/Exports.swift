@@ -42,6 +42,7 @@ public func w2s_swift_control_create(_ hostView: UInt64, _ window: UInt64, _ pos
         guard W2S.control(handle) != nil else { return }
         let container = Unmanaged<NSView>.fromOpaque(viewPtr).takeUnretainedValue()
         let hosting = PassThroughHostingView(rootView: ControlViews.root(for: host.model, entry: entryID))
+        hosting.native = PassThroughHostingView<AnyView>.region(for: entryID, model: host.model)
         hosting.frame = container.bounds
         hosting.autoresizingMask = [.width, .height]
         // light or dark as what wine draws behind it (wine's colours follow macOS: Look)

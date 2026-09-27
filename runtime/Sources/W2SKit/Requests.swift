@@ -601,6 +601,37 @@ enum Debug {
                 return "{\"ok\":true}"
             }
             guard let host = W2S.control(handle) else { return "{\"error\":\"no control\"}" }
+            if event["t"] as? String == "realClick" {
+                // a mouse click at the view's centre through AppKit, as the mouse makes one:
+                // winemac's routing, hit-testing and the SwiftUI control's own tracking
+                guard let view = host.hosting, let window = view.window else { return "{\"error\":\"not in a window\"}" }
+                let rect = view.convert(view.bounds, to: nil)
+                let point = NSPoint(x: rect.midX, y: rect.midY)
+                let hit = window.contentView.flatMap { $0.hitTest($0.superview?.convert(point, from: nil) ?? point) }
+                var chain: [String] = []
+                var v: NSView? = hit
+                while let x = v, chain.count < 12 { chain.append(String(describing: type(of: x))); v = x.superview }
+                let probe = NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 0,
+                                               windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                                               clickCount: 1, pressure: 1)
+                let diag: [String: Any] = [
+                    "ok": true, "key": window.isKeyWindow, "main": window.isMainWindow, "appActive": NSApp.isActive,
+                    "canBecomeKey": window.canBecomeKey, "windowClass": String(describing: type(of: window)),
+                    "hit": chain, "firstMouse": probe.map { hit?.acceptsFirstMouse(for: $0) ?? false } ?? false,
+                ]
+                DispatchQueue.main.async {
+                    func mouse(_ type: NSEvent.EventType) -> NSEvent? {
+                        NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                                           timestamp: ProcessInfo.processInfo.systemUptime,
+                                           windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                                           clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)
+                    }
+                    // the up waits in the queue for the control's tracking loop
+                    if let up = mouse(.leftMouseUp) { NSApp.postEvent(up, atStart: false) }
+                    if let down = mouse(.leftMouseDown) { NSApp.sendEvent(down) }
+                }
+                return W2S.json(diag)
+            }
             // what the native control would do: update its own state, then tell Win32
             switch event["t"] as? String {
             case "text": host.model.snap.text = event["s"] as? String
