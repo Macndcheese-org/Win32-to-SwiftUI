@@ -103,7 +103,14 @@ struct w2s_kind
     /* where wine keeps drawing (an owner-drawn status bar pane), in window
      * coordinates; NULL or an empty region: nowhere */
     HRGN (*region)( struct w2s_control *ctl );
+    /* sees every message after the control handled it (before the push) */
+    void (*observe)( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM lparam );
+    /* frees what the kind keeps in ctl->data; NULL: HeapFree */
+    void (*release)( struct w2s_control *ctl );
+    unsigned int flags;
 };
+
+#define W2S_OWN_TEXT 0x0001     /* the kind writes "text" itself (a multi-line edit's whole text) */
 
 struct w2s_control
 {
@@ -121,6 +128,7 @@ struct w2s_control
     int applying;
     int snapshotting;       /* building a snapshot sends queries to the control */
     UINT64 ack;             /* highest native event sequence number taken */
+    UINT answered;          /* queries answered from the native view (for the tests) */
     void *data;             /* the kind's own state, HeapFree'd when the view goes */
     char *native;           /* what the native view published for answers, or NULL */
     UINT64 native_version;

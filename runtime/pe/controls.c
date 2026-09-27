@@ -303,6 +303,361 @@ static const struct w2s_kind kind_edit_password = { "edit.password", edit_snapsh
 static const struct w2s_kind kind_edit_number = { "edit.number", edit_snapshot, edit_apply };
 static const struct w2s_kind kind_edit_readonly = { "edit.readonly", edit_snapshot, nothing_apply };
 
+/* ---------- multi-line Edit ---------- */
+
+/* The native text view keeps every line break as "\n", the Win32 edit as
+ * "\r\n": offsets and text are converted here. A lone "\r" or "\n" in the
+ * Win32 text is one character on both sides. */
+
+static WCHAR *window_text( HWND hwnd, int *len )
+{
+    int n = GetWindowTextLengthW( hwnd );
+    WCHAR *text = HeapAlloc( GetProcessHeap(), 0, (n + 1) * sizeof(WCHAR) );
+    text[0] = 0;
+    *len = GetWindowTextW( hwnd, text, n + 1 );
+    return text;
+}
+
+static inline BOOL is_crlf( const WCHAR *text, int len, int i )
+{
+    return text[i] == '\r' && i + 1 < len && text[i + 1] == '\n';
+}
+
+/* Win32 offset -> native offset (inside a CRLF: before the break) */
+static int native_offset( const WCHAR *text, int len, int pos )
+{
+    int i, n = pos;
+    pos = min( max( pos, 0 ), len );
+    for (i = 0; i < pos; i++) if (is_crlf( text, len, i )) n--;
+    return max( n, 0 );
+}
+
+/* native offset -> Win32 offset */
+static int win_offset( const WCHAR *text, int len, int npos )
+{
+    int i = 0, n = 0;
+    while (i < len && n < npos)
+    {
+        i += is_crlf( text, len, i ) ? 2 : 1;
+        n++;
+    }
+    return i;
+}
+
+/* the native form of the text, and FNV-1a over its UTF-16 units: the native
+ * view publishes the same hash, so both sides can tell they hold one text */
+static WCHAR *native_text( const WCHAR *text, int len, int *nlen, UINT32 *hash )
+{
+    WCHAR *out = HeapAlloc( GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR) );
+    UINT32 h = 2166136261u;
+    int i, n = 0;
+
+    for (i = 0; i < len; i++)
+    {
+        WCHAR c = text[i];
+        if (is_crlf( text, len, i )) continue;
+        out[n++] = c;
+        h ^= c & 0xff;
+        h *= 16777619u;
+        h ^= c >> 8;
+        h *= 16777619u;
+    }
+    out[n] = 0;
+    *nlen = n;
+    if (hash) *hash = h;
+    return out;
+}
+
+/* "\n" -> "\r\n" for the Win32 edit */
+static WCHAR *crlf_text( const WCHAR *text )
+{
+    int n = 0, i;
+    WCHAR *out, *o;
+
+    for (i = 0; text[i]; i++) n += text[i] == '\n' ? 2 : 1;
+    out = o = HeapAlloc( GetProcessHeap(), 0, (n + 1) * sizeof(WCHAR) );
+    for (i = 0; text[i]; i++)
+    {
+        if (text[i] == '\n' && (i == 0 || text[i - 1] != '\r')) *o++ = '\r';
+        *o++ = text[i];
+    }
+    *o = 0;
+    return out;
+}
+
+/* what the native view published: its selection and line layout */
+struct ml_native
+{
+    UINT64 version;         /* of ctl->native this was read from */
+    int len;                /* native length */
+    UINT32 hash;
+    int sel[2];
+    int *lines, nlines;     /* native start offset of each visual line */
+    int *tops, ntops;       /* each line's top, in pixels from the top of the visible area */
+    int first;              /* first visible line */
+    int caret[2], caret_char;
+    int avg, left;          /* average character width, left edge of the text, pixels */
+};
+
+struct ml_data
+{
+    int caret_gen, scroll_gen, scroll_line;
+    struct ml_native nat;
+};
+
+static struct ml_data *ml_data( struct w2s_control *ctl )
+{
+    if (!ctl->data) ctl->data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(struct ml_data) );
+    return ctl->data;
+}
+
+static void ml_release( struct w2s_control *ctl )
+{
+    struct ml_data *data = ctl->data;
+    if (data->nat.lines) HeapFree( GetProcessHeap(), 0, data->nat.lines );
+    if (data->nat.tops) HeapFree( GetProcessHeap(), 0, data->nat.tops );
+    HeapFree( GetProcessHeap(), 0, data );
+}
+
+static int json_int_or( const char *text, const char *key, int def )
+{
+    double v;
+    return json_get_num( text, key, &v ) ? (int)v : def;
+}
+
+static struct ml_native *ml_native( struct w2s_control *ctl )
+{
+    struct ml_data *data = ml_data( ctl );
+    struct ml_native *nat = &data->nat;
+    const char *state = w2s_native_state( ctl, NULL );
+    int *pair, n;
+    double hash;
+
+    if (!state) return NULL;
+    if (nat->version == ctl->native_version && nat->lines) return nat;
+
+    if (nat->lines) HeapFree( GetProcessHeap(), 0, nat->lines );
+    if (nat->tops) HeapFree( GetProcessHeap(), 0, nat->tops );
+    memset( nat, 0, sizeof(*nat) );
+    nat->version = ctl->native_version;
+    nat->len = json_int_or( state, "len", -1 );
+    nat->hash = json_get_num( state, "hash", &hash ) ? (UINT32)hash : 0;
+    if ((n = json_get_int_array( state, "sel", &pair )) == 2) memcpy( nat->sel, pair, sizeof(nat->sel) );
+    if (pair) HeapFree( GetProcessHeap(), 0, pair );
+    if ((n = json_get_int_array( state, "caret", &pair )) == 2) memcpy( nat->caret, pair, sizeof(nat->caret) );
+    if (pair) HeapFree( GetProcessHeap(), 0, pair );
+    nat->nlines = json_get_int_array( state, "lines", &nat->lines );
+    nat->ntops = json_get_int_array( state, "tops", &nat->tops );
+    nat->first = json_int_or( state, "first", 0 );
+    nat->caret_char = json_int_or( state, "caretChar", nat->sel[1] );
+    nat->avg = max( 1, json_int_or( state, "avg", 7 ) );
+    nat->left = json_int_or( state, "left", 0 );
+    return nat;
+}
+
+/* the visual line holding native offset n */
+static int ml_line_of( const struct ml_native *nat, int n )
+{
+    int lo = 0, hi = nat->nlines - 1;
+    while (lo < hi)
+    {
+        int mid = (lo + hi + 1) / 2;
+        if (nat->lines[mid] <= n) lo = mid; else hi = mid - 1;
+    }
+    return lo;
+}
+
+/* a visual line's Win32 range, without its line break */
+static void ml_line_range( const struct ml_native *nat, const WCHAR *text, int len, int line, int *start, int *end )
+{
+    *start = win_offset( text, len, nat->lines[line] );
+    *end = line + 1 < nat->nlines ? win_offset( text, len, nat->lines[line + 1] ) : len;
+    if (*end > *start && text[*end - 1] == '\n') (*end)--;
+    if (*end > *start && text[*end - 1] == '\r') (*end)--;
+}
+
+static BOOL ml_answer( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM lparam, LRESULT *ret )
+{
+    struct ml_native *nat = ml_native( ctl );
+    WCHAR *text, *ntext;
+    int len, nlen, line, start, end, n;
+    UINT32 hash;
+
+    if (!nat || nat->nlines <= 0 || nat->ntops != nat->nlines) return FALSE;
+    text = window_text( ctl->hwnd, &len );
+    ntext = native_text( text, len, &nlen, &hash );
+    HeapFree( GetProcessHeap(), 0, ntext );
+    if (nlen != nat->len || hash != nat->hash)
+    {
+        /* the native view hasn't caught up with the Win32 text yet */
+        HeapFree( GetProcessHeap(), 0, text );
+        return FALSE;
+    }
+
+    switch (msg)
+    {
+    case EM_GETSEL:
+        start = win_offset( text, len, nat->sel[0] );
+        end = win_offset( text, len, nat->sel[1] );
+        if (wparam) *(DWORD *)wparam = start;
+        if (lparam) *(DWORD *)lparam = end;
+        *ret = (start > 0xffff || end > 0xffff) ? -1 : MAKELONG( start, end );
+        break;
+    case EM_LINEFROMCHAR:
+        n = (INT)wparam == -1 ? nat->sel[0] : native_offset( text, len, (INT)wparam );
+        *ret = ml_line_of( nat, n );
+        break;
+    case EM_LINEINDEX:
+        line = (INT)wparam == -1 ? ml_line_of( nat, nat->caret_char ) : (INT)wparam;
+        *ret = line >= 0 && line < nat->nlines ? win_offset( text, len, nat->lines[line] ) : -1;
+        break;
+    case EM_GETLINECOUNT:
+        *ret = nat->nlines;
+        break;
+    case EM_LINELENGTH:
+        if ((INT)wparam == -1)
+        {
+            /* the unselected characters on the lines the selection touches */
+            int s0, e0, s1, e1, sel0 = win_offset( text, len, nat->sel[0] ), sel1 = win_offset( text, len, nat->sel[1] );
+            ml_line_range( nat, text, len, ml_line_of( nat, nat->sel[0] ), &s0, &e0 );
+            ml_line_range( nat, text, len, ml_line_of( nat, nat->sel[1] ), &s1, &e1 );
+            *ret = max( 0, sel0 - s0 ) + max( 0, e1 - sel1 );
+        }
+        else
+        {
+            ml_line_range( nat, text, len, ml_line_of( nat, native_offset( text, len, (INT)wparam ) ), &start, &end );
+            *ret = end - start;
+        }
+        break;
+    case EM_GETFIRSTVISIBLELINE:
+        *ret = nat->first;
+        break;
+    case EM_GETLINE:
+        line = (INT)wparam;
+        if (line < 0 || line >= nat->nlines || !lparam) *ret = 0;
+        else
+        {
+            WORD size = *(WORD *)lparam;
+            ml_line_range( nat, text, len, line, &start, &end );
+            n = min( end - start, (int)size );
+            memcpy( (WCHAR *)lparam, text + start, n * sizeof(WCHAR) );
+            *ret = n;
+        }
+        break;
+    case EM_POSFROMCHAR:
+    {
+        int x, y;
+        if ((INT)wparam < 0 || (INT)wparam > len) { *ret = -1; break; }
+        n = native_offset( text, len, (INT)wparam );
+        line = ml_line_of( nat, n );
+        y = nat->tops[line];
+        /* exact at the caret and at line starts; elsewhere the average advance */
+        if (n == nat->caret_char) { x = nat->caret[0]; y = nat->caret[1]; }
+        else x = nat->left + (n - nat->lines[line]) * nat->avg;
+        *ret = MAKELONG( (SHORT)x, (SHORT)y );
+        break;
+    }
+    case EM_CHARFROMPOS:
+    {
+        int x = (SHORT)LOWORD( lparam ), y = (SHORT)HIWORD( lparam ), col;
+        for (line = 0; line + 1 < nat->nlines && nat->tops[line + 1] <= y; line++) ;
+        ml_line_range( nat, text, len, line, &start, &end );
+        col = max( 0, (x - nat->left + nat->avg / 2) / nat->avg );
+        start = min( start + col, end );
+        *ret = MAKELONG( start, line );
+        break;
+    }
+    default:
+        HeapFree( GetProcessHeap(), 0, text );
+        return FALSE;
+    }
+    HeapFree( GetProcessHeap(), 0, text );
+    return TRUE;
+}
+
+static void ml_snapshot( struct w2s_control *ctl, struct json *j )
+{
+    struct ml_data *data = ml_data( ctl );
+    DWORD style = GetWindowLongW( ctl->hwnd, GWL_STYLE ), sel_start = 0, sel_end = 0;
+    WCHAR *text, *ntext, parent_class[64] = { 0 };
+    int len, nlen;
+    const char *align = (style & ES_CENTER) ? "center" : (style & ES_RIGHT) ? "trailing" : "leading";
+
+    text = window_text( ctl->hwnd, &len );
+    ntext = native_text( text, len, &nlen, NULL );
+    json_str( j, "text", ntext );
+    SendMessageW( ctl->hwnd, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end );   /* the Win32 edit's own */
+    json_arr_begin( j, "sel" );
+    json_int( j, NULL, native_offset( text, len, sel_start ) );
+    json_int( j, NULL, native_offset( text, len, sel_end ) );
+    json_arr_end( j );
+    HeapFree( GetProcessHeap(), 0, ntext );
+    HeapFree( GetProcessHeap(), 0, text );
+
+    GetClassNameW( GetParent( ctl->hwnd ), parent_class, ARRAYSIZE(parent_class) );
+    json_bool( j, "readonly", (style & ES_READONLY) != 0 );
+    /* Return only goes to the default button in a dialog, without ES_WANTRETURN */
+    json_bool( j, "wantReturn", (style & ES_WANTRETURN) || wcscmp( parent_class, L"#32770" ) );
+    json_bool( j, "wrap", !(style & (ES_AUTOHSCROLL | WS_HSCROLL)) );
+    json_int( j, "limit", (UINT)SendMessageW( ctl->hwnd, EM_GETLIMITTEXT, 0, 0 ) );
+    json_str_a( j, "align", align );
+    json_int( j, "caretGen", data->caret_gen );
+    json_int( j, "scrollGen", data->scroll_gen );
+    json_int( j, "scrollLine", data->scroll_line );
+}
+
+static void ml_observe( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    struct ml_data *data;
+
+    if (msg != EM_SCROLLCARET && msg != EM_LINESCROLL) return;
+    data = ml_data( ctl );
+    if (msg == EM_SCROLLCARET) data->caret_gen++;
+    else
+    {
+        struct ml_native *nat = ml_native( ctl );
+        data->scroll_line = max( 0, (nat ? nat->first : 0) + (int)lparam );
+        data->scroll_gen++;
+    }
+}
+
+/* the native view reports each edit as a replacement of a range, as typing does */
+static void ml_apply( struct w2s_control *ctl, const struct w2s_event *ev )
+{
+    WCHAR *text;
+    int len;
+
+    if (!strcmp( ev->type, "return" ))
+    {
+        HWND dlg = GetParent( ctl->hwnd ), button;
+        DWORD def = (DWORD)SendMessageW( dlg, DM_GETDEFID, 0, 0 );
+
+        /* what IsDialogMessage does with Return */
+        if (HIWORD( def ) == DC_HASDEFID && (button = GetDlgItem( dlg, LOWORD( def ) )) && IsWindowEnabled( button ))
+            SendMessageW( dlg, WM_COMMAND, MAKEWPARAM( LOWORD( def ), BN_CLICKED ), (LPARAM)button );
+        else
+            SendMessageW( dlg, WM_COMMAND, IDOK, (LPARAM)GetDlgItem( dlg, IDOK ) );
+        return;
+    }
+    if (ev->array_count != 2) return;
+    text = window_text( ctl->hwnd, &len );
+    if (!strcmp( ev->type, "replace" ) && ev->string)
+    {
+        WCHAR *insert = crlf_text( ev->string );
+        int start = win_offset( text, len, ev->array[0] );
+        int end = win_offset( text, len, ev->array[0] + ev->array[1] );
+        SendMessageW( ctl->hwnd, EM_SETSEL, start, end );
+        SendMessageW( ctl->hwnd, EM_REPLACESEL, TRUE, (LPARAM)insert );
+        HeapFree( GetProcessHeap(), 0, insert );
+    }
+    else if (!strcmp( ev->type, "sel" ))
+        SendMessageW( ctl->hwnd, EM_SETSEL, win_offset( text, len, ev->array[0] ), win_offset( text, len, ev->array[1] ) );
+    HeapFree( GetProcessHeap(), 0, text );
+}
+
+static const struct w2s_kind kind_edit_multiline =
+    { "edit.multiline", ml_snapshot, ml_apply, ml_answer, NULL, NULL, ml_observe, ml_release, W2S_OWN_TEXT };
+
 /* ---------- ComboBox ---------- */
 
 static void combo_snapshot( struct w2s_control *ctl, struct json *j )
@@ -715,7 +1070,7 @@ const struct w2s_kind *w2s_select_kind( HWND hwnd )
     }
     if (is_class( name, L"Edit" ))
     {
-        if (style & ES_MULTILINE) return NULL; /* NSTextView path: later */
+        if (style & ES_MULTILINE) return (style & ES_PASSWORD) ? NULL : &kind_edit_multiline;
         if (style & ES_PASSWORD) return &kind_edit_password;
         if (style & ES_READONLY) return &kind_edit_readonly;
         if (style & ES_NUMBER) return &kind_edit_number;

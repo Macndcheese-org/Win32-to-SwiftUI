@@ -38,6 +38,12 @@ struct Snapshot: Codable, Equatable {
     var cue: String?
     var readonly: Bool?
     var limit: Int?
+    // multi-line edit (native offsets: every line break is one "\n")
+    var sel: [Int]?
+    var wantReturn: Bool?
+    var caretGen: Int?
+    var scrollGen: Int?
+    var scrollLine: Int?
     // lists
     var items: [String]?
     var selection: Int?
@@ -64,6 +70,8 @@ final class ControlModel: ObservableObject {
     @Published var snap: Snapshot
     @Published var focusRequest = 0
     let emit: ([String: Any]) -> Void
+    /// What the Win32 control answers its `answers` queries from (main thread).
+    var publish: ([String: Any]) -> Void = { _ in }
     private var clickQueued = false
 
     init(snap: Snapshot, emit: @escaping ([String: Any]) -> Void) {

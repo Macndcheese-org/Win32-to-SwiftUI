@@ -28,8 +28,8 @@ static const UINT w2s_state_edit_single[] = { WM_SETTEXT, EM_SETSEL, EM_REPLACES
 static const UINT w2s_state_edit_password[] = { WM_SETTEXT, EM_SETPASSWORDCHAR };
 static const UINT w2s_state_edit_number[] = { WM_SETTEXT };
 static const UINT w2s_state_edit_readonly[] = { WM_SETTEXT, EM_SETREADONLY };
-static const UINT w2s_state_edit_multiline[] = { WM_SETTEXT, EM_SETSEL, EM_REPLACESEL, EM_SCROLLCARET, EM_LINESCROLL };
-static const UINT w2s_answers_edit_multiline[] = { EM_GETSEL, EM_LINEFROMCHAR, EM_LINEINDEX, EM_GETLINECOUNT, EM_POSFROMCHAR };
+static const UINT w2s_state_edit_multiline[] = { WM_SETTEXT, EM_SETSEL, EM_REPLACESEL, EM_SCROLLCARET, EM_LINESCROLL, EM_SETREADONLY, EM_SETLIMITTEXT, EM_UNDO, WM_CUT, WM_PASTE, WM_CLEAR };
+static const UINT w2s_answers_edit_multiline[] = { EM_GETSEL, EM_LINEFROMCHAR, EM_LINEINDEX, EM_GETLINECOUNT, EM_POSFROMCHAR, EM_LINELENGTH, EM_GETFIRSTVISIBLELINE, EM_GETLINE, EM_CHARFROMPOS };
 static const UINT w2s_state_edit_balloon[] = { EM_SHOWBALLOONTIP, EM_HIDEBALLOONTIP };
 static const UINT w2s_state_listbox_single[] = { LB_ADDSTRING, LB_INSERTSTRING, LB_DELETESTRING, LB_RESETCONTENT, LB_SETCURSEL, LB_SETTOPINDEX, LB_SETITEMDATA, WM_SETREDRAW };
 static const UINT w2s_state_listbox_multi[] = { LB_SETSEL, LB_SELITEMRANGE, LB_SETANCHORINDEX, LB_SETCARETINDEX };
@@ -115,7 +115,7 @@ static const struct w2s_map_entry w2s_map_entries[] =
     { "edit.password", w2s_state_edit_password, 2, NULL, 0 },
     { "edit.number", w2s_state_edit_number, 1, NULL, 0 },
     { "edit.readonly", w2s_state_edit_readonly, 2, NULL, 0 },
-    { "edit.multiline", w2s_state_edit_multiline, 5, w2s_answers_edit_multiline, 5 },
+    { "edit.multiline", w2s_state_edit_multiline, 11, w2s_answers_edit_multiline, 9 },
     { "edit.balloon", w2s_state_edit_balloon, 2, NULL, 0 },
     { "listbox.single", w2s_state_listbox_single, 8, NULL, 0 },
     { "listbox.multi", w2s_state_listbox_multi, 4, NULL, 0 },

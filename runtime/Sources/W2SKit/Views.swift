@@ -8,14 +8,14 @@ enum ControlViews {
     // map: button.3state button.split button.commandlink
     // map: static.text static.separator static.image edit.single edit.password edit.number edit.readonly
     // map: combobox.dropdownlist listbox.single listbox.multi listview.list listview.report
-    // map: progress trackbar tab static.frame statusbar
+    // map: progress trackbar tab static.frame statusbar edit.multiline
     static let entries: Set<String> = [
         "button.push", "button.default", "button.checkbox", "button.pushlike", "button.radio", "button.groupbox",
         "button.3state", "button.split", "button.commandlink",
         "static.text", "static.separator", "static.image",
         "edit.single", "edit.password", "edit.number", "edit.readonly",
         "combobox.dropdownlist", "listbox.single", "listbox.multi", "listview.list", "listview.report",
-        "progress", "trackbar", "tab", "static.frame", "statusbar",
+        "progress", "trackbar", "tab", "static.frame", "statusbar", "edit.multiline",
     ]
 
     static func supports(_ entry: String) -> Bool { entries.contains(entry) }
@@ -110,6 +110,8 @@ struct ControlRoot: View {
             StatusBar(model: model, scale: metrics.scale)
         case "edit.single", "edit.password", "edit.number":
             EditField(model: model, secure: entry == "edit.password")
+        case "edit.multiline":
+            MultilineEdit(model: model, fontSize: metrics.fontSize, scale: metrics.scale)
         case "edit.readonly":
             Text(snap.text ?? "").textSelection(.enabled)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -475,6 +477,312 @@ struct EditField: View {
         }
         .onChange(of: model.focusRequest) { _ in focused = true }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// ES_MULTILINE. An NSTextView on every version: the Win32 control answers
+/// EM_GETSEL, EM_LINEFROMCHAR, EM_POSFROMCHAR... from this view (the map's
+/// `answers`), which needs its layout manager; TextEditor (15+) draws the same
+/// view but exposes no line layout. TextKit 1 is set up explicitly so the
+/// layout manager is there from the start.
+///
+/// Line breaks are one "\n" here; the PE side converts to and from CRLF. Each
+/// edit goes to Win32 as the replacement of a range (EM_SETSEL + EM_REPLACESEL,
+/// so EN_UPDATE/EN_CHANGE happen as for typing), the selection as EM_SETSEL,
+/// and after every change the view publishes its selection and line table.
+struct MultilineEdit: NSViewRepresentable {
+    @ObservedObject var model: ControlModel
+    let fontSize: CGFloat
+    let scale: CGFloat
+
+    final class TextView: NSTextView {
+        var onReturn: (() -> Bool)?         // true: handled (the dialog's default button)
+        var onFocus: (() -> Void)?
+
+        override func insertNewline(_ sender: Any?) {
+            if let handler = onReturn, handler() { return }
+            super.insertNewline(sender)
+        }
+
+        override func becomeFirstResponder() -> Bool {
+            let ok = super.becomeFirstResponder()
+            if ok { onFocus?() }
+            return ok
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var model: ControlModel
+        var scale: CGFloat = 1
+        weak var textView: TextView?
+        weak var scroll: NSScrollView?
+        var updating = false
+        var edits: [(NSRange, String)] = []
+        var lastSnapSel: [Int]?
+        var lastEmittedSel: NSRange?
+        var lastCaretGen: Int?
+        var lastScrollGen: Int?
+        var lastFocus: Int
+        var wraps: Bool?
+        var publishQueued = false
+
+        init(model: ControlModel) {
+            self.model = model
+            lastFocus = model.focusRequest
+        }
+
+        /// A Win32 edit limit counts a line break as two characters.
+        func win32Length(_ s: String) -> Int {
+            s.utf16.count + s.utf16.reduce(0) { $0 + ($1 == 10 ? 1 : 0) }
+        }
+
+        func textView(_ tv: NSTextView, shouldChangeTextIn range: NSRange, replacementString text: String?) -> Bool {
+            guard !updating, let text = text else { return true }
+            let clean = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+            if let limit = model.snap.limit, limit > 0 {
+                let current = tv.string as NSString
+                let after = win32Length(current as String) - win32Length(current.substring(with: range)) + win32Length(clean)
+                if after > limit && clean.utf16.count > range.length {
+                    NSSound.beep()
+                    return false
+                }
+            }
+            if clean != text {
+                tv.insertText(clean, replacementRange: range)
+                return false
+            }
+            edits.append((range, clean))
+            return true
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard !updating else { return }
+            // several ranges in one change all refer to the text before it: last first
+            let ordered = edits.count > 1 ? edits.sorted { $0.0.location > $1.0.location } : edits
+            for (range, text) in ordered {
+                model.emit(["t": "replace", "a": [range.location, range.length], "s": text])
+            }
+            edits.removeAll()
+            emitSelection()
+            schedulePublish()
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard !updating else { return }
+            emitSelection()
+            schedulePublish()
+        }
+
+        func emitSelection() {
+            guard let tv = textView else { return }
+            let range = tv.selectedRange()
+            guard range != lastEmittedSel else { return }
+            lastEmittedSel = range
+            model.emit(["t": "sel", "a": [range.location, NSMaxRange(range)]])
+        }
+
+        func returnPressed() -> Bool {
+            if model.snap.wantReturn ?? true { return false }
+            model.emit(["t": "return"])
+            return true
+        }
+
+        @objc func viewChanged(_ notification: Notification) { schedulePublish() }
+
+        func schedulePublish() {
+            guard !publishQueued else { return }
+            publishQueued = true
+            DispatchQueue.main.async {
+                self.publishQueued = false
+                self.publishNow()
+            }
+        }
+
+        /// The selection, line starts and line tops (Win32 pixels, from the top
+        /// of the visible area) the Win32 control answers queries from.
+        func publishNow() {
+            guard let tv = textView, let scroll = scroll, let lm = tv.layoutManager, let tc = tv.textContainer
+            else { return }
+            lm.ensureLayout(for: tc)
+            let string = tv.string as NSString
+            let s = max(scale, 0.01)
+            let origin = tv.textContainerOrigin
+            let visible = scroll.contentView.bounds
+            func px(_ v: CGFloat) -> Int { Int((v / s).rounded()) }
+
+            var lines: [Int] = []
+            var tops: [Int] = []
+            let glyphs = lm.numberOfGlyphs
+            var glyph = 0
+            while glyph < glyphs {
+                var range = NSRange(location: 0, length: 0)
+                let rect = lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: &range)
+                lines.append(lm.characterIndexForGlyph(at: range.location))
+                tops.append(px(rect.minY + origin.y - visible.minY))
+                glyph = max(NSMaxRange(range), glyph + 1)
+            }
+            let extra = lm.extraLineFragmentRect
+            if lm.extraLineFragmentTextContainer != nil || lines.isEmpty {
+                // after a final line break, or no text at all: Win32 counts that line
+                lines.append(string.length)
+                tops.append(px(extra.minY + origin.y - visible.minY))
+            }
+            let first = tops.lastIndex { $0 <= 0 } ?? 0
+
+            let selection = tv.selectedRange()
+            let caretChar = NSMaxRange(selection)
+            var caret = NSPoint(x: extra.minX, y: extra.minY)
+            if caretChar < string.length {
+                let g = lm.glyphIndexForCharacter(at: caretChar)
+                let line = lm.lineFragmentRect(forGlyphAt: g, effectiveRange: nil)
+                caret = NSPoint(x: line.minX + lm.location(forGlyphAt: g).x, y: line.minY)
+            } else if lm.extraLineFragmentTextContainer == nil && glyphs > 0 {
+                let last = lm.boundingRect(forGlyphRange: NSRange(location: glyphs - 1, length: 1), in: tc)
+                caret = NSPoint(x: last.maxX, y: last.minY)
+            }
+            let font = tv.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+            let average = ("x" as NSString).size(withAttributes: [.font: font]).width
+
+            // FNV-1a over the UTF-16 units, as the PE side hashes the Win32 text
+            var hash: UInt32 = 2166136261
+            for unit in (string as String).utf16 {
+                hash = (hash ^ UInt32(unit & 0xff)) &* 16777619
+                hash = (hash ^ UInt32(unit >> 8)) &* 16777619
+            }
+            model.publish([
+                "len": string.length, "hash": hash,
+                "sel": [selection.location, NSMaxRange(selection)],
+                "lines": lines, "tops": tops, "first": first,
+                "caret": [px(caret.x + origin.x - visible.minX), px(caret.y + origin.y - visible.minY)],
+                "caretChar": caretChar,
+                "avg": max(1, px(average)),
+                "left": px(origin.x + tc.lineFragmentPadding - visible.minX),
+            ])
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(model: model) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let coordinator = context.coordinator
+        let storage = NSTextStorage()
+        let layout = NSLayoutManager()
+        storage.addLayoutManager(layout)
+        let container = NSTextContainer(containerSize: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+        container.widthTracksTextView = true
+        layout.addTextContainer(container)
+
+        let tv = TextView(frame: .zero, textContainer: container)
+        tv.isRichText = false
+        tv.importsGraphics = false
+        tv.allowsUndo = true
+        // a Win32 edit never rewrites what is typed
+        tv.isAutomaticQuoteSubstitutionEnabled = false
+        tv.isAutomaticDashSubstitutionEnabled = false
+        tv.isAutomaticTextReplacementEnabled = false
+        tv.isAutomaticSpellingCorrectionEnabled = false
+        tv.isAutomaticLinkDetectionEnabled = false
+        tv.isVerticallyResizable = true
+        tv.isHorizontallyResizable = false
+        tv.autoresizingMask = [.width]
+        tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        tv.textContainerInset = NSSize(width: 2, height: 2)
+        tv.delegate = coordinator
+        tv.onReturn = { [weak coordinator] in coordinator?.returnPressed() ?? false }
+        tv.onFocus = { [weak coordinator] in coordinator?.model.emit(["t": "focus"]) }
+        tv.postsFrameChangedNotifications = true
+
+        let scroll = NSScrollView()
+        scroll.borderType = .bezelBorder
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.documentView = tv
+        scroll.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(coordinator, selector: #selector(Coordinator.viewChanged(_:)),
+                                               name: NSView.boundsDidChangeNotification, object: scroll.contentView)
+        NotificationCenter.default.addObserver(coordinator, selector: #selector(Coordinator.viewChanged(_:)),
+                                               name: NSView.frameDidChangeNotification, object: tv)
+        coordinator.textView = tv
+        coordinator.scroll = scroll
+        return scroll
+    }
+
+    static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
+        NotificationCenter.default.removeObserver(coordinator)
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        let c = context.coordinator
+        c.model = model
+        c.scale = scale
+        guard let tv = c.textView, let container = tv.textContainer else { return }
+        let snap = model.snap
+        c.updating = true
+        defer { c.updating = false }
+
+        let font = NSFont.systemFont(ofSize: fontSize)
+        if tv.font != font { tv.font = font }
+        let enabled = snap.enabled ?? true
+        tv.isEditable = enabled && !(snap.readonly ?? false)
+        tv.isSelectable = enabled
+        tv.textColor = enabled ? .textColor : .disabledControlTextColor
+        tv.alignment = snap.align == "center" ? .center : snap.align == "trailing" ? .right : .natural
+
+        let wraps = snap.wrap ?? true
+        if c.wraps != wraps {
+            c.wraps = wraps
+            container.widthTracksTextView = wraps
+            container.containerSize = NSSize(width: wraps ? scroll.contentSize.width : CGFloat.greatestFiniteMagnitude,
+                                             height: CGFloat.greatestFiniteMagnitude)
+            tv.isHorizontallyResizable = !wraps
+            tv.autoresizingMask = wraps ? [.width] : []
+            scroll.hasHorizontalScroller = !wraps
+        }
+
+        // a snapshot that got here has seen every edit made in this view
+        // (see ack), so a different text is the Win32 side's
+        let text = snap.text ?? ""
+        if tv.string != text {
+            tv.string = text
+            c.lastSnapSel = nil
+        }
+        let sel = snap.sel ?? [0, 0]
+        if c.lastSnapSel != sel {
+            c.lastSnapSel = sel
+            let length = (tv.string as NSString).length
+            let start = min(max(sel.first ?? 0, 0), length), end = min(max(sel.last ?? 0, start), length)
+            let range = NSRange(location: start, length: end - start)
+            if tv.selectedRange() != range { tv.setSelectedRange(range) }
+            tv.scrollRangeToVisible(range)
+            c.lastEmittedSel = range
+        }
+        if c.lastCaretGen != snap.caretGen {
+            if c.lastCaretGen != nil { tv.scrollRangeToVisible(tv.selectedRange()) }
+            c.lastCaretGen = snap.caretGen
+        }
+        if c.lastScrollGen != snap.scrollGen {
+            if c.lastScrollGen != nil, let lm = tv.layoutManager {
+                // EM_LINESCROLL: that line at the top
+                lm.ensureLayout(for: container)
+                let target = snap.scrollLine ?? 0
+                var glyph = 0, line = 0
+                var top: CGFloat = 0
+                while glyph < lm.numberOfGlyphs && line < target {
+                    var range = NSRange(location: 0, length: 0)
+                    top = lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: &range).maxY
+                    glyph = max(NSMaxRange(range), glyph + 1)
+                    line += 1
+                }
+                scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.minX, y: top))
+                scroll.reflectScrolledClipView(scroll.contentView)
+            }
+            c.lastScrollGen = snap.scrollGen
+        }
+        if c.lastFocus != model.focusRequest {
+            c.lastFocus = model.focusRequest
+            if tv.window?.firstResponder !== tv { tv.window?.makeFirstResponder(tv) }
+        }
+        c.schedulePublish()
     }
 }
 

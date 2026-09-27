@@ -27,6 +27,7 @@ public func w2s_swift_control_create(_ hostView: UInt64, _ window: UInt64, _ pos
     let handle = W2S.newID()
     let host = ControlHost(handle: handle, entry: entryID, hostView: viewPtr, postWake: wake)
     host.model = ControlModel(snap: snap) { [weak host] event in host?.emit(event) }
+    host.model.publish = { [weak host] state in host?.publish(state) }
 
     W2S.lock.lock()
     W2S.controls[handle] = host

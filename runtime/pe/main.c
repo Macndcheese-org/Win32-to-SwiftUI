@@ -101,9 +101,12 @@ void w2s_common_snapshot( struct w2s_control *ctl, struct json *j )
     LOGFONTW lf;
     RECT rc;
 
-    GetWindowTextW( ctl->hwnd, text, ARRAYSIZE(text) );
     json_str_a( j, "entry", ctl->kind->entry );
-    json_str( j, "text", text );
+    if (!(ctl->kind->flags & W2S_OWN_TEXT))
+    {
+        GetWindowTextW( ctl->hwnd, text, ARRAYSIZE(text) );
+        json_str( j, "text", text );
+    }
     json_bool( j, "enabled", IsWindowEnabled( ctl->hwnd ) );
     if (!font) font = GetStockObject( DEFAULT_GUI_FONT );
     if (GetObjectW( font, sizeof(lf), &lf )) json_int( j, "fontPx", abs( lf.lfHeight ) ? abs( lf.lfHeight ) : 11 );
@@ -287,7 +290,11 @@ static void deactivate( struct w2s_control *ctl, BOOL destroying )
     memset( &ctl->host, 0, sizeof(ctl->host) );
     if (ctl->last) HeapFree( GetProcessHeap(), 0, ctl->last );
     ctl->last = NULL;
-    if (ctl->data) HeapFree( GetProcessHeap(), 0, ctl->data );
+    if (ctl->data)
+    {
+        if (ctl->kind && ctl->kind->release) ctl->kind->release( ctl );
+        else HeapFree( GetProcessHeap(), 0, ctl->data );
+    }
     ctl->data = NULL;
     if (ctl->native) HeapFree( GetProcessHeap(), 0, ctl->native );
     ctl->native = NULL;
@@ -435,7 +442,10 @@ static LRESULT CALLBACK subclass_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
      * of a multi-line edit); building a snapshot asks the Win32 control */
     if (ctl->kind->answer && !ctl->snapshotting && is_answer( ctl, msg ) &&
         ctl->kind->answer( ctl, msg, wparam, lparam, &ret ))
+    {
+        ctl->answered++;
         return ret;
+    }
 
     ret = CallWindowProcW( ctl->orig, hwnd, msg, wparam, lparam );
 
@@ -444,6 +454,7 @@ static LRESULT CALLBACK subclass_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
         struct w2s_control_focus_params params = { ctl->handle, msg == WM_SETFOCUS };
         w2s_call( unix_w2s_control_focus, &params );
     }
+    if (ctl->kind->observe) ctl->kind->observe( ctl, msg, wparam, lparam );
     if (is_reselect_message( msg ) && !ctl->applying) reselect_kind( ctl );
     if (ctl->active && !ctl->applying && !ctl->snapshotting && is_state_message( ctl, msg )) w2s_push( ctl, FALSE );
     return ret;
@@ -509,7 +520,14 @@ static char *debug_call( HWND hwnd, const char *json )
 
 char * WINAPI W2SDebugQuery( HWND hwnd )
 {
-    return debug_call( hwnd, "{\"op\":\"query\"}" );
+    char *ret = debug_call( hwnd, "{\"op\":\"query\"}" );
+    struct w2s_control *ctl = hwnd ? GetPropW( hwnd, prop_name ) : NULL;
+    size_t len = ret ? strlen( ret ) : 0;
+
+    /* what only this side knows */
+    if (ctl && len > 1 && ret[len - 1] == '}' && len + 32 < 65536)
+        snprintf( ret + len - 1, 34, ",\"peAnswers\":%u}", ctl->answered );
+    return ret;
 }
 
 char * WINAPI W2SDebugInject( HWND hwnd, const char *event_json )

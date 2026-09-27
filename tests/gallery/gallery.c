@@ -188,6 +188,8 @@ static void create_controls2(void)
         SendMessageW( ctl[ID_CMDLINK], BCM_SETNOTE, 0, (LPARAM)L"With a note under the title" );
         v6_end( cookie );
     }
+    make( L"Edit", L"Line one\r\nLine two\r\nLine three",
+          ES_MULTILINE | ES_WANTRETURN | ES_AUTOVSCROLL | WS_VSCROLL | WS_BORDER | WS_TABSTOP, 724, 180, 392, 110, ID_MLEDIT );
     make( L"Static", NULL, SS_ETCHEDFRAME, 724, 112, 120, 60, ID_FRAME );
     make( L"Static", NULL, SS_GRAYRECT, 852, 112, 40, 60, ID_RECT );
 
@@ -401,7 +403,41 @@ static void selftest2(void)
         check( GetWindowRgn( ctl[ID_STATUS], rgn ) == NULLREGION, "back to an empty region without it" );
         DeleteObject( rgn );
     }
-    (void)text;
+    /* multi-line edit: CRLF on the Win32 side, "\n" natively */
+    SetWindowTextW( ctl[ID_MLEDIT], L"a\r\nb\r\nc\r\nd" );
+    check( SendMessageW( ctl[ID_MLEDIT], EM_GETLINECOUNT, 0, 0 ) == 4,
+           "answers stay right before the native view has the new text (Win32 answers)" );
+    SetWindowTextW( ctl[ID_MLEDIT], L"Alpha\r\nBeta" );
+    pump( 200 );
+    check( query_has( ctl[ID_MLEDIT], "\"text\":\"Alpha\\nBeta\"" ), "WM_SETTEXT reaches the native text view (CRLF -> LF)" );
+    SendMessageW( ctl[ID_MLEDIT], EM_SETSEL, 7, 11 );
+    pump( 200 );
+    check( query_has( ctl[ID_MLEDIT], "\"sel\":[6,10]" ), "EM_SETSEL reaches the native text view (offsets without CR)" );
+    inject( ctl[ID_MLEDIT], "{\"t\":\"replace\",\"a\":[5,0],\"s\":\"\\n!\"}" );
+    pump( 200 );
+    GetWindowTextW( ctl[ID_MLEDIT], text, ARRAYSIZE(text) );
+    check( !wcscmp( text, L"Alpha\r\n!\r\nBeta" ) && got_command[ID_MLEDIT][EN_CHANGE & 15] > 0,
+           "a native edit replaces its range in Win32 (LF -> CRLF) with EN_CHANGE" );
+    inject( ctl[ID_MLEDIT], "{\"t\":\"sel\",\"a\":[2,4]}" );
+    pump( 300 );
+    {
+        char *q = pQuery( ctl[ID_MLEDIT] ), *p = q ? strstr( q, "\"peAnswers\":" ) : NULL;
+        unsigned int before = p ? atoi( p + 12 ) : 0;
+        DWORD start = 0, end = 0;
+        LRESULT lines, index;
+        pFree( q );
+        SendMessageW( ctl[ID_MLEDIT], EM_GETSEL, (WPARAM)&start, (LPARAM)&end );
+        lines = SendMessageW( ctl[ID_MLEDIT], EM_GETLINECOUNT, 0, 0 );
+        index = SendMessageW( ctl[ID_MLEDIT], EM_LINEINDEX, 2, 0 );
+        q = pQuery( ctl[ID_MLEDIT] );
+        p = q ? strstr( q, "\"peAnswers\":" ) : NULL;
+        printf( "      EM_GETSEL %lu-%lu, %d lines, line 2 at %d, answered %u -> %d\n", start, end, (int)lines,
+                (int)index, before, p ? atoi( p + 12 ) : -1 );
+        check( start == 2 && end == 4 && lines == 3 && index == 10,
+               "EM_GETSEL / EM_GETLINECOUNT / EM_LINEINDEX give the native selection and lines" );
+        check( p && (unsigned int)atoi( p + 12 ) == before + 3, "... and the native view answered them" );
+        pFree( q );
+    }
 }
 
 static int selftest(void)
@@ -409,7 +445,7 @@ static int selftest(void)
     static const int ids[] = { ID_PUSH, ID_DEFAULT, ID_PUSHLIKE, ID_GROUP, ID_CHECK, ID_RADIO1, ID_RADIO2, ID_LABEL,
                                ID_SEP, ID_ICON, ID_EDIT, ID_PASSWORD, ID_NUMBER, ID_READONLY, ID_COMBO, ID_LIST,
                                ID_MULTI, ID_REPORT, ID_LVLIST, ID_PROGRESS, ID_TRACK, ID_TAB,
-                               ID_3STATE, ID_SPLIT, ID_CMDLINK, ID_FRAME, ID_RECT, ID_STATUS };
+                               ID_3STATE, ID_SPLIT, ID_CMDLINK, ID_FRAME, ID_RECT, ID_STATUS, ID_MLEDIT };
     HMODULE w2s = GetModuleHandleW( L"win32swiftui.dll" );
     WCHAR text[256], file[MAX_PATH] = L"";
     OPENFILENAMEW ofn = { sizeof(ofn) };
