@@ -155,11 +155,14 @@ entries:
             }
           }.pickerStyle(.menu).labelsHidden()
     glass: automatic
-    state_in: [CBEM_INSERTITEM, CBEM_SETITEM, CBEM_DELETEITEM, CBEM_SETIMAGELIST, CB_SETCURSEL]
+    state_in: [CBEM_INSERTITEM, CBEM_SETITEM, CBEM_DELETEITEM, CBEM_SETIMAGELIST, CB_SETCURSEL, CB_RESETCONTENT, WM_SETTEXT, WM_COMMAND]
     events_out: {select: CBN_SELCHANGE, edit: CBEN_ENDEDIT}
     notes: >-
-      Images come from the control's image list (ImageList_GetIcon -> NSImage). An editable
-      ComboBoxEx uses combobox.editable with images drawn in the item cells.
+      A drop-down list is the native pop-up, an editable one (CBS_DROPDOWN) the editable
+      combo; their items' images aren't shown yet. Native choices go through the
+      ComboBoxEx's own combo box part, as a pick in its list does, so it updates its edit
+      and tells the app (CBN_SELENDOK); typing goes into its edit and Return there ends the
+      edit (CBEN_ENDEDIT). Its edit's changes (WM_COMMAND from it) refresh the view.
 
   - id: listview.report
     kind: control

@@ -830,6 +830,69 @@ static void editable_combo_apply( struct w2s_control *ctl, const struct w2s_even
 
 static const struct w2s_kind kind_combobox_editable = { "combobox.editable", editable_combo_snapshot, editable_combo_apply };
 
+/* ---------- ComboBoxEx (map: comboboxex) ---------- */
+
+/* A ComboBoxEx is a combo box and an edit it owns: the native pop-up (or
+ * editable combo) stands in for both, and native choices go through its own
+ * combo box part, as a pick in the list does, so the ComboBoxEx updates its edit
+ * and tells the app (CBN_SELENDOK). Typing goes into its edit, and Return
+ * there (wine keeps dialog keys) ends the edit with CBEN_ENDEDIT. */
+static void comboex_snapshot( struct w2s_control *ctl, struct json *j )
+{
+    DWORD style = GetWindowLongW( ctl->hwnd, GWL_STYLE );
+    HWND edit = (HWND)SendMessageW( ctl->hwnd, CBEM_GETEDITCONTROL, 0, 0 );
+    int count = min( (int)SendMessageW( ctl->hwnd, CB_GETCOUNT, 0, 0 ), 2000 ), i, sel, len;
+    WCHAR text[256], *edit_text;
+
+    json_bool( j, "editable", (style & 3) != CBS_DROPDOWNLIST );
+    json_arr_begin( j, "items" );
+    for (i = 0; i < count; i++)
+    {
+        COMBOBOXEXITEMW item;
+        memset( &item, 0, sizeof(item) );
+        item.mask = CBEIF_TEXT;
+        item.iItem = i;
+        item.pszText = text;
+        item.cchTextMax = ARRAYSIZE(text);
+        text[0] = 0;
+        SendMessageW( ctl->hwnd, CBEM_GETITEMW, 0, (LPARAM)&item );
+        json_str( j, NULL, text );
+    }
+    json_arr_end( j );
+    sel = (int)SendMessageW( ctl->hwnd, CB_GETCURSEL, 0, 0 );
+    json_int( j, "selection", sel );
+    if (edit && (edit_text = window_text( edit, &len )))
+    {
+        json_str( j, "text", edit_text );
+        HeapFree( GetProcessHeap(), 0, edit_text );
+        json_int( j, "limit", (UINT)SendMessageW( edit, EM_GETLIMITTEXT, 0, 0 ) );
+    }
+    else json_str( j, "text", L"" );
+}
+
+static void comboex_apply( struct w2s_control *ctl, const struct w2s_event *ev )
+{
+    HWND combo = (HWND)SendMessageW( ctl->hwnd, CBEM_GETCOMBOCONTROL, 0, 0 );
+    HWND edit = (HWND)SendMessageW( ctl->hwnd, CBEM_GETEDITCONTROL, 0, 0 );
+    int id = combo ? GetDlgCtrlID( combo ) : 0;
+
+    if (!strcmp( ev->type, "select" ) && ev->has_value && combo)
+    {
+        if ((int)SendMessageW( ctl->hwnd, CB_GETCURSEL, 0, 0 ) == (int)ev->value) return;
+        SendMessageW( combo, CB_SETCURSEL, (int)ev->value, 0 );
+        SendMessageW( ctl->hwnd, WM_COMMAND, MAKEWPARAM( id, CBN_SELCHANGE ), (LPARAM)combo );
+        SendMessageW( ctl->hwnd, WM_COMMAND, MAKEWPARAM( id, CBN_SELENDOK ), (LPARAM)combo );
+    }
+    else if (!strcmp( ev->type, "text" ) && ev->string && edit) replace_text( edit, ev->string );
+    else if (!strcmp( ev->type, "open" ) && combo)
+        SendMessageW( ctl->hwnd, WM_COMMAND, MAKEWPARAM( id, CBN_DROPDOWN ), (LPARAM)combo );
+    else if (!strcmp( ev->type, "close" ) && combo)
+        SendMessageW( ctl->hwnd, WM_COMMAND, MAKEWPARAM( id, CBN_CLOSEUP ), (LPARAM)combo );
+}
+
+static const struct w2s_kind kind_comboboxex =
+    { "comboboxex", comboex_snapshot, comboex_apply, NULL, NULL, NULL, NULL, NULL, W2S_OWN_TEXT };
+
 /* ---------- ListBox ---------- */
 
 static void listbox_snapshot( struct w2s_control *ctl, struct json *j )
@@ -2303,9 +2366,11 @@ const struct w2s_kind *w2s_select_kind( HWND hwnd )
     class_name( hwnd, name, ARRAYSIZE(name) );
     class_name( parent, parent_name, ARRAYSIZE(parent_name) );
 
-    /* a rebar's toolbars are translated as any toolbar (map: rebar) */
+    /* a rebar's toolbars and ComboBoxEx lists are translated as anywhere (map: rebar) */
     if (is_class( parent_name, L"ReBarWindow32" ) && is_class( name, TOOLBARCLASSNAMEW ))
         return (style & CCS_VERT) ? NULL : &kind_toolbar;
+    if (is_class( name, WC_COMBOBOXEXW ))
+        return (style & 3) == CBS_SIMPLE ? NULL : &kind_comboboxex;
 
     /* parts of composite controls belong to their parent */
     if (is_class( parent_name, L"ComboBox" ) || is_class( parent_name, L"ComboBoxEx32" ) ||

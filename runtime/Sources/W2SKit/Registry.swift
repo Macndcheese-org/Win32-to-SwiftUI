@@ -68,6 +68,7 @@ struct Snapshot: Codable, Equatable {
     }
     var buttons: [ToolbarButton]?
     var children: [[Int]]?      // toolbar, rebar: the app's own windows in it (client left, top, right, bottom)
+    var editable: Bool?         // comboboxex: CBS_DROPDOWN
     var list: Bool?
     var mixed: Bool?
     var bottom: Bool?           // tab control: TCS_BOTTOM

@@ -631,7 +631,7 @@ VStack(spacing: 4) {
 <a id="comboboxex"></a>`comboboxex` · SwiftUI · Liquid Glass: automatic on 26+
 
 - Windows: `ComboBoxEx32`
-- Windows → view: CBEM_INSERTITEM, CBEM_SETITEM, CBEM_DELETEITEM, CBEM_SETIMAGELIST, CB_SETCURSEL
+- Windows → view: CBEM_INSERTITEM, CBEM_SETITEM, CBEM_DELETEITEM, CBEM_SETIMAGELIST, CB_SETCURSEL, CB_RESETCONTENT, WM_SETTEXT, WM_COMMAND
 - View → Windows: select: CBN_SELCHANGE; edit: CBEN_ENDEDIT
 
 **SwiftUI, macOS 12+**
@@ -644,7 +644,7 @@ Picker(title, selection: $choice) {
 }.pickerStyle(.menu).labelsHidden()
 ```
 
-Images come from the control's image list (ImageList_GetIcon -> NSImage). An editable ComboBoxEx uses combobox.editable with images drawn in the item cells.
+A drop-down list is the native pop-up, an editable one (CBS_DROPDOWN) the editable combo; their items' images aren't shown yet. Native choices go through the ComboBoxEx's own combo box part, as a pick in its list does, so it updates its edit and tells the app (CBN_SELENDOK); typing goes into its edit and Return there ends the edit (CBEN_ENDEDIT). Its edit's changes (WM_COMMAND from it) refresh the view.
 
 ### List view, details (report) mode
 <a id="listviewreport"></a>`listview.report` · SwiftUI · Liquid Glass: automatic on 26+

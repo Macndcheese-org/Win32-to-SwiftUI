@@ -12,7 +12,7 @@ enum ControlViews {
     // map: updown datetime monthcal tooltip (as .help on every control: HelpText)
     // map: listview.checkboxes listview.icon
     // map: propsheet propsheet.wizard (modes of the sheet's tab control: WindowSidebar, WizardSteps)
-    // map: toolbar rebar
+    // map: toolbar rebar comboboxex
     static let entries: Set<String> = [
         "button.push", "button.default", "button.checkbox", "button.pushlike", "button.radio", "button.groupbox",
         "button.3state", "button.split", "button.commandlink",
@@ -21,7 +21,7 @@ enum ControlViews {
         "combobox.dropdownlist", "listbox.single", "listbox.multi", "listview.list", "listview.report",
         "progress", "trackbar", "tab", "static.frame", "statusbar", "edit.multiline", "combobox.editable",
         "treeview", "updown", "datetime", "monthcal", "listview.checkboxes", "listview.icon",
-        "toolbar", "rebar",
+        "toolbar", "rebar", "comboboxex",
     ]
 
     static func supports(_ entry: String) -> Bool { entries.contains(entry) }
@@ -142,6 +142,12 @@ struct ControlRoot: View {
             Text(snap.text ?? "").textSelection(.enabled)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         case "combobox.dropdownlist":
+            DropDownList(model: model, fontSize: metrics.fontSize, controlSize: metrics.controlSize)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        case "comboboxex" where snap.editable ?? false:
+            EditableCombo(model: model, fontSize: metrics.fontSize, controlSize: metrics.controlSize)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        case "comboboxex":
             DropDownList(model: model, fontSize: metrics.fontSize, controlSize: metrics.controlSize)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         case "combobox.editable":

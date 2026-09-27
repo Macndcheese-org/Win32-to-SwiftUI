@@ -37,8 +37,8 @@ enum
     ID_TASKDLG, ID_FOLDER, ID_COLOR, ID_FONT, ID_PRINT, ID_ITEMDLG, ID_PROPSHEET, ID_WIZARD,
     /* light and dark */
     ID_WHITEPANEL, ID_WHITECHECK,
-    /* toolbars */
-    ID_TOOLBAR,
+    /* toolbars, ComboBoxEx */
+    ID_TOOLBAR, ID_CBEX,
     ID_LAST
 };
 
@@ -379,6 +379,22 @@ static void create_controls2(void)
         b[3].iBitmap = STD_FIND; b[3].idCommand = 9103; b[3].fsState = TBSTATE_ENABLED; b[3].fsStyle = BTNS_CHECK;
         b[4].iBitmap = STD_PRINT; b[4].idCommand = 9104; b[4].fsState = TBSTATE_ENABLED; b[4].fsStyle = BTNS_DROPDOWN;
         SendMessageW( ctl[ID_TOOLBAR], TB_ADDBUTTONSW, 5, (LPARAM)b );
+    }
+    /* a ComboBoxEx, as wordpad's font list */
+    make( WC_COMBOBOXEXW, NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 724, 540, 200, 150, ID_CBEX );
+    {
+        static const WCHAR *fonts[] = { L"Arial", L"Courier New", L"Times New Roman" };
+        COMBOBOXEXITEMW item;
+        int i;
+        for (i = 0; i < 3; i++)
+        {
+            memset( &item, 0, sizeof(item) );
+            item.mask = CBEIF_TEXT;
+            item.iItem = i;
+            item.pszText = (WCHAR *)fonts[i];
+            SendMessageW( ctl[ID_CBEX], CBEM_INSERTITEMW, 0, (LPARAM)&item );
+        }
+        SendMessageW( ctl[ID_CBEX], CB_SETCURSEL, 2, 0 );
     }
     make( L"Edit", L"5", ES_NUMBER | WS_BORDER | WS_TABSTOP, 916, 112, 80, 22, ID_UDEDIT );
     make( UPDOWN_CLASSW, NULL, UDS_AUTOBUDDY | UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS, 0, 0, 0, 0, ID_UPDOWN );
@@ -1440,6 +1456,26 @@ static void selftest2(void)
         inject( tb, "{\"t\":\"dropdown\",\"v\":4}" );
         pump( 200 );
         check( got_tb_dropdown == 1 && got_tb_command[3] == 0, "a native drop-down arrow -> TBN_DROPDOWN, not the command" );
+    }
+
+    /* ComboBoxEx: the native editable combo; choices through its own combo box part */
+    {
+        HWND cbex = ctl[ID_CBEX], edit = (HWND)SendMessageW( ctl[ID_CBEX], CBEM_GETEDITCONTROL, 0, 0 );
+        WCHAR text[64];
+
+        check( pIsTranslated( cbex ) && query_has( cbex, "\"items\":[\"Arial\",\"Courier New\",\"Times New Roman\"]" ) &&
+               query_has( cbex, "\"selection\":2" ) && query_has( cbex, "\"text\":\"Times New Roman\"" ),
+               "a ComboBoxEx is a native combo with its items and selection" );
+        inject( cbex, "{\"t\":\"select\",\"v\":1}" );
+        pump( 200 );
+        GetWindowTextW( edit, text, ARRAYSIZE(text) );
+        check( SendMessageW( cbex, CB_GETCURSEL, 0, 0 ) == 1 && !wcscmp( text, L"Courier New" ) &&
+               got_command[ID_CBEX][CBN_SELENDOK & 15] == 1,
+               "a native choice -> its edit's text and CBN_SELENDOK from the ComboBoxEx" );
+        inject( cbex, "{\"t\":\"text\",\"s\":\"Consolas\"}" );
+        pump( 200 );
+        GetWindowTextW( edit, text, ARRAYSIZE(text) );
+        check( !wcscmp( text, L"Consolas" ) && query_has( cbex, "\"text\":\"Consolas\"" ), "native typing goes into its edit" );
     }
 
     /* up-down with its buddy edit */
