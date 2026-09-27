@@ -815,13 +815,14 @@ static int listview_columns( HWND hwnd, int *subitems, struct json *j )
     if (j) json_arr_begin( j, "columns" );
     for (c = 0; c < n; c++)
     {
-        LVCOLUMNW col = { LVCF_TEXT | LVCF_WIDTH | LVCF_FMT | LVCF_SUBITEM };
+        LVCOLUMNW col = { LVCF_TEXT | LVCF_WIDTH | LVCF_FMT };
         text[0] = 0;
         col.pszText = text;
         col.cchTextMax = ARRAYSIZE(text);
-        col.iSubItem = order[c];
-        if (!SendMessageW( hwnd, LVM_GETCOLUMNW, order[c], (LPARAM)&col )) col.iSubItem = order[c];
-        subitems[c] = col.iSubItem;
+        SendMessageW( hwnd, LVM_GETCOLUMNW, order[c], (LPARAM)&col );
+        /* column k shows subitem k, as the list view draws it; LVCOLUMN.iSubItem
+         * is only what the app stored (0 when it never set LVCF_SUBITEM) */
+        subitems[c] = order[c];
         if (!j) continue;
         json_obj_begin( j );
         json_str( j, "title", text );

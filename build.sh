@@ -10,7 +10,7 @@
 set -e
 cd "${0:A:h}"
 WINE_SRC=${WINE_SRC:?set WINE_SRC to the MNC wine source tree (branch w2s)}
-WINE_BUILD=${WINE_BUILD:?set WINE_BUILD to that tree's x86_64 build directory}
+WINE_BUILD=${WINE_BUILD:?set WINE_BUILD to the x86_64 build directory of that tree}
 DEST=${1:-$WINE_BUILD}
 OUT=build
 

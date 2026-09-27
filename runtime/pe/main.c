@@ -85,8 +85,27 @@ static HRGN wine_region( struct w2s_control *ctl )
 static void clip_wine_drawing( struct w2s_control *ctl, BOOL clip )
 {
     HWND hwnd = ctl->hwnd, parent = GetParent( hwnd );
+    DWORD style = GetWindowLongW( hwnd, GWL_STYLE );
     RECT rc;
 
+    /* Button, Static, Edit and ComboBox are CS_PARENTDC classes: their DCs clip
+     * with the parent's region, which ignores the control's own window region,
+     * so wine kept drawing them under the native view. win32u drops parent
+     * clipping for WS_CLIPSIBLINGS windows (dce.c), and then the empty region
+     * holds for every DC the control gets, in WM_PAINT or not. */
+    /* our own style change must not look like the app's (reselect_kind) */
+    ctl->reselecting++;
+    if (clip && !(style & WS_CLIPSIBLINGS))
+    {
+        ctl->added_clipsiblings = TRUE;
+        SetWindowLongW( hwnd, GWL_STYLE, style | WS_CLIPSIBLINGS );
+    }
+    else if (!clip && ctl->added_clipsiblings)
+    {
+        ctl->added_clipsiblings = FALSE;
+        SetWindowLongW( hwnd, GWL_STYLE, style & ~WS_CLIPSIBLINGS );
+    }
+    ctl->reselecting--;
     SetWindowRgn( hwnd, clip ? wine_region( ctl ) : NULL, FALSE );
     if (!parent || !IsWindowVisible( hwnd )) return;
     GetWindowRect( hwnd, &rc );
@@ -373,8 +392,13 @@ static BOOL activate( struct w2s_control *ctl, const struct w2s_kind *kind )
  * (a list view switched to LVS_OWNERDATA, LVS_EX_CHECKBOXES added) */
 static void reselect_kind( struct w2s_control *ctl )
 {
-    const struct w2s_kind *kind = w2s_select_kind( ctl->hwnd );
+    const struct w2s_kind *kind;
 
+    /* switching sends style changes of its own; they must not switch again
+     * (that activated twice: a leaked native view, and a second one that
+     * never got the list view's icons) */
+    if (ctl->reselecting) return;
+    kind = w2s_select_kind( ctl->hwnd );
     if (kind == ctl->kind && ctl->active) return;
     if (kind && ctl->active && !strcmp( family( kind ), family( ctl->kind ) ))
     {
@@ -382,8 +406,10 @@ static void reselect_kind( struct w2s_control *ctl )
         return;
     }
     TRACE( "%p: %s -> %s\n", ctl->hwnd, ctl->active ? ctl->kind->entry : "(wine)", kind ? kind->entry : "(wine)" );
+    ctl->reselecting++;
     deactivate( ctl, FALSE );
     if (kind) activate( ctl, kind );
+    ctl->reselecting--;
 }
 
 static BOOL is_reselect_message( UINT msg )

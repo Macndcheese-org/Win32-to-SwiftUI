@@ -11,40 +11,40 @@ struct w2s_map_entry
     unsigned int answers_count;
 };
 
-static const UINT w2s_state_button_push[] = { WM_SETTEXT, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK };
-static const UINT w2s_state_button_default[] = { WM_SETTEXT, WM_ENABLE, BM_SETSTYLE, DM_SETDEFID };
-static const UINT w2s_state_button_checkbox[] = { WM_SETTEXT, WM_ENABLE, BM_SETCHECK };
-static const UINT w2s_state_button_3state[] = { BM_SETCHECK };
-static const UINT w2s_state_button_pushlike[] = { BM_SETCHECK };
-static const UINT w2s_state_button_radio[] = { BM_SETCHECK, WM_SETTEXT, WM_ENABLE };
-static const UINT w2s_state_button_groupbox[] = { WM_SETTEXT };
-static const UINT w2s_state_button_split[] = { WM_SETTEXT, BCM_SETSPLITINFO };
-static const UINT w2s_state_button_commandlink[] = { WM_SETTEXT, BCM_SETNOTE, BCM_SETSHIELD };
-static const UINT w2s_state_static_text[] = { WM_SETTEXT, WM_SETFONT, WM_ENABLE };
-static const UINT w2s_state_static_image[] = { STM_SETICON, STM_SETIMAGE };
-static const UINT w2s_state_static_separator[] = { 0 };
-static const UINT w2s_state_static_frame[] = { 0 };
-static const UINT w2s_state_edit_single[] = { WM_SETTEXT, EM_SETSEL, EM_REPLACESEL, EM_SETREADONLY, EM_SETLIMITTEXT, EM_SETCUEBANNER, EM_SETPASSWORDCHAR, EM_UNDO };
-static const UINT w2s_state_edit_password[] = { WM_SETTEXT, EM_SETPASSWORDCHAR };
-static const UINT w2s_state_edit_number[] = { WM_SETTEXT };
-static const UINT w2s_state_edit_readonly[] = { WM_SETTEXT, EM_SETREADONLY };
-static const UINT w2s_state_edit_multiline[] = { WM_SETTEXT, EM_SETSEL, EM_REPLACESEL, EM_SCROLLCARET, EM_LINESCROLL, EM_SETREADONLY, EM_SETLIMITTEXT, EM_UNDO, WM_CUT, WM_PASTE, WM_CLEAR };
+static const UINT w2s_state_button_push[] = { WM_SETTEXT, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, BM_SETCHECK, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
+static const UINT w2s_state_button_default[] = { WM_SETTEXT, WM_ENABLE, BM_SETSTYLE, DM_SETDEFID, WM_SETFONT, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, BM_SETCHECK, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
+static const UINT w2s_state_button_checkbox[] = { WM_SETTEXT, WM_ENABLE, BM_SETCHECK, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
+static const UINT w2s_state_button_3state[] = { BM_SETCHECK, WM_SETTEXT, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
+static const UINT w2s_state_button_pushlike[] = { BM_SETCHECK, WM_SETTEXT, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
+static const UINT w2s_state_button_radio[] = { BM_SETCHECK, WM_SETTEXT, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
+static const UINT w2s_state_button_groupbox[] = { WM_SETTEXT, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, BM_SETCHECK, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
+static const UINT w2s_state_button_split[] = { WM_SETTEXT, BCM_SETSPLITINFO, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, BM_SETCHECK, BCM_SETNOTE, BCM_SETSHIELD };
+static const UINT w2s_state_button_commandlink[] = { WM_SETTEXT, BCM_SETNOTE, BCM_SETSHIELD, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, BM_SETCHECK, BCM_SETSPLITINFO };
+static const UINT w2s_state_static_text[] = { WM_SETTEXT, WM_SETFONT, WM_ENABLE, STM_SETICON, STM_SETIMAGE };
+static const UINT w2s_state_static_image[] = { STM_SETICON, STM_SETIMAGE, WM_SETTEXT, WM_SETFONT, WM_ENABLE };
+static const UINT w2s_state_static_separator[] = { WM_SETTEXT, WM_SETFONT, WM_ENABLE, STM_SETICON, STM_SETIMAGE };
+static const UINT w2s_state_static_frame[] = { WM_SETTEXT, WM_SETFONT, WM_ENABLE, STM_SETICON, STM_SETIMAGE };
+static const UINT w2s_state_edit_single[] = { WM_SETTEXT, EM_SETSEL, EM_REPLACESEL, EM_SETREADONLY, EM_SETLIMITTEXT, EM_SETCUEBANNER, EM_SETPASSWORDCHAR, EM_UNDO, EM_SCROLLCARET, EM_LINESCROLL, WM_CUT, WM_PASTE, WM_CLEAR, EM_SHOWBALLOONTIP, EM_HIDEBALLOONTIP };
+static const UINT w2s_state_edit_password[] = { WM_SETTEXT, EM_SETPASSWORDCHAR, EM_SETSEL, EM_REPLACESEL, EM_SETREADONLY, EM_SETLIMITTEXT, EM_SETCUEBANNER, EM_UNDO, EM_SCROLLCARET, EM_LINESCROLL, WM_CUT, WM_PASTE, WM_CLEAR, EM_SHOWBALLOONTIP, EM_HIDEBALLOONTIP };
+static const UINT w2s_state_edit_number[] = { WM_SETTEXT, EM_SETSEL, EM_REPLACESEL, EM_SETREADONLY, EM_SETLIMITTEXT, EM_SETCUEBANNER, EM_SETPASSWORDCHAR, EM_UNDO, EM_SCROLLCARET, EM_LINESCROLL, WM_CUT, WM_PASTE, WM_CLEAR, EM_SHOWBALLOONTIP, EM_HIDEBALLOONTIP };
+static const UINT w2s_state_edit_readonly[] = { WM_SETTEXT, EM_SETREADONLY, EM_SETSEL, EM_REPLACESEL, EM_SETLIMITTEXT, EM_SETCUEBANNER, EM_SETPASSWORDCHAR, EM_UNDO, EM_SCROLLCARET, EM_LINESCROLL, WM_CUT, WM_PASTE, WM_CLEAR, EM_SHOWBALLOONTIP, EM_HIDEBALLOONTIP };
+static const UINT w2s_state_edit_multiline[] = { WM_SETTEXT, EM_SETSEL, EM_REPLACESEL, EM_SCROLLCARET, EM_LINESCROLL, EM_SETREADONLY, EM_SETLIMITTEXT, EM_UNDO, WM_CUT, WM_PASTE, WM_CLEAR, EM_SETCUEBANNER, EM_SETPASSWORDCHAR, EM_SHOWBALLOONTIP, EM_HIDEBALLOONTIP };
 static const UINT w2s_answers_edit_multiline[] = { EM_GETSEL, EM_LINEFROMCHAR, EM_LINEINDEX, EM_GETLINECOUNT, EM_POSFROMCHAR, EM_LINELENGTH, EM_GETFIRSTVISIBLELINE, EM_GETLINE, EM_CHARFROMPOS };
-static const UINT w2s_state_edit_balloon[] = { EM_SHOWBALLOONTIP, EM_HIDEBALLOONTIP };
-static const UINT w2s_state_listbox_single[] = { LB_ADDSTRING, LB_INSERTSTRING, LB_DELETESTRING, LB_RESETCONTENT, LB_SETCURSEL, LB_SETTOPINDEX, LB_SETITEMDATA, WM_SETREDRAW };
-static const UINT w2s_state_listbox_multi[] = { LB_SETSEL, LB_SELITEMRANGE, LB_SETANCHORINDEX, LB_SETCARETINDEX };
-static const UINT w2s_state_listbox_multicolumn[] = { LB_SETCOLUMNWIDTH };
-static const UINT w2s_state_listbox_nosel[] = { 0 };
-static const UINT w2s_state_combobox_dropdownlist[] = { CB_ADDSTRING, CB_INSERTSTRING, CB_DELETESTRING, CB_RESETCONTENT, CB_SETCURSEL, CB_SELECTSTRING, CB_SHOWDROPDOWN };
-static const UINT w2s_state_combobox_editable[] = { WM_SETTEXT, CB_ADDSTRING, CB_INSERTSTRING, CB_DELETESTRING, CB_RESETCONTENT, CB_SETCURSEL, CB_SELECTSTRING, CB_SETEDITSEL, CB_LIMITTEXT, WM_COMMAND };
-static const UINT w2s_state_combobox_simple[] = { 0 };
+static const UINT w2s_state_edit_balloon[] = { EM_SHOWBALLOONTIP, EM_HIDEBALLOONTIP, WM_SETTEXT, EM_SETSEL, EM_REPLACESEL, EM_SETREADONLY, EM_SETLIMITTEXT, EM_SETCUEBANNER, EM_SETPASSWORDCHAR, EM_UNDO, EM_SCROLLCARET, EM_LINESCROLL, WM_CUT, WM_PASTE, WM_CLEAR };
+static const UINT w2s_state_listbox_single[] = { LB_ADDSTRING, LB_INSERTSTRING, LB_DELETESTRING, LB_RESETCONTENT, LB_SETCURSEL, LB_SETTOPINDEX, LB_SETITEMDATA, WM_SETREDRAW, LB_SETSEL, LB_SELITEMRANGE, LB_SETANCHORINDEX, LB_SETCARETINDEX, LB_SETCOLUMNWIDTH };
+static const UINT w2s_state_listbox_multi[] = { LB_SETSEL, LB_SELITEMRANGE, LB_SETANCHORINDEX, LB_SETCARETINDEX, LB_ADDSTRING, LB_INSERTSTRING, LB_DELETESTRING, LB_RESETCONTENT, LB_SETCURSEL, LB_SETTOPINDEX, LB_SETITEMDATA, WM_SETREDRAW, LB_SETCOLUMNWIDTH };
+static const UINT w2s_state_listbox_multicolumn[] = { LB_SETCOLUMNWIDTH, LB_ADDSTRING, LB_INSERTSTRING, LB_DELETESTRING, LB_RESETCONTENT, LB_SETCURSEL, LB_SETTOPINDEX, LB_SETITEMDATA, WM_SETREDRAW, LB_SETSEL, LB_SELITEMRANGE, LB_SETANCHORINDEX, LB_SETCARETINDEX };
+static const UINT w2s_state_listbox_nosel[] = { LB_ADDSTRING, LB_INSERTSTRING, LB_DELETESTRING, LB_RESETCONTENT, LB_SETCURSEL, LB_SETTOPINDEX, LB_SETITEMDATA, WM_SETREDRAW, LB_SETSEL, LB_SELITEMRANGE, LB_SETANCHORINDEX, LB_SETCARETINDEX, LB_SETCOLUMNWIDTH };
+static const UINT w2s_state_combobox_dropdownlist[] = { CB_ADDSTRING, CB_INSERTSTRING, CB_DELETESTRING, CB_RESETCONTENT, CB_SETCURSEL, CB_SELECTSTRING, CB_SHOWDROPDOWN, WM_SETTEXT, CB_SETEDITSEL, CB_LIMITTEXT, WM_COMMAND };
+static const UINT w2s_state_combobox_editable[] = { WM_SETTEXT, CB_ADDSTRING, CB_INSERTSTRING, CB_DELETESTRING, CB_RESETCONTENT, CB_SETCURSEL, CB_SELECTSTRING, CB_SETEDITSEL, CB_LIMITTEXT, WM_COMMAND, CB_SHOWDROPDOWN };
+static const UINT w2s_state_combobox_simple[] = { CB_ADDSTRING, CB_INSERTSTRING, CB_DELETESTRING, CB_RESETCONTENT, CB_SETCURSEL, CB_SELECTSTRING, CB_SHOWDROPDOWN, WM_SETTEXT, CB_SETEDITSEL, CB_LIMITTEXT, WM_COMMAND };
 static const UINT w2s_state_comboboxex[] = { CBEM_INSERTITEMA, CBEM_INSERTITEMW, CBEM_SETITEMA, CBEM_SETITEMW, CBEM_DELETEITEM, CBEM_SETIMAGELIST, CB_SETCURSEL };
-static const UINT w2s_state_listview_report[] = { LVM_INSERTCOLUMNA, LVM_INSERTCOLUMNW, LVM_SETCOLUMNA, LVM_SETCOLUMNW, LVM_DELETECOLUMN, LVM_INSERTITEMA, LVM_INSERTITEMW, LVM_SETITEMA, LVM_SETITEMW, LVM_SETITEMTEXTA, LVM_SETITEMTEXTW, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SETITEMSTATE, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_ENSUREVISIBLE, LVM_SETCOLUMNWIDTH, LVM_SETITEMCOUNT };
-static const UINT w2s_state_listview_icon[] = { LVM_SETIMAGELIST, LVM_ARRANGE, LVM_SETICONSPACING, LVM_INSERTITEMA, LVM_INSERTITEMW, LVM_SETITEMA, LVM_SETITEMW, LVM_SETITEMTEXTA, LVM_SETITEMTEXTW, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SETITEMSTATE, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_SETITEMCOUNT, LVM_ENSUREVISIBLE };
-static const UINT w2s_state_listview_list[] = { LVM_INSERTITEMA, LVM_INSERTITEMW, LVM_SETITEMA, LVM_SETITEMW, LVM_SETITEMTEXTA, LVM_SETITEMTEXTW, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SETITEMSTATE, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_SETITEMCOUNT, LVM_ENSUREVISIBLE };
-static const UINT w2s_state_listview_checkboxes[] = { LVM_SETITEMSTATE, LVM_INSERTCOLUMNA, LVM_INSERTCOLUMNW, LVM_SETCOLUMNA, LVM_SETCOLUMNW, LVM_DELETECOLUMN, LVM_SETCOLUMNWIDTH, LVM_INSERTITEMA, LVM_INSERTITEMW, LVM_SETITEMA, LVM_SETITEMW, LVM_SETITEMTEXTA, LVM_SETITEMTEXTW, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_SETITEMCOUNT, LVM_ENSUREVISIBLE };
-static const UINT w2s_state_listview_groups[] = { LVM_ENABLEGROUPVIEW, LVM_INSERTGROUP, LVM_SETGROUPINFO };
-static const UINT w2s_state_listview_empty[] = { 0 };
+static const UINT w2s_state_listview_report[] = { LVM_INSERTCOLUMNA, LVM_INSERTCOLUMNW, LVM_SETCOLUMNA, LVM_SETCOLUMNW, LVM_DELETECOLUMN, LVM_INSERTITEMA, LVM_INSERTITEMW, LVM_SETITEMA, LVM_SETITEMW, LVM_SETITEMTEXTA, LVM_SETITEMTEXTW, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SETITEMSTATE, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_ENSUREVISIBLE, LVM_SETCOLUMNWIDTH, LVM_SETITEMCOUNT, LVM_SETIMAGELIST, LVM_ARRANGE, LVM_SETICONSPACING, LVM_ENABLEGROUPVIEW, LVM_INSERTGROUP, LVM_SETGROUPINFO };
+static const UINT w2s_state_listview_icon[] = { LVM_SETIMAGELIST, LVM_ARRANGE, LVM_SETICONSPACING, LVM_INSERTITEMA, LVM_INSERTITEMW, LVM_SETITEMA, LVM_SETITEMW, LVM_SETITEMTEXTA, LVM_SETITEMTEXTW, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SETITEMSTATE, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_SETITEMCOUNT, LVM_ENSUREVISIBLE, LVM_INSERTCOLUMNA, LVM_INSERTCOLUMNW, LVM_SETCOLUMNA, LVM_SETCOLUMNW, LVM_DELETECOLUMN, LVM_SETCOLUMNWIDTH, LVM_ENABLEGROUPVIEW, LVM_INSERTGROUP, LVM_SETGROUPINFO };
+static const UINT w2s_state_listview_list[] = { LVM_INSERTITEMA, LVM_INSERTITEMW, LVM_SETITEMA, LVM_SETITEMW, LVM_SETITEMTEXTA, LVM_SETITEMTEXTW, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SETITEMSTATE, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_SETITEMCOUNT, LVM_ENSUREVISIBLE, LVM_INSERTCOLUMNA, LVM_INSERTCOLUMNW, LVM_SETCOLUMNA, LVM_SETCOLUMNW, LVM_DELETECOLUMN, LVM_SETCOLUMNWIDTH, LVM_SETIMAGELIST, LVM_ARRANGE, LVM_SETICONSPACING, LVM_ENABLEGROUPVIEW, LVM_INSERTGROUP, LVM_SETGROUPINFO };
+static const UINT w2s_state_listview_checkboxes[] = { LVM_SETITEMSTATE, LVM_INSERTCOLUMNA, LVM_INSERTCOLUMNW, LVM_SETCOLUMNA, LVM_SETCOLUMNW, LVM_DELETECOLUMN, LVM_SETCOLUMNWIDTH, LVM_INSERTITEMA, LVM_INSERTITEMW, LVM_SETITEMA, LVM_SETITEMW, LVM_SETITEMTEXTA, LVM_SETITEMTEXTW, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_SETITEMCOUNT, LVM_ENSUREVISIBLE, LVM_SETIMAGELIST, LVM_ARRANGE, LVM_SETICONSPACING, LVM_ENABLEGROUPVIEW, LVM_INSERTGROUP, LVM_SETGROUPINFO };
+static const UINT w2s_state_listview_groups[] = { LVM_ENABLEGROUPVIEW, LVM_INSERTGROUP, LVM_SETGROUPINFO, LVM_INSERTCOLUMNA, LVM_INSERTCOLUMNW, LVM_SETCOLUMNA, LVM_SETCOLUMNW, LVM_DELETECOLUMN, LVM_INSERTITEMA, LVM_INSERTITEMW, LVM_SETITEMA, LVM_SETITEMW, LVM_SETITEMTEXTA, LVM_SETITEMTEXTW, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SETITEMSTATE, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_ENSUREVISIBLE, LVM_SETCOLUMNWIDTH, LVM_SETITEMCOUNT, LVM_SETIMAGELIST, LVM_ARRANGE, LVM_SETICONSPACING };
+static const UINT w2s_state_listview_empty[] = { LVM_INSERTCOLUMNA, LVM_INSERTCOLUMNW, LVM_SETCOLUMNA, LVM_SETCOLUMNW, LVM_DELETECOLUMN, LVM_INSERTITEMA, LVM_INSERTITEMW, LVM_SETITEMA, LVM_SETITEMW, LVM_SETITEMTEXTA, LVM_SETITEMTEXTW, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SETITEMSTATE, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_ENSUREVISIBLE, LVM_SETCOLUMNWIDTH, LVM_SETITEMCOUNT, LVM_SETIMAGELIST, LVM_ARRANGE, LVM_SETICONSPACING, LVM_ENABLEGROUPVIEW, LVM_INSERTGROUP, LVM_SETGROUPINFO };
 static const UINT w2s_state_treeview[] = { TVM_INSERTITEMA, TVM_INSERTITEMW, TVM_DELETEITEM, TVM_SETITEMA, TVM_SETITEMW, TVM_EXPAND, TVM_SELECTITEM, TVM_ENSUREVISIBLE, TVM_SETIMAGELIST, TVM_SORTCHILDREN, TVM_SORTCHILDRENCB };
 static const UINT w2s_state_header[] = { HDM_INSERTITEMA, HDM_INSERTITEMW, HDM_SETITEMA, HDM_SETITEMW, HDM_LAYOUT };
 static const UINT w2s_state_tab[] = { TCM_INSERTITEMA, TCM_INSERTITEMW, TCM_SETITEMA, TCM_SETITEMW, TCM_DELETEITEM, TCM_SETCURSEL, TCM_SETCURFOCUS };
@@ -60,7 +60,7 @@ static const UINT w2s_state_mdiclient[] = { 0 };
 static const UINT w2s_state_scrollbar[] = { SBM_SETSCROLLINFO, SBM_SETPOS, SBM_SETRANGE, SBM_ENABLE_ARROWS };
 static const UINT w2s_state_progress[] = { PBM_SETPOS, PBM_DELTAPOS, PBM_STEPIT, PBM_SETRANGE, PBM_SETRANGE32, PBM_SETSTATE, PBM_SETMARQUEE, PBM_SETBARCOLOR };
 static const UINT w2s_state_trackbar[] = { TBM_SETPOS, TBM_SETRANGE, TBM_SETRANGEMIN, TBM_SETRANGEMAX, TBM_SETTICFREQ, TBM_SETTIC, TBM_CLEARTICS, TBM_SETLINESIZE, TBM_SETPAGESIZE };
-static const UINT w2s_state_trackbar_vertical[] = { 0 };
+static const UINT w2s_state_trackbar_vertical[] = { TBM_SETPOS, TBM_SETRANGE, TBM_SETRANGEMIN, TBM_SETRANGEMAX, TBM_SETTICFREQ, TBM_SETTIC, TBM_CLEARTICS, TBM_SETLINESIZE, TBM_SETPAGESIZE };
 static const UINT w2s_state_updown[] = { UDM_SETPOS32, UDM_SETRANGE32, UDM_SETPOS, UDM_SETRANGE, UDM_SETBUDDY, UDM_SETACCEL, UDM_SETBASE };
 static const UINT w2s_state_datetime[] = { DTM_SETSYSTEMTIME, DTM_SETRANGE, DTM_SETFORMATA, DTM_SETFORMATW, DTM_SETMCCOLOR };
 static const UINT w2s_state_monthcal[] = { MCM_SETCURSEL, MCM_SETRANGE, MCM_SETTODAY, MCM_SETFIRSTDAYOFWEEK };
@@ -68,8 +68,8 @@ static const UINT w2s_state_hotkey[] = { HKM_SETHOTKEY, HKM_SETRULES };
 static const UINT w2s_state_ipaddress[] = { IPM_SETADDRESS, IPM_CLEARADDRESS, IPM_SETRANGE, IPM_SETFOCUS };
 static const UINT w2s_state_syslink[] = { WM_SETTEXT, LM_SETITEM };
 static const UINT w2s_state_animate[] = { ACM_OPENA, ACM_OPENW, ACM_PLAY, ACM_STOP };
-static const UINT w2s_state_tooltip[] = { TTM_ADDTOOLA, TTM_ADDTOOLW, TTM_DELTOOLA, TTM_DELTOOLW, TTM_UPDATETIPTEXTA, TTM_UPDATETIPTEXTW, TTM_SETTOOLINFOA, TTM_SETTOOLINFOW, TTM_SETTITLEA, TTM_SETTITLEW, TTM_ACTIVATE, TTM_SETMAXTIPWIDTH };
-static const UINT w2s_state_tooltip_balloon[] = { TTM_TRACKACTIVATE, TTM_TRACKPOSITION, TTM_SETTITLEA, TTM_SETTITLEW };
+static const UINT w2s_state_tooltip[] = { TTM_ADDTOOLA, TTM_ADDTOOLW, TTM_DELTOOLA, TTM_DELTOOLW, TTM_UPDATETIPTEXTA, TTM_UPDATETIPTEXTW, TTM_SETTOOLINFOA, TTM_SETTOOLINFOW, TTM_SETTITLEA, TTM_SETTITLEW, TTM_ACTIVATE, TTM_SETMAXTIPWIDTH, TTM_TRACKACTIVATE, TTM_TRACKPOSITION };
+static const UINT w2s_state_tooltip_balloon[] = { TTM_TRACKACTIVATE, TTM_TRACKPOSITION, TTM_SETTITLEA, TTM_SETTITLEW, TTM_ADDTOOLA, TTM_ADDTOOLW, TTM_DELTOOLA, TTM_DELTOOLW, TTM_UPDATETIPTEXTA, TTM_UPDATETIPTEXTW, TTM_SETTOOLINFOA, TTM_SETTOOLINFOW, TTM_ACTIVATE, TTM_SETMAXTIPWIDTH };
 static const UINT w2s_state_nativefont[] = { 0 };
 static const UINT w2s_state_messagebox[] = { 0 };
 static const UINT w2s_state_taskdialog[] = { TDM_SET_ELEMENT_TEXT, TDM_UPDATE_ELEMENT_TEXT, TDM_SET_PROGRESS_BAR_POS, TDM_SET_PROGRESS_BAR_STATE, TDM_SET_MARQUEE_PROGRESS_BAR, TDM_ENABLE_BUTTON, TDM_CLICK_BUTTON, TDM_CLICK_RADIO_BUTTON, TDM_CLICK_VERIFICATION };
@@ -98,39 +98,39 @@ static const UINT w2s_state_beep[] = { 0 };
 
 static const struct w2s_map_entry w2s_map_entries[] =
 {
-    { "button.push", w2s_state_button_push, 7, NULL, 0 },
-    { "button.default", w2s_state_button_default, 4, NULL, 0 },
-    { "button.checkbox", w2s_state_button_checkbox, 3, NULL, 0 },
-    { "button.3state", w2s_state_button_3state, 1, NULL, 0 },
-    { "button.pushlike", w2s_state_button_pushlike, 1, NULL, 0 },
-    { "button.radio", w2s_state_button_radio, 3, NULL, 0 },
-    { "button.groupbox", w2s_state_button_groupbox, 1, NULL, 0 },
-    { "button.split", w2s_state_button_split, 2, NULL, 0 },
-    { "button.commandlink", w2s_state_button_commandlink, 3, NULL, 0 },
-    { "static.text", w2s_state_static_text, 3, NULL, 0 },
-    { "static.image", w2s_state_static_image, 2, NULL, 0 },
-    { "static.separator", w2s_state_static_separator, 0, NULL, 0 },
-    { "static.frame", w2s_state_static_frame, 0, NULL, 0 },
-    { "edit.single", w2s_state_edit_single, 8, NULL, 0 },
-    { "edit.password", w2s_state_edit_password, 2, NULL, 0 },
-    { "edit.number", w2s_state_edit_number, 1, NULL, 0 },
-    { "edit.readonly", w2s_state_edit_readonly, 2, NULL, 0 },
-    { "edit.multiline", w2s_state_edit_multiline, 11, w2s_answers_edit_multiline, 9 },
-    { "edit.balloon", w2s_state_edit_balloon, 2, NULL, 0 },
-    { "listbox.single", w2s_state_listbox_single, 8, NULL, 0 },
-    { "listbox.multi", w2s_state_listbox_multi, 4, NULL, 0 },
-    { "listbox.multicolumn", w2s_state_listbox_multicolumn, 1, NULL, 0 },
-    { "listbox.nosel", w2s_state_listbox_nosel, 0, NULL, 0 },
-    { "combobox.dropdownlist", w2s_state_combobox_dropdownlist, 7, NULL, 0 },
-    { "combobox.editable", w2s_state_combobox_editable, 10, NULL, 0 },
-    { "combobox.simple", w2s_state_combobox_simple, 0, NULL, 0 },
+    { "button.push", w2s_state_button_push, 12, NULL, 0 },
+    { "button.default", w2s_state_button_default, 12, NULL, 0 },
+    { "button.checkbox", w2s_state_button_checkbox, 12, NULL, 0 },
+    { "button.3state", w2s_state_button_3state, 12, NULL, 0 },
+    { "button.pushlike", w2s_state_button_pushlike, 12, NULL, 0 },
+    { "button.radio", w2s_state_button_radio, 12, NULL, 0 },
+    { "button.groupbox", w2s_state_button_groupbox, 12, NULL, 0 },
+    { "button.split", w2s_state_button_split, 12, NULL, 0 },
+    { "button.commandlink", w2s_state_button_commandlink, 12, NULL, 0 },
+    { "static.text", w2s_state_static_text, 5, NULL, 0 },
+    { "static.image", w2s_state_static_image, 5, NULL, 0 },
+    { "static.separator", w2s_state_static_separator, 5, NULL, 0 },
+    { "static.frame", w2s_state_static_frame, 5, NULL, 0 },
+    { "edit.single", w2s_state_edit_single, 15, NULL, 0 },
+    { "edit.password", w2s_state_edit_password, 15, NULL, 0 },
+    { "edit.number", w2s_state_edit_number, 15, NULL, 0 },
+    { "edit.readonly", w2s_state_edit_readonly, 15, NULL, 0 },
+    { "edit.multiline", w2s_state_edit_multiline, 15, w2s_answers_edit_multiline, 9 },
+    { "edit.balloon", w2s_state_edit_balloon, 15, NULL, 0 },
+    { "listbox.single", w2s_state_listbox_single, 13, NULL, 0 },
+    { "listbox.multi", w2s_state_listbox_multi, 13, NULL, 0 },
+    { "listbox.multicolumn", w2s_state_listbox_multicolumn, 13, NULL, 0 },
+    { "listbox.nosel", w2s_state_listbox_nosel, 13, NULL, 0 },
+    { "combobox.dropdownlist", w2s_state_combobox_dropdownlist, 11, NULL, 0 },
+    { "combobox.editable", w2s_state_combobox_editable, 11, NULL, 0 },
+    { "combobox.simple", w2s_state_combobox_simple, 11, NULL, 0 },
     { "comboboxex", w2s_state_comboboxex, 7, NULL, 0 },
-    { "listview.report", w2s_state_listview_report, 19, NULL, 0 },
-    { "listview.icon", w2s_state_listview_icon, 16, NULL, 0 },
-    { "listview.list", w2s_state_listview_list, 13, NULL, 0 },
-    { "listview.checkboxes", w2s_state_listview_checkboxes, 19, NULL, 0 },
-    { "listview.groups", w2s_state_listview_groups, 3, NULL, 0 },
-    { "listview.empty", w2s_state_listview_empty, 0, NULL, 0 },
+    { "listview.report", w2s_state_listview_report, 25, NULL, 0 },
+    { "listview.icon", w2s_state_listview_icon, 25, NULL, 0 },
+    { "listview.list", w2s_state_listview_list, 25, NULL, 0 },
+    { "listview.checkboxes", w2s_state_listview_checkboxes, 25, NULL, 0 },
+    { "listview.groups", w2s_state_listview_groups, 25, NULL, 0 },
+    { "listview.empty", w2s_state_listview_empty, 25, NULL, 0 },
     { "treeview", w2s_state_treeview, 11, NULL, 0 },
     { "header", w2s_state_header, 5, NULL, 0 },
     { "tab", w2s_state_tab, 7, w2s_answers_tab, 2 },
@@ -145,7 +145,7 @@ static const struct w2s_map_entry w2s_map_entries[] =
     { "scrollbar", w2s_state_scrollbar, 4, NULL, 0 },
     { "progress", w2s_state_progress, 8, NULL, 0 },
     { "trackbar", w2s_state_trackbar, 9, NULL, 0 },
-    { "trackbar.vertical", w2s_state_trackbar_vertical, 0, NULL, 0 },
+    { "trackbar.vertical", w2s_state_trackbar_vertical, 9, NULL, 0 },
     { "updown", w2s_state_updown, 7, NULL, 0 },
     { "datetime", w2s_state_datetime, 5, NULL, 0 },
     { "monthcal", w2s_state_monthcal, 4, NULL, 0 },
@@ -153,8 +153,8 @@ static const struct w2s_map_entry w2s_map_entries[] =
     { "ipaddress", w2s_state_ipaddress, 4, NULL, 0 },
     { "syslink", w2s_state_syslink, 2, NULL, 0 },
     { "animate", w2s_state_animate, 4, NULL, 0 },
-    { "tooltip", w2s_state_tooltip, 12, NULL, 0 },
-    { "tooltip.balloon", w2s_state_tooltip_balloon, 4, NULL, 0 },
+    { "tooltip", w2s_state_tooltip, 14, NULL, 0 },
+    { "tooltip.balloon", w2s_state_tooltip_balloon, 14, NULL, 0 },
     { "nativefont", w2s_state_nativefont, 0, NULL, 0 },
     { "messagebox", w2s_state_messagebox, 0, NULL, 0 },
     { "taskdialog", w2s_state_taskdialog, 9, NULL, 0 },

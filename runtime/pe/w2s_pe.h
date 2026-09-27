@@ -129,6 +129,8 @@ struct w2s_control
     char *last;             /* last snapshot sent */
     BOOL active;            /* clipped and without a non-client area: the native view stands in */
     int applying;
+    BOOL added_clipsiblings; /* we set WS_CLIPSIBLINGS (clip_wine_drawing) */
+    int reselecting;         /* inside reselect_kind, or changing the style ourselves */
     int snapshotting;       /* building a snapshot sends queries to the control */
     UINT64 ack;             /* highest native event sequence number taken */
     UINT answered;          /* queries answered from the native view (for the tests) */

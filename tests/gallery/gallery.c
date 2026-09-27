@@ -20,6 +20,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifndef DCX_USESTYLE
+#define DCX_USESTYLE 0x00010000 /* undocumented; what GetDC uses (class and window style decide the clipping) */
+#endif
+
 enum
 {
     ID_PUSH = 100, ID_DEFAULT, ID_CHECK, ID_RADIO1, ID_RADIO2, ID_GROUP, ID_LABEL, ID_SEP, ID_ICON,
@@ -442,7 +446,7 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     case WM_COMMAND:
     {
         int id = LOWORD( wparam ), code = HIWORD( wparam );
-        if (id <= ID_PUSHLIKE && lparam) got_command[id][code & 15]++;
+        if (id >= ID_PUSH && id < ID_LAST && lparam) got_command[id][code & 15]++;
         if (code == BN_CLICKED && id == ID_MSGBOX)
         {
             int r = MessageBoxW( hwnd, L"Do you want to save the changes you made?",
@@ -937,6 +941,22 @@ static int selftest(void)
         DeleteObject( rgn );
     }
     check( r == ARRAYSIZE(ids), "translated controls have an empty window region" );
+    /* ...and every DC wine gets to draw them with is empty, including the
+     * parent-clipped DCs of CS_PARENTDC classes (Button, Static, Edit, ComboBox) */
+    for (i = 0, r = 0; i < ARRAYSIZE(ids); i++)
+    {
+        HDC hdc = GetDCEx( ctl[ids[i]], 0, DCX_USESTYLE | DCX_CACHE );
+        RECT box;
+        if (GetClipBox( hdc, &box ) == NULLREGION) r++;
+        else printf( "      control %d can still be drawn by wine (%ld,%ld)-(%ld,%ld)\n", ids[i],
+                     box.left, box.top, box.right, box.bottom );
+        ReleaseDC( ctl[ids[i]], hdc );
+    }
+    check( r == ARRAYSIZE(ids), "wine can't draw a translated control (its DC's clip box is empty)" );
+
+    /* content the app added after creation, before anything else pushed */
+    check( query_has( ctl[ID_MULTI], "Item 6" ), "items added after creation reach a multi-select list" );
+    check( query_has( ctl[ID_REPORT], "\"12 KB\"" ), "a report's second column shows its own subitem" );
 
     /* Win32 -> native */
     SendMessageW( ctl[ID_CHECK], BM_SETCHECK, BST_CHECKED, 0 );

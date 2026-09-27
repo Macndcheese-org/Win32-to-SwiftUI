@@ -54,9 +54,22 @@ def main():
                 sys.exit(f"{e['id']}: {key} {n} is not defined in the wine headers")
         return list(dict.fromkeys(msgs))
 
+    # A message that changes a Win32 ListBox changes it whatever the variant
+    # (listbox.multi only lists its selection extras), so an entry follows the
+    # state_in of every entry of its window class.
+    by_class = {}
+    for e in m["entries"]:
+        for c in aslist((e.get("win32") or {}).get("class")):
+            by_class.setdefault(c, []).append(e)
+
     for e in m["entries"]:
         base = re.sub(r"\W", "_", e["id"])
-        state, answers = messages(e, "state_in"), messages(e, "answers")
+        state = messages(e, "state_in")
+        for c in aslist((e.get("win32") or {}).get("class")):
+            for other in by_class[c]:
+                if other is not e:
+                    state += [s for s in messages(other, "state_in") if s not in state]
+        answers = messages(e, "answers")
         out.append(f"static const UINT w2s_state_{base}[] = {{ {', '.join(state) or '0'} }};")
         if answers:
             out.append(f"static const UINT w2s_answers_{base}[] = {{ {', '.join(answers)} }};")
