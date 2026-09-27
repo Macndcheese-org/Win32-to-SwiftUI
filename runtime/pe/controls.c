@@ -1427,8 +1427,10 @@ static struct tab_data *tab_layout( struct w2s_control *ctl, BOOL decide )
         }
         SelectObject( hdc, old );
         ReleaseDC( ctl->hwnd, hdc );
-        /* the sidebar draws its rows larger than the dialog font (13 pt vs 11 px) */
-        data->width = min( max( widest * 5 / 4 + 56, 150 ), 300 );
+        /* the sidebar draws its rows larger than the dialog font (13 pt vs 11 px), with
+         * room for a row's symbol, the list's insets and, from macOS 26, the floating
+         * sidebar's margins */
+        data->width = min( max( widest * 4 / 3 + 96, 170 ), 320 );
         data->pad = 8;
         /* the sheet lays out around it full-height (propsheet.c) */
         SetPropW( ctl->hwnd, native_sidebar_prop, (HANDLE)1 );
