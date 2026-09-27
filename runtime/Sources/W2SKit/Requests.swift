@@ -572,6 +572,22 @@ enum Debug {
             if host.entry == "tab", let attach = host.owned as? WindowSidebarAttach {
                 out["windowSidebar"] = attach.controller != nil
                 out["sidebarCollapsed"] = attach.collapsed() ?? false
+                if let view = attach.controller?.view {
+                    // the list's rows as AppKit lays them out (a List is an NSTableView)
+                    func table(_ v: NSView) -> NSTableView? {
+                        if let t = v as? NSTableView { return t }
+                        for sub in v.subviews { if let t = table(sub) { return t } }
+                        return nil
+                    }
+                    if let t = table(view), let window = view.window, t.numberOfRows > 0 {
+                        let row = t.convert(t.rect(ofRow: 0), to: nil)
+                        out["sidebarRows"] = t.numberOfRows
+                        out["firstRowTop"] = Int(window.frame.height - row.maxY)   // from the window's top
+                        out["firstRowVisible"] = !t.visibleRect.intersection(t.rect(ofRow: 0)).isEmpty
+                    }
+                    out["sidebarSafeTop"] = Int(view.safeAreaInsets.top)
+                    out["sidebarFrame"] = [Int(view.frame.minX), Int(view.frame.minY), Int(view.frame.width), Int(view.frame.height)]
+                }
                 // where wine's content sits in the window: after the sidebar, below the toolbar
                 if let window = host.hosting?.window,
                    let wineView = window.perform(NSSelectorFromString("wineContentView"))?.takeUnretainedValue() as? NSView {
@@ -613,6 +629,19 @@ enum Debug {
                 return "{\"ok\":true}"
             }
             guard let host = W2S.control(handle) else { return "{\"error\":\"no control\"}" }
+            if event["t"] as? String == "capture" {
+                // tests: draw the control's window (frame, toolbar, sidebar, wine's content)
+                // into a PNG: works with the screen locked, unlike a window server capture
+                guard let path = event["s"] as? String, let window = host.hosting?.window,
+                      let view = window.contentView?.superview ?? window.contentView,
+                      let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
+                else { return "{\"error\":\"no window\"}" }
+                view.cacheDisplay(in: view.bounds, to: rep)
+                guard let png = rep.representation(using: .png, properties: [:]),
+                      (try? png.write(to: URL(fileURLWithPath: path))) != nil
+                else { return "{\"error\":\"can't write\"}" }
+                return "{\"ok\":true}"
+            }
             if event["t"] as? String == "sidebarCollapse" {
                 // tests: collapse or expand the window sidebar (window chrome only,
                 // wine's content doesn't move, so nothing is reported to Win32)

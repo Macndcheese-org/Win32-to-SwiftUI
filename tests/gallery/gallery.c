@@ -1649,6 +1649,10 @@ static int selftest(void)
         check( pIsTranslated( tab ) && query_has( tab, "\"mode\":\"window\"" ) &&
                query_has( tab, "\"windowSidebar\":true" ),
                "a 7-page property sheet gets the window's native sidebar (split view)" );
+        check( query_int( tab, "sidebarRows" ) == 7 && query_int( tab, "firstRowTop" ) >= 28 &&
+               query_int( tab, "firstRowTop" ) >= query_int( tab, "sidebarSafeTop" ) &&
+               query_has( tab, "\"firstRowVisible\":true" ),
+               "the sidebar lists the pages, starting below the titlebar and toolbar" );
         x = query_int( tab, "wineViewX" );
         check( x >= 150 && query_int( tab, "windowWidth" ) - query_int( tab, "wineViewWidth" ) == x,
                "wine's content sits right of the sidebar, which is outside it" );
@@ -1847,6 +1851,54 @@ static int selftest(void)
     return failures;
 }
 
+/* gallery.exe /capture <unix dir>: draws the gallery and its sheets into PNGs
+ * there (W2SDebugInject "capture"), for looking at them without a screen */
+static void capture_window( HWND control, const char *dir, const char *name )
+{
+    char event[1024];
+    snprintf( event, sizeof(event), "{\"t\":\"capture\",\"s\":\"%s/%s.png\"}", dir, name );
+    inject( control, event );
+    printf( "captured %s/%s.png\n", dir, name );
+}
+
+static int capture( const WCHAR *args )
+{
+    HMODULE w2s = GetModuleHandleW( L"win32swiftui.dll" );
+    char dir[512];
+    HWND sheet;
+
+    if (!w2s) return 1;
+    pQuery = (void *)GetProcAddress( w2s, "W2SDebugQuery" );
+    pInject = (void *)GetProcAddress( w2s, "W2SDebugInject" );
+    pFree = (void *)GetProcAddress( w2s, "W2SDebugFree" );
+    pIsTranslated = (void *)GetProcAddress( w2s, "W2SIsTranslated" );
+    while (*args == ' ') args++;
+    WideCharToMultiByte( CP_UTF8, 0, args, -1, dir, sizeof(dir), NULL, NULL );
+    in_selftest = TRUE;
+    pump( 1500 );
+    capture_window( ctl[ID_PUSH], dir, "gallery" );
+    sheet = property_sheet( 7, TRUE );
+    pump( 4000 );
+    {
+        HWND tab = (HWND)SendMessageW( sheet, PSM_GETTABCONTROL, 0, 0 );
+        char *q = pQuery( tab );
+        printf( "sheet7 query: %s\n", q ? q : "(null)" );
+        pFree( q );
+        capture_window( tab, dir, "sheet7" );
+    }
+    DestroyWindow( sheet );
+    sheet = property_sheet( 3, TRUE );
+    pump( 1500 );
+    capture_window( (HWND)SendMessageW( sheet, PSM_GETTABCONTROL, 0, 0 ), dir, "sheet3" );
+    DestroyWindow( sheet );
+    sheet = wizard_sheet( TRUE );
+    pump( 1500 );
+    capture_window( (HWND)SendMessageW( sheet, PSM_GETTABCONTROL, 0, 0 ), dir, "wizard" );
+    DestroyWindow( sheet );
+    pump( 300 );
+    return 0;
+}
+
 int WINAPI wWinMain( HINSTANCE inst, HINSTANCE prev, WCHAR *cmdline, int show )
 {
     INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_WIN95_CLASSES | ICC_TAB_CLASSES | ICC_BAR_CLASSES };
@@ -1886,6 +1938,12 @@ int WINAPI wWinMain( HINSTANCE inst, HINSTANCE prev, WCHAR *cmdline, int show )
     ShowWindow( main_window, SW_SHOW );
     UpdateWindow( main_window );
 
+    if (wcsstr( cmdline, L"/capture" ))
+    {
+        ret = capture( wcsstr( cmdline, L"/capture" ) + 8 );
+        DestroyWindow( main_window );
+        return ret;
+    }
     if (wcsstr( cmdline, L"/selftest" ))
     {
         in_selftest = TRUE;
