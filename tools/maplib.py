@@ -54,6 +54,13 @@ def load_map():
     return merged, origin
 
 
+# the modules stock icons come from: their file, and the header naming their resources
+ICON_MODULES = {
+    "user32": ("user32.dll", "include/winuser.rh"),
+    "shell32": ("shell32.dll", "dlls/shell32/shresdef.h"),
+    "regedit": ("regedit.exe", "programs/regedit/resource.h"),
+}
+
 # what a stock icon (map section `icons`) may become
 ICON_KINDS = ("sf", "uttype", "file", "nsimage", "app")
 ICON_COLORS = ("white", "black", "systemBlue", "systemRed", "systemYellow", "systemOrange", "systemGreen",

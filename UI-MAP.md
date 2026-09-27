@@ -3470,6 +3470,11 @@ wine's own icons, shown as the macOS image with the same meaning (runtime: icons
 | `shell32/IDI_SHELL_TRUETYPE_FONT` |  | `uttype:public.truetype-ttf-font` |
 | `shell32/IDI_SHELL_POSTSCRIPT_FONT` |  | `uttype:com.adobe.postscript-font` |
 | `shell32/IDI_SHELL_BACKUP` |  | `sf:externaldrive.badge.timemachine` |
+| `regedit/IDI_CLOSED_FILE` |  | `uttype:public.folder` |
+| `regedit/IDI_OPEN_FILE` |  | `uttype:public.folder` |
+| `regedit/IDI_ROOT` |  | `nsimage:NSComputer` |
+| `regedit/IDI_STRING` |  | `sf:textformat.abc` |
+| `regedit/IDI_BIN` |  | `sf:number` |
 
 ## SwiftUI with no Windows counterpart (yet)
 

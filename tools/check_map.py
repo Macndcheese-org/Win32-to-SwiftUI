@@ -12,7 +12,7 @@ import re
 import sys
 from collections import Counter
 
-from maplib import DISPOSITIONS, ICON_COLORS, ICON_KINDS, IDENT, RUNTIMES, aslist, inventories, load_map, snippets, vkey
+from maplib import DISPOSITIONS, ICON_COLORS, ICON_KINDS, ICON_MODULES, IDENT, RUNTIMES, aslist, inventories, load_map, snippets, vkey
 
 errors = []
 
@@ -180,8 +180,8 @@ def main():
     # ---- stock icons: one macOS image each, SF Symbols that exist at the macOS 12 floor
     symbols = sf_symbols()
     for k, d in m["icons"].items():
-        if not re.fullmatch(r"(user32|shell32)/[A-Z0-9_]+", k):
-            err(f"icons.{k}: key is <user32|shell32>/<resource name>")
+        if not re.fullmatch(r"(%s)/[A-Z0-9_]+" % "|".join(ICON_MODULES), k):
+            err(f"icons.{k}: key is <{'|'.join(ICON_MODULES)}>/<resource name>")
         kinds = [x for x in ICON_KINDS if x in d]
         if len(kinds) != 1:
             err(f"icons.{k}: needs exactly one of {', '.join(ICON_KINDS)}")

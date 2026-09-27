@@ -265,6 +265,11 @@ static const struct w2s_icon_entry w2s_icon_entries[] =
     { L"shell32.dll", 156, "uttype:public.truetype-ttf-font" },
     { L"shell32.dll", 157, "uttype:com.adobe.postscript-font" },
     { L"shell32.dll", 165, "sf:externaldrive.badge.timemachine" },
+    { L"regedit.exe", 133, "uttype:public.folder" },
+    { L"regedit.exe", 132, "uttype:public.folder" },
+    { L"regedit.exe", 134, "nsimage:NSComputer" },
+    { L"regedit.exe", 135, "sf:textformat.abc" },
+    { L"regedit.exe", 136, "sf:number" },
 };
 
 #endif

@@ -924,18 +924,20 @@ struct lv_data
 {
     HIMAGELIST himl;
     int cx, cy, gen;
+    BOOL more;                      /* images left for the next snapshot */
     BYTE sent[MAX_LV_IMAGES / 8];
 };
 
-static void listview_icons( struct w2s_control *ctl, struct json *j, BOOL small, int count )
+/* An image list's images, each sent once: the native view keeps them until
+ * imageGen changes (another image list or icon size). Pixels, or for wine's
+ * stock icons the macOS image with the same meaning (icons.c). indices: the
+ * images the view shows now. */
+static void image_list_json( struct lv_data *data, HIMAGELIST himl, const int *indices, int count, struct json *j )
 {
-    struct lv_data *data = ctl->data;
-    HIMAGELIST himl = (HIMAGELIST)SendMessageW( ctl->hwnd, LVM_GETIMAGELIST, small ? LVSIL_SMALL : LVSIL_NORMAL, 0 );
     int cx = 0, cy = 0, i, fresh = 0, spec_index[64];
     const char *specs[64];
     char key[16];
 
-    if (!data) data = ctl->data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data) );
     if (himl) ImageList_GetIconSize( himl, &cx, &cy );
     if (himl != data->himl || cx != data->cx || cy != data->cy)
     {
@@ -945,56 +947,40 @@ static void listview_icons( struct w2s_control *ctl, struct json *j, BOOL small,
         data->gen++;
         memset( data->sent, 0, sizeof(data->sent) );
     }
-    json_bool( j, "small", small );
     json_int( j, "imageGen", data->gen );
     json_arr_begin( j, "imageSize" );
     json_int( j, NULL, cx );
     json_int( j, NULL, cy );
     json_arr_end( j );
-    json_arr_begin( j, "icons" );
-    for (i = 0; i < count && i < 2000; i++)
-    {
-        LVITEMW item = { LVIF_IMAGE };
-        item.iItem = i;
-        item.iImage = -1;
-        SendMessageW( ctl->hwnd, LVM_GETITEMW, 0, (LPARAM)&item );
-        json_int( j, NULL, himl ? item.iImage : -1 );
-    }
-    json_arr_end( j );
     if (!himl || cx <= 0 || cy <= 0 || cx > 256 || cy > 256) return;
 
     json_key_obj_begin( j, "images" );
-    for (i = 0; i < count && i < 2000 && fresh < 64; i++)
+    for (i = 0; i < count && fresh < 64; i++)
     {
-        LVITEMW item = { LVIF_IMAGE };
+        int index = indices[i];
         HICON icon;
         BYTE *bits;
 
-        item.iItem = i;
-        item.iImage = -1;
-        SendMessageW( ctl->hwnd, LVM_GETITEMW, 0, (LPARAM)&item );
-        if (item.iImage < 0 || item.iImage >= MAX_LV_IMAGES || (data->sent[item.iImage / 8] & (1 << (item.iImage % 8))))
-            continue;
-        data->sent[item.iImage / 8] |= 1 << (item.iImage % 8);
-        if (!(icon = ImageList_GetIcon( himl, item.iImage, ILD_NORMAL ))) continue;
+        if (index < 0 || index >= MAX_LV_IMAGES || (data->sent[index / 8] & (1 << (index % 8)))) continue;
+        data->sent[index / 8] |= 1 << (index % 8);
+        if (!(icon = ImageList_GetIcon( himl, index, ILD_NORMAL ))) continue;
+        specs[fresh] = NULL;
         if ((bits = w2s_image_bgra( icon, NULL, cx, cy )))
         {
-            /* wine's stock icons go as the macOS image with the same meaning (icons.c) */
             if ((specs[fresh] = w2s_stock_icon( NULL, bits, cx, cy, himl )))
-                spec_index[fresh] = item.iImage;
+                spec_index[fresh] = index;
             else
             {
-                snprintf( key, sizeof(key), "%d", item.iImage );
+                snprintf( key, sizeof(key), "%d", index );
                 json_base64( j, key, bits, (size_t)cx * cy * 4 );
             }
             HeapFree( GetProcessHeap(), 0, bits );
         }
-        else specs[fresh] = NULL;
         DestroyIcon( icon );
         if (++fresh == 64)
         {
-            /* enough for one snapshot: the rest come with the next one */
-            PostMessageW( ctl->hwnd, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
+            /* enough for one snapshot: the rest come with the next one (the view's
+             * control gets the refresh; data->sent keeps what already went) */
             break;
         }
     }
@@ -1007,6 +993,33 @@ static void listview_icons( struct w2s_control *ctl, struct json *j, BOOL small,
         json_str_a( j, key, specs[i] );
     }
     json_obj_end( j );
+    data->more = (fresh == 64);
+}
+
+static void listview_icons( struct w2s_control *ctl, struct json *j, BOOL small, int count )
+{
+    struct lv_data *data = ctl->data;
+    HIMAGELIST himl = (HIMAGELIST)SendMessageW( ctl->hwnd, LVM_GETIMAGELIST, small ? LVSIL_SMALL : LVSIL_NORMAL, 0 );
+    int i, *indices;
+
+    if (!data) data = ctl->data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data) );
+    json_bool( j, "small", small );
+    count = min( count, 2000 );
+    indices = HeapAlloc( GetProcessHeap(), 0, max( count, 1 ) * sizeof(int) );
+    json_arr_begin( j, "icons" );
+    for (i = 0; i < count; i++)
+    {
+        LVITEMW item = { LVIF_IMAGE };
+        item.iItem = i;
+        item.iImage = -1;
+        SendMessageW( ctl->hwnd, LVM_GETITEMW, 0, (LPARAM)&item );
+        indices[i] = himl ? item.iImage : -1;
+        json_int( j, NULL, indices[i] );
+    }
+    json_arr_end( j );
+    image_list_json( data, himl, indices, count, j );
+    HeapFree( GetProcessHeap(), 0, indices );
+    if (data->more) PostMessageW( ctl->hwnd, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
 }
 
 static void listview_snapshot( struct w2s_control *ctl, struct json *j )
@@ -1120,11 +1133,12 @@ static const struct w2s_kind kind_listview_icon = { "listview.icon", listview_sn
 #define MAX_TREE_NODES 5000
 #define MAX_TREE_DEPTH 50
 
-static void tree_nodes( HWND hwnd, HTREEITEM item, struct json *j, int depth, int *budget )
+static void tree_nodes( HWND hwnd, HTREEITEM item, struct json *j, int depth, int *budget,
+                        int *images, int *images_count )
 {
     for (; item && *budget > 0; item = (HTREEITEM)SendMessageW( hwnd, TVM_GETNEXTITEM, TVGN_NEXT, (LPARAM)item ))
     {
-        TVITEMW it = { TVIF_TEXT | TVIF_STATE | TVIF_CHILDREN | TVIF_HANDLE };
+        TVITEMW it = { TVIF_TEXT | TVIF_STATE | TVIF_CHILDREN | TVIF_HANDLE | TVIF_IMAGE };
         WCHAR text[260];
         HTREEITEM child;
         BOOL open;
@@ -1134,6 +1148,7 @@ static void tree_nodes( HWND hwnd, HTREEITEM item, struct json *j, int depth, in
         it.pszText = text;
         it.cchTextMax = ARRAYSIZE(text);
         it.stateMask = TVIS_EXPANDED;
+        it.iImage = -1;
         SendMessageW( hwnd, TVM_GETITEMW, 0, (LPARAM)&it );
         if (it.pszText != text) lstrcpynW( text, it.pszText && it.pszText != LPSTR_TEXTCALLBACKW ? it.pszText : L"", ARRAYSIZE(text) );
         (*budget)--;
@@ -1144,11 +1159,16 @@ static void tree_nodes( HWND hwnd, HTREEITEM item, struct json *j, int depth, in
         json_int( j, "id", (INT_PTR)item );
         json_str( j, "text", text );
         json_bool( j, "kids", child || it.cChildren > 0 );
+        if (it.iImage >= 0 && it.iImage != I_IMAGECALLBACK && images && *images_count < MAX_TREE_NODES)
+        {
+            json_int( j, "img", it.iImage );
+            images[(*images_count)++] = it.iImage;
+        }
         if (open)
         {
             json_bool( j, "open", TRUE );
             json_arr_begin( j, "children" );
-            tree_nodes( hwnd, child, j, depth + 1, budget );
+            tree_nodes( hwnd, child, j, depth + 1, budget, images, images_count );
             json_arr_end( j );
         }
         json_obj_end( j );
@@ -1162,9 +1182,20 @@ static void tree_snapshot( struct w2s_control *ctl, struct json *j )
     int budget = MAX_TREE_NODES;
     RECT rc;
 
+    HIMAGELIST himl = (HIMAGELIST)SendMessageW( ctl->hwnd, TVM_GETIMAGELIST, TVSIL_NORMAL, 0 );
+    struct lv_data *data = ctl->data;
+    int *images = NULL, images_count = 0;
+
+    if (!data) data = ctl->data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data) );
+    if (himl) images = HeapAlloc( GetProcessHeap(), 0, MAX_TREE_NODES * sizeof(int) );
     json_arr_begin( j, "nodes" );
-    tree_nodes( ctl->hwnd, (HTREEITEM)SendMessageW( ctl->hwnd, TVM_GETNEXTITEM, TVGN_ROOT, 0 ), j, 0, &budget );
+    tree_nodes( ctl->hwnd, (HTREEITEM)SendMessageW( ctl->hwnd, TVM_GETNEXTITEM, TVGN_ROOT, 0 ), j, 0, &budget,
+                images, &images_count );
     json_arr_end( j );
+    /* the nodes' icons: wine's folders and drives come as the Finder's (icons.c) */
+    image_list_json( data, himl, images, images_count, j );
+    HeapFree( GetProcessHeap(), 0, images );
+    if (data->more) PostMessageW( ctl->hwnd, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
     json_int( j, "selection", (INT_PTR)SendMessageW( ctl->hwnd, TVM_GETNEXTITEM, TVGN_CARET, 0 ) );
     /* a tree along the left edge of a window is a sidebar (Finder's); in a dialog, a bordered list */
     GetClassNameW( parent, parent_class, ARRAYSIZE(parent_class) );

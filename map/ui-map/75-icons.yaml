@@ -1,8 +1,8 @@
 # Stock icons: wine's Windows artwork swapped for the macOS image that means the same.
 #
 # Keys are <module>/<resource name>: the icon resources of wine's user32 (OIC_*, what
-# LoadIcon(NULL, IDI_*) loads) and shell32 (IDI_SHELL_*, what the shell's file lists and
-# SHGetStockIconInfo use). tools/gen_runtime_tables.py resolves each name to its id in the
+# LoadIcon(NULL, IDI_*) loads), shell32 (IDI_SHELL_*, what the shell's file lists and
+# SHGetStockIconInfo use) and wine's own programs (regedit's keys and values). tools/gen_runtime_tables.py resolves each name to its id in the
 # wine headers and writes the runtime's table.
 #
 # The runtime knows an icon by where it came from (GetIconInfoExW: module and resource id).
@@ -96,3 +96,10 @@ icons:
   shell32/IDI_SHELL_TRUETYPE_FONT: {uttype: public.truetype-ttf-font}
   shell32/IDI_SHELL_POSTSCRIPT_FONT: {uttype: com.adobe.postscript-font}
   shell32/IDI_SHELL_BACKUP: {sf: externaldrive.badge.timemachine}
+
+  # regedit (wine's own program: its tree and list icons are wine's artwork too)
+  regedit/IDI_CLOSED_FILE: {uttype: public.folder}
+  regedit/IDI_OPEN_FILE: {uttype: public.folder}
+  regedit/IDI_ROOT: {nsimage: NSComputer}
+  regedit/IDI_STRING: {sf: textformat.abc}
+  regedit/IDI_BIN: {sf: number}

@@ -337,17 +337,25 @@ static void create_controls2(void)
     make( WC_TREEVIEWW, NULL, TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT | TVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,
           724, 330, 180, 160, ID_TREE );
     {
+        /* shell32's folder and document icons, as a file browser's tree shows them */
+        HMODULE shell32 = LoadLibraryW( L"shell32.dll" );
+        HIMAGELIST himl = ImageList_Create( 16, 16, ILC_COLOR32 | ILC_MASK, 2, 0 );
         TVINSERTSTRUCTW ins = { TVI_ROOT, TVI_LAST };
-        ins.item.mask = TVIF_TEXT;
+
+        ImageList_AddIcon( himl, LoadImageW( shell32, MAKEINTRESOURCEW( 4 ), IMAGE_ICON, 16, 16, 0 ) );  /* IDI_SHELL_FOLDER */
+        ImageList_AddIcon( himl, LoadImageW( shell32, MAKEINTRESOURCEW( 2 ), IMAGE_ICON, 16, 16, 0 ) );  /* IDI_SHELL_DOCUMENT */
+        SendMessageW( ctl[ID_TREE], TVM_SETIMAGELIST, TVSIL_NORMAL, (LPARAM)himl );
+        ins.item.mask = TVIF_TEXT | TVIF_IMAGE | TVIF_SELECTEDIMAGE;
         ins.item.pszText = (WCHAR *)L"Fruits";
         tree_fruits = (HTREEITEM)SendMessageW( ctl[ID_TREE], TVM_INSERTITEMW, 0, (LPARAM)&ins );
         /* filled when it is first expanded, as file browsers do */
-        ins.item.mask = TVIF_TEXT | TVIF_CHILDREN;
+        ins.item.mask = TVIF_TEXT | TVIF_CHILDREN | TVIF_IMAGE | TVIF_SELECTEDIMAGE;
         ins.item.cChildren = 1;
         ins.item.pszText = (WCHAR *)L"Vegetables";
         tree_veg = (HTREEITEM)SendMessageW( ctl[ID_TREE], TVM_INSERTITEMW, 0, (LPARAM)&ins );
         ins.hParent = tree_fruits;
-        ins.item.mask = TVIF_TEXT;
+        ins.item.mask = TVIF_TEXT | TVIF_IMAGE | TVIF_SELECTEDIMAGE;
+        ins.item.iImage = ins.item.iSelectedImage = 1;
         ins.item.pszText = (WCHAR *)L"Apple";
         tree_apple = (HTREEITEM)SendMessageW( ctl[ID_TREE], TVM_INSERTITEMW, 0, (LPARAM)&ins );
         ins.item.pszText = (WCHAR *)L"Pear";
@@ -1341,6 +1349,9 @@ static void selftest2(void)
         snprintf( needle, sizeof(needle), "\"selection\":%lld", (long long)(INT_PTR)tree_pear );
         check( query_has( tree, "\"Apple\"" ) && query_has( tree, needle ),
                "TVM_EXPAND and TVM_SELECTITEM reach the native outline" );
+        check( query_has( tree, "\"img\":0" ) && query_has( tree, "\"0\":\"uttype:public.folder\"" ) &&
+               query_has( tree, "\"1\":\"uttype:public." ),   /* shell32's file and document look the same at 16 px */
+               "the nodes' icons: shell32's folder and document as the Finder's" );
         snprintf( event, sizeof(event), "{\"t\":\"expand\",\"v\":%lld}", (long long)(INT_PTR)tree_veg );
         inject( tree, event );
         pump( 250 );

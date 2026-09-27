@@ -1377,12 +1377,27 @@ struct TreeRows: View {
                     // the recursion goes through AnyView so the view type stays finite
                     AnyView(TreeRows(model: model, nodes: node.children ?? []))
                 } label: {
-                    Text(node.text).lineLimit(1)
+                    row(node)
                 }
                 .tag(Optional(node.id))     // the selection is Int? (as the list boxes')
             } else {
-                Text(node.text).lineLimit(1).tag(Optional(node.id))
+                row(node).tag(Optional(node.id))
             }
+        }
+    }
+
+    /// A node as a native outline shows it: its icon (wine's folders as the
+    /// Finder's, icons.c) before its title.
+    @ViewBuilder
+    func row(_ node: Snapshot.TreeNode) -> some View {
+        if let index = node.img, let image = model.images[index] {
+            Label {
+                Text(node.text).lineLimit(1)
+            } icon: {
+                Image(nsImage: image).resizable().interpolation(.high).frame(width: 16, height: 16)
+            }
+        } else {
+            Text(node.text).lineLimit(1)
         }
     }
 

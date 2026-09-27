@@ -16,6 +16,7 @@ struct Snapshot: Codable, Equatable {
         var text: String
         var kids: Bool?
         var open: Bool?
+        var img: Int?           // its image list index (ControlModel.images)
         var children: [TreeNode]?
     }
 
