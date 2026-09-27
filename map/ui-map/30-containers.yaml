@@ -77,11 +77,18 @@ entries:
     notes: >-
       Up to 5 pages: tabs, as in older macOS preference windows. More than 5 (winecfg has
       8): from macOS 13 a sidebar, the System Settings layout. The runtime does it through
-      the sheet's own tab control: wine's propsheet sizes the sheet and places every page
-      from the tab control's TCM_ADJUSTRECT, so answering it with a left inset the width of
-      the sidebar makes wine lay the sheet out around it, and the tab control's native view
-      draws the sidebar list there. OK/Cancel/Apply stay, because apps commit on PSN_APPLY;
-      macOS settings would apply live, but that can't be emulated safely.
+      the sheet's own tab control: marked with __wine_native_sidebar, the tab control is
+      placed at (0,0) spanning the sheet's whole client height, flush with the left edge,
+      and wine's propsheet sizes the sheet and places every page from the tab control's
+      TCM_ADJUSTRECT, so the pages land right of the sidebar while OK/Cancel/Apply stay
+      at the bottom right. The rows are a real List(selection:) in the sidebar style on
+      the sidebar material: on macOS 26+ the sidebar floats like System Settings (8 pt in
+      from the top, left and bottom, 12 pt rounded corners), before that it is flush with
+      a hairline separator. Rows show SF Symbols only when every page title is a known
+      settings page in English or French, else none (Staging uses testtube.2: its flask
+      needs macOS 14). OK/Cancel/Apply stay,
+      because apps commit on PSN_APPLY; macOS settings would apply live, but that can't
+      be emulated safely.
   - id: propsheet.wizard
     kind: dialog
     title: Wizard (property sheet in wizard mode)
