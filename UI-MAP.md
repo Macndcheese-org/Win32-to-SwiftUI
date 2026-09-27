@@ -1251,7 +1251,7 @@ NavigationSplitView {
 }
 ```
 
-Up to 5 pages: tabs, as in older macOS preference windows. More than 5 (winecfg has 8): from macOS 13 a sidebar, the System Settings layout, which is Liquid Glass on 26 automatically. OK/Cancel/Apply stay, because apps commit on PSN_APPLY; macOS settings would apply live, but that can't be emulated safely.
+Up to 5 pages: tabs, as in older macOS preference windows. More than 5 (winecfg has 8): from macOS 13 a sidebar, the System Settings layout. The runtime does it through the sheet's own tab control: wine's propsheet sizes the sheet and places every page from the tab control's TCM_ADJUSTRECT, so answering it with a left inset the width of the sidebar makes wine lay the sheet out around it, and the tab control's native view draws the sidebar list there. OK/Cancel/Apply stay, because apps commit on PSN_APPLY; macOS settings would apply live, but that can't be emulated safely.
 
 ### Wizard (property sheet in wizard mode)
 <a id="propsheetwizard"></a>`propsheet.wizard` · SwiftUI · Liquid Glass: automatic on 26+

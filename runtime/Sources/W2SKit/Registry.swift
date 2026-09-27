@@ -88,6 +88,8 @@ struct Snapshot: Codable, Equatable {
     // tree view
     var nodes: [TreeNode]?
     var sidebar: Bool?
+    var mode: String?           // tab: "strip" or "sidebar" (a property sheet, macOS 13+)
+    var sidebarPx: Double?
     // status bar
     var panes: [Pane]?
     var simple: Bool?

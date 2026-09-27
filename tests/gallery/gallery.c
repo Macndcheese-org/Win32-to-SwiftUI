@@ -439,6 +439,76 @@ static void open_file( BOOL save )
         MessageBoxW( main_window, file, save ? L"Save to" : L"Opened", MB_OK | MB_ICONINFORMATION );
 }
 
+/* ---------- property sheets ---------- */
+
+/* an in-memory page template: a static text naming the page */
+static DLGTEMPLATE *page_template( const WCHAR *text )
+{
+    static const WCHAR font[] = L"MS Shell Dlg";
+    BYTE *buf = calloc( 1, 1024 ), *p;
+    DLGTEMPLATE *tmpl = (DLGTEMPLATE *)buf;
+    DLGITEMTEMPLATE *item;
+
+    tmpl->style = DS_SETFONT | WS_CHILD | WS_DISABLED | WS_CAPTION;
+    tmpl->cdit = 1;
+    tmpl->cx = 220;
+    tmpl->cy = 120;
+    p = (BYTE *)(tmpl + 1);
+    p += 2 * sizeof(WORD);                               /* no menu, default class */
+    p += sizeof(WCHAR);                                  /* no title */
+    *(WORD *)p = 8; p += sizeof(WORD);                   /* font size */
+    memcpy( p, font, sizeof(font) ); p += sizeof(font);
+    p = (BYTE *)(((UINT_PTR)p + 3) & ~(UINT_PTR)3);
+    item = (DLGITEMTEMPLATE *)p;
+    item->style = WS_CHILD | WS_VISIBLE | SS_LEFT;
+    item->x = 7; item->y = 7; item->cx = 200; item->cy = 12;
+    item->id = 1000;
+    p = (BYTE *)(item + 1);
+    *(WORD *)p = 0xffff; p += sizeof(WORD);
+    *(WORD *)p = 0x0082; p += sizeof(WORD);              /* Static */
+    memcpy( p, text, (wcslen( text ) + 1) * sizeof(WCHAR) );
+    return tmpl;
+}
+
+static INT_PTR CALLBACK page_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    return msg == WM_INITDIALOG;
+}
+
+static const WCHAR *page_titles[] = { L"General", L"Appearance", L"Desktop & Dock", L"Displays", L"Sound",
+                                      L"Keyboard shortcuts", L"Accessibility" };
+
+/* PSH_MODELESS: returns the sheet; otherwise runs it and returns NULL */
+static HWND property_sheet( int pages, BOOL modeless )
+{
+    HPROPSHEETPAGE hpages[8];
+    DLGTEMPLATE *tmpl[8];
+    PROPSHEETHEADERW psh = { sizeof(psh) };
+    HWND sheet;
+    int i;
+
+    for (i = 0; i < pages; i++)
+    {
+        PROPSHEETPAGEW psp = { sizeof(psp) };
+        WCHAR text[64];
+        swprintf( text, 64, L"This is the %ls page.", page_titles[i] );
+        tmpl[i] = page_template( text );
+        psp.dwFlags = PSP_DLGINDIRECT | PSP_USETITLE;
+        psp.pResource = tmpl[i];
+        psp.pszTitle = page_titles[i];
+        psp.pfnDlgProc = page_proc;
+        hpages[i] = CreatePropertySheetPageW( &psp );
+    }
+    psh.dwFlags = modeless ? PSH_MODELESS : 0;
+    psh.hwndParent = main_window;
+    psh.pszCaption = L"Gallery settings";
+    psh.nPages = pages;
+    psh.phpage = hpages;
+    sheet = (HWND)PropertySheetW( &psh );
+    for (i = 0; i < pages; i++) free( tmpl[i] );
+    return modeless ? sheet : NULL;
+}
+
 static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
     switch (msg)
@@ -462,6 +532,7 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
             if (id == ID_FOLDER ? browse_for_folder( path ) : SUCCEEDED(item_dialog_folder( path )))
                 SetWindowTextW( ctl[ID_LABEL], path );
         }
+        if (code == BN_CLICKED && id == ID_PROPSHEET && !in_selftest) property_sheet( 7, FALSE );
         if (code == BN_CLICKED && id == ID_TASKDLG && !in_selftest)
         {
             int button = 0, radio = 0;
@@ -1047,6 +1118,35 @@ static int selftest(void)
     check( SendMessageW( ctl[ID_TAB], TCM_GETCURSEL, 0, 0 ) == 1 && got_tabchange > 0, "native tab -> TCN_SELCHANGE" );
 
     selftest2();
+
+    /* property sheets: more than 5 pages get the sidebar (macOS 13+), fewer keep the strip */
+    {
+        HWND sheet = property_sheet( 7, TRUE ), tab, page;
+        RECT tab_rc, page_rc;
+
+        pump( 600 );
+        tab = (HWND)SendMessageW( sheet, PSM_GETTABCONTROL, 0, 0 );
+        check( pIsTranslated( tab ) && query_has( tab, "\"mode\":\"sidebar\"" ), "a 7-page property sheet gets the native sidebar" );
+        page = (HWND)SendMessageW( sheet, PSM_GETCURRENTPAGEHWND, 0, 0 );
+        GetWindowRect( tab, &tab_rc );
+        GetWindowRect( page, &page_rc );
+        check( page_rc.left - tab_rc.left >= 140, "wine lays the pages out to the right of the sidebar" );
+        inject( tab, "{\"t\":\"select\",\"v\":3}" );
+        pump( 300 );
+        page = (HWND)SendMessageW( sheet, PSM_GETCURRENTPAGEHWND, 0, 0 );
+        check( page && page == (HWND)SendMessageW( sheet, PSM_INDEXTOHWND, 3, 0 ) && IsWindowVisible( page ),
+               "a native sidebar click switches the page" );
+        GetWindowRect( page, &page_rc );
+        check( page_rc.left - tab_rc.left >= 140, "a page created later is placed right of the sidebar too" );
+        DestroyWindow( sheet );
+
+        sheet = property_sheet( 3, TRUE );
+        pump( 600 );
+        tab = (HWND)SendMessageW( sheet, PSM_GETTABCONTROL, 0, 0 );
+        check( pIsTranslated( tab ) && query_has( tab, "\"mode\":\"strip\"" ), "a 3-page property sheet keeps the tab strip" );
+        DestroyWindow( sheet );
+        pump( 200 );
+    }
 
     /* message box -> NSAlert: press the second button ("No") */
     SetTimer( main_window, 1, 800, press_alert_button );

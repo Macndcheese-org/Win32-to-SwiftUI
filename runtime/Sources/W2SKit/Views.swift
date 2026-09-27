@@ -1533,28 +1533,75 @@ struct TabStrip: View {
     @ObservedObject var model: ControlModel
 
     var body: some View {
+        if model.snap.mode == "sidebar" {
+            TabSidebar(model: model)
+        } else {
+            strip
+        }
+    }
+
+    var strip: some View {
         let items = model.snap.items ?? []
         let selection = Binding(
             get: { model.snap.selection ?? 0 },
             set: { i in model.emit(["t": "select", "v": i]) })
-        VStack(spacing: 0) {
-            Group {
-                if #available(macOS 27, *) {
-                    Picker("", selection: selection) {
-                        ForEach(items.indices, id: \.self) { Text(stripMnemonic(items[$0])).tag($0) }
-                    }
-                    .pickerStyle(.tabs)
-                } else {
-                    Picker("", selection: selection) {
-                        ForEach(items.indices, id: \.self) { Text(stripMnemonic(items[$0])).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
+        let picker = Group {
+            if #available(macOS 27, *) {
+                Picker("", selection: selection) {
+                    ForEach(items.indices, id: \.self) { Text(stripMnemonic(items[$0])).tag($0) }
                 }
+                .pickerStyle(.tabs)
+            } else {
+                Picker("", selection: selection) {
+                    ForEach(items.indices, id: \.self) { Text(stripMnemonic(items[$0])).tag($0) }
+                }
+                .pickerStyle(.segmented)
             }
-            .labelsHidden()
-            .fixedSize()
-            .frame(maxWidth: .infinity)
+        }
+        .labelsHidden()
+        .fixedSize()
+        return VStack(spacing: 0) {
+            // more tabs than fit (a multi-row Win32 strip) scroll sideways
+            if #available(macOS 13, *) {
+                ViewThatFits(in: .horizontal) {
+                    picker.frame(maxWidth: .infinity)
+                    ScrollView(.horizontal, showsIndicators: false) { picker }
+                }
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) { picker }
+            }
             Spacer(minLength: 0)
+        }
+    }
+}
+
+/// map: propsheet (more than 5 pages, macOS 13+): the System Settings sidebar.
+/// The sheet's tab control told wine's propsheet to lay the pages out to the
+/// right of it (TCM_ADJUSTRECT), so only the sidebar is drawn here.
+struct TabSidebar: View {
+    @ObservedObject var model: ControlModel
+
+    var body: some View {
+        GeometryReader { geo in
+            let items = model.snap.items ?? []
+            let scale = geo.size.width / CGFloat(max(1, model.snap.widthPx ?? Double(geo.size.width)))
+            let width = CGFloat(model.snap.sidebarPx ?? 180) * (scale.isFinite && scale > 0 ? scale : 1)
+            HStack(spacing: 0) {
+                List(selection: Binding<Int?>(
+                    get: { model.snap.selection.flatMap { $0 >= 0 ? $0 : nil } },
+                    set: { i in
+                        guard let i = i, i != model.snap.selection else { return }
+                        model.snap.selection = i
+                        model.emit(["t": "select", "v": i])
+                    })) {
+                    ForEach(items.indices, id: \.self) { i in
+                        Text(stripMnemonic(items[i])).tag(Optional(i))
+                    }
+                }
+                .listStyle(.sidebar)
+                .frame(width: width)
+                Spacer(minLength: 0)
+            }
         }
     }
 }

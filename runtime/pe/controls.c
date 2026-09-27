@@ -1326,10 +1326,105 @@ static const struct w2s_kind kind_monthcal = { "monthcal", monthcal_snapshot, mo
 
 /* ---------- Tab ---------- */
 
+/* A property sheet with more than 5 pages gets a sidebar from macOS 13 (the
+ * map's propsheet entry), the System Settings layout. The sheet's tab control
+ * carries it: wine's propsheet sizes the sheet and places every page from the
+ * tab control's TCM_ADJUSTRECT, so answering it with a left inset the width of
+ * the sidebar makes wine lay the sheet out around it. The native view draws
+ * the sidebar list there and stays clear over the page. */
+#define IDC_PROPSHEET_TAB 12320     /* comctl32's IDC_TABCONTROL */
+
+struct tab_data
+{
+    BOOL decided;
+    BOOL sidebar;
+    int width;                      /* sidebar width, pixels */
+    int pad;                        /* page margin, pixels */
+};
+
+/* decided at the first layout query (TCM_ADJUSTRECT), when the sheet has all
+ * its pages: the tabs arrive one by one before that */
+static struct tab_data *tab_layout( struct w2s_control *ctl, BOOL decide )
+{
+    struct tab_data *data = ctl->data;
+    int i, count = (int)SendMessageW( ctl->hwnd, TCM_GETITEMCOUNT, 0, 0 );
+    WCHAR parent_class[16] = {0};
+    HWND parent = GetParent( ctl->hwnd );
+
+    if (!data) data = ctl->data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data) );
+    if (!decide || data->decided || count <= 0) return data;
+
+    data->decided = TRUE;
+    GetClassNameW( parent, parent_class, ARRAYSIZE(parent_class) );
+    data->sidebar = count > 5 && w2s_os_major >= 13 && !wcscmp( parent_class, L"#32770" ) &&
+                    GetDlgCtrlID( ctl->hwnd ) == IDC_PROPSHEET_TAB;
+    if (data->sidebar)
+    {
+        HFONT font = (HFONT)SendMessageW( ctl->hwnd, WM_GETFONT, 0, 0 );
+        HDC hdc = GetDC( ctl->hwnd );
+        HGDIOBJ old = SelectObject( hdc, font ? font : GetStockObject( DEFAULT_GUI_FONT ) );
+        int widest = 0;
+        WCHAR text[256];
+        SIZE size;
+
+        for (i = 0; i < count; i++)
+        {
+            TCITEMW item = { TCIF_TEXT };
+            text[0] = 0;
+            item.pszText = text;
+            item.cchTextMax = ARRAYSIZE(text);
+            SendMessageW( ctl->hwnd, TCM_GETITEMW, i, (LPARAM)&item );
+            if (GetTextExtentPoint32W( hdc, text, wcslen( text ), &size )) widest = max( widest, size.cx );
+        }
+        SelectObject( hdc, old );
+        ReleaseDC( ctl->hwnd, hdc );
+        /* the sidebar draws its rows larger than the dialog font (13 pt vs 11 px) */
+        data->width = min( max( widest * 5 / 4 + 56, 150 ), 300 );
+        data->pad = 8;
+        TRACE( "%p: property sheet with %d pages gets a %d px sidebar\n", ctl->hwnd, count, data->width );
+    }
+    return data;
+}
+
+static BOOL tab_answer( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM lparam, LRESULT *ret )
+{
+    struct tab_data *data;
+    RECT *rc = (RECT *)lparam;
+
+    if (msg != TCM_ADJUSTRECT || !rc) return FALSE;
+    if (!(data = ctl->data) || !data->decided)
+    {
+        data = tab_layout( ctl, TRUE );
+        if (data->sidebar) w2s_push( ctl, FALSE );
+    }
+    if (!data->sidebar) return FALSE;       /* a strip: wine's tab row metrics fit it */
+    if (wparam)
+    {
+        /* display rect -> window rect */
+        rc->left -= data->width + data->pad;
+        rc->top -= data->pad;
+        rc->right += data->pad;
+        rc->bottom += data->pad;
+    }
+    else
+    {
+        rc->left += data->width + data->pad;
+        rc->top += data->pad;
+        rc->right -= data->pad;
+        rc->bottom -= data->pad;
+    }
+    *ret = 0;
+    return TRUE;
+}
+
 static void tab_snapshot( struct w2s_control *ctl, struct json *j )
 {
     int i, count = (int)SendMessageW( ctl->hwnd, TCM_GETITEMCOUNT, 0, 0 );
+    struct tab_data *data = tab_layout( ctl, FALSE );
     WCHAR text[256];
+
+    json_str_a( j, "mode", data->sidebar ? "sidebar" : "strip" );
+    if (data->sidebar) json_int( j, "sidebarPx", data->width );
 
     json_arr_begin( j, "items" );
     for (i = 0; i < count; i++)
@@ -1356,7 +1451,7 @@ static void tab_apply( struct w2s_control *ctl, const struct w2s_event *ev )
     w2s_notify_parent( ctl->hwnd, TCN_SELCHANGE, &nm );
 }
 
-static const struct w2s_kind kind_tab = { "tab", tab_snapshot, tab_apply };
+static const struct w2s_kind kind_tab = { "tab", tab_snapshot, tab_apply, tab_answer };
 
 /* ---------- Status bar ---------- */
 
@@ -1712,7 +1807,9 @@ const struct w2s_kind *w2s_select_kind( HWND hwnd )
     if (is_class( name, TRACKBAR_CLASSW )) return (style & TBS_VERT) ? NULL : &kind_trackbar;
     if (is_class( name, WC_TABCONTROLW ))
     {
-        if (style & (TCS_OWNERDRAWFIXED | TCS_BUTTONS | TCS_VERTICAL | TCS_MULTILINE)) return NULL;
+        /* TCS_MULTILINE (every property sheet) is fine: several rows become a
+         * sidebar from macOS 13, and a strip scrolls before that */
+        if (style & (TCS_OWNERDRAWFIXED | TCS_BUTTONS | TCS_VERTICAL)) return NULL;
         return &kind_tab;
     }
     return NULL;
