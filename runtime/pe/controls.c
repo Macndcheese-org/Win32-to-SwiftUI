@@ -1378,6 +1378,11 @@ static const struct w2s_kind kind_monthcal = { "monthcal", monthcal_snapshot, mo
  * the sidebar list there and stays clear over the page. */
 #define IDC_PROPSHEET_TAB 12320     /* comctl32's IDC_TABCONTROL */
 
+/* Tells wine's propsheet that this tab control carries a native sidebar, so
+ * the sheet lays out around it full-height (propsheet.c); the wizard's own
+ * mark is further down. Removed when the view goes. */
+static const WCHAR native_sidebar_prop[] = L"__wine_native_sidebar";
+
 struct tab_data
 {
     BOOL decided;
@@ -1425,6 +1430,8 @@ static struct tab_data *tab_layout( struct w2s_control *ctl, BOOL decide )
         /* the sidebar draws its rows larger than the dialog font (13 pt vs 11 px) */
         data->width = min( max( widest * 5 / 4 + 56, 150 ), 300 );
         data->pad = 8;
+        /* the sheet lays out around it full-height (propsheet.c) */
+        SetPropW( ctl->hwnd, native_sidebar_prop, (HANDLE)1 );
         TRACE( "%p: property sheet with %d pages gets a %d px sidebar\n", ctl->hwnd, count, data->width );
     }
     return data;
@@ -1500,7 +1507,14 @@ static void tab_apply( struct w2s_control *ctl, const struct w2s_event *ev )
     w2s_notify_parent( ctl->hwnd, TCN_SELCHANGE, &nm );
 }
 
-static const struct w2s_kind kind_tab = { "tab", tab_snapshot, tab_apply, tab_answer };
+static void tab_release( struct w2s_control *ctl )
+{
+    RemovePropW( ctl->hwnd, native_sidebar_prop );
+    HeapFree( GetProcessHeap(), 0, ctl->data );
+}
+
+static const struct w2s_kind kind_tab = { "tab", tab_snapshot, tab_apply, tab_answer,
+                                                  NULL, NULL, NULL, tab_release };
 
 /* ---------- Wizard (map: propsheet.wizard) ---------- */
 
