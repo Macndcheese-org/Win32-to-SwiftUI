@@ -141,8 +141,10 @@ and 8 pages; the Applications page is `IDD_APPCFG` in `programs/winecfg/winecfg.
     can't be the floor.
   - Native events come back through the macdrv event queue as the usual
     `WM_COMMAND`/`WM_NOTIFY`, so an app's own subclasses still see them.
-- **Shipping.** `wine-unified/win32-to-swiftui/`, next to `mnc-d3d`, behind
-  `WINE_MNC_NATIVE_UI` and a per-app setting, off by default until verified.
+- **Shipping.** `wine-unified/dlls/win32swiftui/`, on by default. Off with
+  `WINE_MNC_NATIVE_UI=0` or `NativeUI` = `n` under `HKCU\Software\Wine\Mac Driver`
+  (per app under `AppDefaults\<program.exe>\Mac Driver`). Wine's background processes
+  and Chromium helpers (`--type=...`) stay off unless a setting names them.
 
 ## Known open points
 
