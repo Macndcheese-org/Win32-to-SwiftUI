@@ -599,6 +599,7 @@ enum Debug {
             }
             if let hosting = host.hosting {
                 out["frame"] = [hosting.frame.origin.x, hosting.frame.origin.y, hosting.frame.width, hosting.frame.height]
+                if let hostView = hosting.superview { out["hostHeight"] = Int(hostView.frame.height) }
                 out["hidden"] = hosting.superview?.isHidden ?? true
                 out["inWindow"] = hosting.window != nil
                 // clicks in the middle of the control: native, or through to wine?

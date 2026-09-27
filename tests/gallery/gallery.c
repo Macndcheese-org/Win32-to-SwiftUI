@@ -1637,6 +1637,37 @@ static int selftest(void)
 
     selftest2();
 
+    /* group boxes: a real NSBox, its title above the box when the app leaves room */
+    {
+        RECT rc;
+        int h;
+
+        check( query_has( ctl[ID_GROUP], "\"titleAbove\":false" ),
+               "a group box right under a row of buttons keeps its title inside the box" );
+        /* a window of its own: a button, and a group box with room above it */
+        {
+            HWND win = CreateWindowExW( 0, L"W2SWhitePanel", L"Group boxes", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                                        200, 200, 320, 220, main_window, NULL, GetModuleHandleW( NULL ), NULL );
+            HWND button = CreateWindowExW( 0, L"Button", L"Button", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                           12, 10, 100, 24, win, (HMENU)1, NULL, NULL );
+            HWND group = CreateWindowExW( 0, L"Button", L"Options", WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
+                                          12, 80, 280, 90, win, (HMENU)2, NULL, NULL );
+            pump( 600 );
+            h = 90;
+            /* the native view reaches above the Win32 rectangle by the title's band */
+            check( pIsTranslated( group ) && query_has( group, "\"titleAbove\":true" ) &&
+                   query_int( group, "hostHeight" ) > h + 8,
+                   "with room above, the title goes above the box, which takes the Win32 rectangle" );
+            SetWindowPos( group, 0, 12, 40, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE );
+            pump( 400 );
+            check( query_has( group, "\"titleAbove\":false" ) && query_int( group, "hostHeight" ) == h,
+                   "moved up under the button, the title goes inside the box" );
+            DestroyWindow( win );
+            pump( 200 );
+            (void)button; (void)rc;
+        }
+    }
+
     /* property sheets: more than 5 pages get the window's native sidebar (an
      * NSSplitViewController, macOS 13+) outside wine's content; fewer keep the strip */
     {

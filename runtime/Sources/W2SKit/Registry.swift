@@ -46,6 +46,7 @@ struct Snapshot: Codable, Equatable {
     var imageHeight: Int?
     var imageBGRA: String?
     var imageSymbol: String?    // a stock icon: the macOS image's spec (Icons.swift) instead of imageBGRA
+    var titleAbove: Bool?       // group box: room for its title above the box
     var fill: String?           // static.frame: "none" (an outline) or the rectangle's colour
     var cue: String?
     var readonly: Bool?

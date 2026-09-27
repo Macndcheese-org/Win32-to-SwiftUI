@@ -11,15 +11,15 @@ struct w2s_map_entry
     unsigned int answers_count;
 };
 
-static const UINT w2s_state_button_push[] = { WM_SETTEXT, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, BM_SETCHECK, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
-static const UINT w2s_state_button_default[] = { WM_SETTEXT, WM_ENABLE, BM_SETSTYLE, DM_SETDEFID, WM_SETFONT, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, BM_SETCHECK, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
-static const UINT w2s_state_button_checkbox[] = { WM_SETTEXT, WM_ENABLE, BM_SETCHECK, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
-static const UINT w2s_state_button_3state[] = { BM_SETCHECK, WM_SETTEXT, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
-static const UINT w2s_state_button_pushlike[] = { BM_SETCHECK, WM_SETTEXT, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
-static const UINT w2s_state_button_radio[] = { BM_SETCHECK, WM_SETTEXT, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
-static const UINT w2s_state_button_groupbox[] = { WM_SETTEXT, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, BM_SETCHECK, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
-static const UINT w2s_state_button_split[] = { WM_SETTEXT, BCM_SETSPLITINFO, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, BM_SETCHECK, BCM_SETNOTE, BCM_SETSHIELD };
-static const UINT w2s_state_button_commandlink[] = { WM_SETTEXT, BCM_SETNOTE, BCM_SETSHIELD, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, BM_SETCHECK, BCM_SETSPLITINFO };
+static const UINT w2s_state_button_push[] = { WM_SETTEXT, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, BM_SETCHECK, WM_WINDOWPOSCHANGED, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
+static const UINT w2s_state_button_default[] = { WM_SETTEXT, WM_ENABLE, BM_SETSTYLE, DM_SETDEFID, WM_SETFONT, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, BM_SETCHECK, WM_WINDOWPOSCHANGED, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
+static const UINT w2s_state_button_checkbox[] = { WM_SETTEXT, WM_ENABLE, BM_SETCHECK, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, WM_WINDOWPOSCHANGED, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
+static const UINT w2s_state_button_3state[] = { BM_SETCHECK, WM_SETTEXT, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, WM_WINDOWPOSCHANGED, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
+static const UINT w2s_state_button_pushlike[] = { BM_SETCHECK, WM_SETTEXT, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, WM_WINDOWPOSCHANGED, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
+static const UINT w2s_state_button_radio[] = { BM_SETCHECK, WM_SETTEXT, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, WM_WINDOWPOSCHANGED, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
+static const UINT w2s_state_button_groupbox[] = { WM_SETTEXT, WM_WINDOWPOSCHANGED, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, BM_SETCHECK, BCM_SETSPLITINFO, BCM_SETNOTE, BCM_SETSHIELD };
+static const UINT w2s_state_button_split[] = { WM_SETTEXT, BCM_SETSPLITINFO, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, BM_SETCHECK, WM_WINDOWPOSCHANGED, BCM_SETNOTE, BCM_SETSHIELD };
+static const UINT w2s_state_button_commandlink[] = { WM_SETTEXT, BCM_SETNOTE, BCM_SETSHIELD, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK, DM_SETDEFID, BM_SETCHECK, WM_WINDOWPOSCHANGED, BCM_SETSPLITINFO };
 static const UINT w2s_state_static_text[] = { WM_SETTEXT, WM_SETFONT, WM_ENABLE, STM_SETICON, STM_SETIMAGE };
 static const UINT w2s_state_static_image[] = { STM_SETICON, STM_SETIMAGE, WM_SETTEXT, WM_SETFONT, WM_ENABLE };
 static const UINT w2s_state_static_separator[] = { WM_SETTEXT, WM_SETFONT, WM_ENABLE, STM_SETICON, STM_SETIMAGE };
@@ -98,15 +98,15 @@ static const UINT w2s_state_beep[] = { 0 };
 
 static const struct w2s_map_entry w2s_map_entries[] =
 {
-    { "button.push", w2s_state_button_push, 12, NULL, 0 },
-    { "button.default", w2s_state_button_default, 12, NULL, 0 },
-    { "button.checkbox", w2s_state_button_checkbox, 12, NULL, 0 },
-    { "button.3state", w2s_state_button_3state, 12, NULL, 0 },
-    { "button.pushlike", w2s_state_button_pushlike, 12, NULL, 0 },
-    { "button.radio", w2s_state_button_radio, 12, NULL, 0 },
-    { "button.groupbox", w2s_state_button_groupbox, 12, NULL, 0 },
-    { "button.split", w2s_state_button_split, 12, NULL, 0 },
-    { "button.commandlink", w2s_state_button_commandlink, 12, NULL, 0 },
+    { "button.push", w2s_state_button_push, 13, NULL, 0 },
+    { "button.default", w2s_state_button_default, 13, NULL, 0 },
+    { "button.checkbox", w2s_state_button_checkbox, 13, NULL, 0 },
+    { "button.3state", w2s_state_button_3state, 13, NULL, 0 },
+    { "button.pushlike", w2s_state_button_pushlike, 13, NULL, 0 },
+    { "button.radio", w2s_state_button_radio, 13, NULL, 0 },
+    { "button.groupbox", w2s_state_button_groupbox, 13, NULL, 0 },
+    { "button.split", w2s_state_button_split, 13, NULL, 0 },
+    { "button.commandlink", w2s_state_button_commandlink, 13, NULL, 0 },
     { "static.text", w2s_state_static_text, 5, NULL, 0 },
     { "static.image", w2s_state_static_image, 5, NULL, 0 },
     { "static.separator", w2s_state_static_separator, 5, NULL, 0 },

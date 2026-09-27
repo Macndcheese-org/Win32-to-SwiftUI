@@ -81,8 +81,60 @@ static void button_apply( struct w2s_control *ctl, const struct w2s_event *ev )
     if (!strcmp( ev->type, "click" )) SendMessageW( ctl->hwnd, BM_CLICK, 0, 0 );
 }
 
+/* A group box's title goes above the box, where macOS puts it (HIG: Boxes),
+ * when nothing of the app's sits in that band: the box then takes the Win32
+ * rectangle, whose caption band becomes the box's padding. Otherwise the title
+ * goes inside the box's top (NSBox's belowTop). */
+#define GROUPBOX_TITLE_BAND 18
+
+static BOOL groupbox_room_above( HWND hwnd )
+{
+    HWND parent = GetParent( hwnd ), child;
+    HFONT font = (HFONT)SendMessageW( hwnd, WM_GETFONT, 0, 0 );
+    RECT rc, band, sib, tmp;
+    WCHAR text[256];
+    SIZE size = { 0 };
+    HGDIOBJ old;
+    HDC hdc;
+
+    if (!parent) return FALSE;
+    GetWindowRect( hwnd, &rc );
+    MapWindowPoints( NULL, parent, (POINT *)&rc, 2 );
+    if (rc.top < GROUPBOX_TITLE_BAND) return FALSE;
+    /* the title's width, in the Mac's larger font */
+    text[0] = 0;
+    GetWindowTextW( hwnd, text, ARRAYSIZE(text) );
+    if ((hdc = GetDC( hwnd )))
+    {
+        old = SelectObject( hdc, font ? font : GetStockObject( DEFAULT_GUI_FONT ) );
+        GetTextExtentPoint32W( hdc, text, wcslen( text ), &size );
+        SelectObject( hdc, old );
+        ReleaseDC( hwnd, hdc );
+    }
+    SetRect( &band, rc.left, rc.top - GROUPBOX_TITLE_BAND, min( rc.right, rc.left + size.cx * 4 / 3 + 16 ), rc.top );
+    for (child = GetWindow( parent, GW_CHILD ); child; child = GetWindow( child, GW_HWNDNEXT ))
+    {
+        if (child == hwnd || !IsWindowVisible( child )) continue;
+        GetWindowRect( child, &sib );
+        MapWindowPoints( NULL, parent, (POINT *)&sib, 2 );
+        /* a box around this one isn't in the way */
+        if (sib.left <= band.left && sib.top <= band.top && sib.right >= band.right && sib.bottom >= rc.bottom)
+            continue;
+        if (IntersectRect( &tmp, &sib, &band )) return FALSE;
+    }
+    return TRUE;
+}
+
 static void groupbox_snapshot( struct w2s_control *ctl, struct json *j )
 {
+    /* made with the dialog, before the controls around it: look again once
+     * they're all there (a posted refresh comes after the dialog is built) */
+    if (!ctl->data)
+    {
+        ctl->data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(int) );
+        PostMessageW( ctl->hwnd, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
+    }
+    json_bool( j, "titleAbove", groupbox_room_above( ctl->hwnd ) );
 }
 
 static void nothing_apply( struct w2s_control *ctl, const struct w2s_event *ev )

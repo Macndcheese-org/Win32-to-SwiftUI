@@ -120,22 +120,27 @@ entries:
     swiftui:
       - since: 12
         code: |-
-          VStack(alignment: .leading, spacing: 0) {
-            Text(title).font(.caption).foregroundStyle(.secondary).padding(.top, 4).padding(.leading, 10)
-            Spacer(minLength: 0)
-          }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-          .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor))
-          .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor))))
+          GroupBox(label: Text(title)) { Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity) }
+    appkit:
+      - since: 12
+        code: |-
+          let box = NSBox()
+          box.boxType = .primary
+          box.title = "Options"
+          box.titlePosition = .aboveTop
     glass: none
-    state_in: [WM_SETTEXT]
+    state_in: [WM_SETTEXT, WM_WINDOWPOSCHANGED]
     notes: >-
-      Win32 group boxes don't contain their controls: the controls are siblings drawn on
-      top. The native view is exactly the group box's rectangle, so the title can't sit
-      above a box the way macOS usually places it (HIG Boxes): the rounded box covers
-      the whole rectangle and the title sits as a small secondary caption inside its
-      top-left, in the title zone apps leave clear, so the content below keeps visible
-      padding on every side.
-
+      A real NSBox (SwiftUI's GroupBox on macOS). Win32 group boxes don't contain their
+      controls: they're siblings drawn on top, placed by the app a caption's height
+      below the box's top. macOS puts a box's title above the box (HIG Boxes), so when
+      nothing of the app's sits in that band the title goes there: the host view reaches
+      above the Win32 rectangle by the title's height (winemac w2sSetOutsetTop:) and the
+      box takes the rectangle, whose caption band becomes its top padding. Without room,
+      the title goes inside the box's top (belowTop), still the real NSBox. The box stays
+      behind the native controls it contains, and its fill is translucent, so what wine
+      draws inside shows through. Room is looked at again once the dialog is built and
+      when the box moves.
   - id: button.split
     kind: control
     title: Split button

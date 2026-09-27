@@ -49,6 +49,7 @@ public func w2s_swift_control_create(_ hostView: UInt64, _ window: UInt64, _ pos
         Look.apply(host.model.snap.backdrop, to: hosting)
         container.addSubview(hosting)
         host.hosting = hosting
+        if entryID == "button.groupbox" { GroupBoxTitle.apply(host) }
         if entryID == "tab" {
             // a window sidebar lives exactly as long as its tab control
             let attach = WindowSidebarAttach(host: host)
@@ -90,7 +91,11 @@ public func w2s_swift_control_update(_ handle: UInt64, _ json: UnsafePointer<CCh
             (host.owned as? WindowSidebarAttach)?.update()
             return
         }
-        if host.model.snap != snap { host.model.snap = snap }
+        if host.model.snap != snap {
+            let titleMoved = snap.titleAbove != host.model.snap.titleAbove || snap.text != host.model.snap.text
+            host.model.snap = snap
+            if titleMoved && host.entry == "button.groupbox" { GroupBoxTitle.apply(host) }
+        }
         // a window sidebar attaches once the host view sits in a window
         (host.owned as? WindowSidebarAttach)?.update()
     }

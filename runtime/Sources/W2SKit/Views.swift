@@ -113,7 +113,7 @@ struct ControlRoot: View {
         case "button.commandlink":
             CommandLink(model: model, label: label)
         case "button.groupbox":
-            NativeGroupBox(label: label)
+            NativeGroupBox(label: label, above: (snap.titleAbove ?? false) && !label.isEmpty)
                 .allowsHitTesting(false)
         case "static.text":
             StaticText(snap: snap, label: label)
@@ -424,28 +424,56 @@ struct CommandLink: View {
 /// a small caption inside its top-left, in the title zone the app leaves
 /// clear, leaving the content room below. The Win32 controls are siblings
 /// drawn over this view, on the dialog background.
-struct NativeGroupBox: View {
+/// map: button.groupbox. A real NSBox (what SwiftUI's GroupBox is on macOS),
+/// its title above the box as macOS shows it (HIG: Boxes) when the app leaves
+/// room there: the host view then reaches above the Win32 rectangle by the
+/// title's band (GroupBoxTitle.band) and the box takes the rectangle, whose
+/// caption band becomes padding. Without room, the title goes inside the
+/// box's top (belowTop). The box's fill is translucent, so what wine draws in
+/// it shows through; it stays behind the native controls it contains.
+struct NativeGroupBox: NSViewRepresentable {
     let label: String
+    let above: Bool
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if !label.isEmpty {
-                Text(label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .padding(.leading, 10)
-                    .padding(.top, 4)
-            }
-            Spacer(minLength: 0)
+    func makeNSView(context: Context) -> NSBox {
+        let box = NSBox()
+        box.boxType = .primary
+        return box
+    }
+
+    func updateNSView(_ box: NSBox, context: Context) {
+        box.title = label
+        box.titlePosition = label.isEmpty ? .noTitle : (above ? .aboveTop : .belowTop)
+    }
+}
+
+enum GroupBoxTitle {
+    private static var bands: [String: CGFloat] = [:]
+
+    /// How far an NSBox's title above it reaches over the box's border (main thread).
+    static func band(_ label: String) -> CGFloat {
+        if let band = bands[label] { return band }
+        let box = NSBox(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+        box.boxType = .primary
+        box.title = label
+        box.titlePosition = .aboveTop
+        box.layoutSubtreeIfNeeded()
+        let band = max(0, box.bounds.height - box.borderRect.maxY)
+        bands[label] = band
+        return band
+    }
+
+    /// The host view reaches above the Win32 rectangle by the title's band when
+    /// the title goes above, and stays behind the controls in the box.
+    static func apply(_ host: ControlHost) {
+        let view = Unmanaged<NSView>.fromOpaque(host.hostView).takeUnretainedValue()
+        let label = stripMnemonic(host.model.snap.text ?? "")
+        let above = (host.model.snap.titleAbove ?? false) && !label.isEmpty
+        let outset = above ? band(label) : 0
+        if view.responds(to: NSSelectorFromString("w2sSetOutsetTop:")) {
+            view.perform(NSSelectorFromString("w2sSetOutsetTop:"), with: NSNumber(value: Double(outset)))
+            view.perform(NSSelectorFromString("w2sSetBehind:"), with: NSNumber(value: true))
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color(nsColor: .controlBackgroundColor))
-                .overlay(RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color(nsColor: .separatorColor)))
-        )
     }
 }
 
