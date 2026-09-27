@@ -1370,25 +1370,20 @@ static const struct w2s_kind kind_monthcal = { "monthcal", monthcal_snapshot, mo
 
 /* ---------- Tab ---------- */
 
-/* A property sheet with more than 5 pages gets a sidebar from macOS 13 (the
- * map's propsheet entry), the System Settings layout. The sheet's tab control
- * carries it: wine's propsheet sizes the sheet and places every page from the
- * tab control's TCM_ADJUSTRECT, so answering it with a left inset the width of
- * the sidebar makes wine lay the sheet out around it. The native view draws
- * the sidebar list there and stays clear over the page. */
+/* A top-level property sheet with more than 5 pages gets a real window sidebar
+ * from macOS 13 (the map's propsheet entry): an NSSplitViewController whose
+ * sidebar lists the pages, outside wine's content. The sheet's tab control
+ * carries it: in this mode TCM_ADJUSTRECT is answered with no change (the
+ * page area is the tab control's whole rectangle: the tabs are in the
+ * window's sidebar, outside wine's content). The tab control's own in-window
+ * view draws nothing and passes clicks through. */
 #define IDC_PROPSHEET_TAB 12320     /* comctl32's IDC_TABCONTROL */
-
-/* Tells wine's propsheet that this tab control carries a native sidebar, so
- * the sheet lays out around it full-height (propsheet.c); the wizard's own
- * mark is further down. Removed when the view goes. */
-static const WCHAR native_sidebar_prop[] = L"__wine_native_sidebar";
 
 struct tab_data
 {
     BOOL decided;
-    BOOL sidebar;
-    int width;                      /* sidebar width, pixels */
-    int pad;                        /* page margin, pixels */
+    BOOL window;                      /* a real window sidebar, not a strip */
+    int width;                        /* sidebar width, points */
 };
 
 /* decided at the first layout query (TCM_ADJUSTRECT), when the sheet has all
@@ -1399,15 +1394,18 @@ static struct tab_data *tab_layout( struct w2s_control *ctl, BOOL decide )
     int i, count = (int)SendMessageW( ctl->hwnd, TCM_GETITEMCOUNT, 0, 0 );
     WCHAR parent_class[16] = {0};
     HWND parent = GetParent( ctl->hwnd );
+    DWORD style;
 
     if (!data) data = ctl->data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data) );
     if (!decide || data->decided || count <= 0) return data;
 
     data->decided = TRUE;
     GetClassNameW( parent, parent_class, ARRAYSIZE(parent_class) );
-    data->sidebar = count > 5 && w2s_os_major >= 13 && !wcscmp( parent_class, L"#32770" ) &&
-                    GetDlgCtrlID( ctl->hwnd ) == IDC_PROPSHEET_TAB;
-    if (data->sidebar)
+    style = GetWindowLongW( parent, GWL_STYLE );
+    data->window = count > 5 && w2s_os_major >= 13 && !wcscmp( parent_class, L"#32770" ) &&
+                   GetDlgCtrlID( ctl->hwnd ) == IDC_PROPSHEET_TAB &&
+                   (style & WS_CAPTION) && !(style & WS_CHILD);
+    if (data->window)
     {
         HFONT font = (HFONT)SendMessageW( ctl->hwnd, WM_GETFONT, 0, 0 );
         HDC hdc = GetDC( ctl->hwnd );
@@ -1427,14 +1425,10 @@ static struct tab_data *tab_layout( struct w2s_control *ctl, BOOL decide )
         }
         SelectObject( hdc, old );
         ReleaseDC( ctl->hwnd, hdc );
-        /* the sidebar draws its rows larger than the dialog font (13 pt vs 11 px), with
-         * room for a row's symbol, the list's insets and, from macOS 26, the floating
-         * sidebar's margins */
-        data->width = min( max( widest * 4 / 3 + 96, 170 ), 320 );
-        data->pad = 8;
-        /* the sheet lays out around it full-height (propsheet.c) */
-        SetPropW( ctl->hwnd, native_sidebar_prop, (HANDLE)1 );
-        TRACE( "%p: property sheet with %d pages gets a %d px sidebar\n", ctl->hwnd, count, data->width );
+        /* plain rows, no icons: the widest title larger than the dialog font
+         * (13 pt vs 11 px), with room for the list's insets */
+        data->width = min( max( widest * 4 / 3 + 60, 180 ), 320 );
+        TRACE( "%p: property sheet with %d pages gets a %d pt window sidebar\n", ctl->hwnd, count, data->width );
     }
     return data;
 }
@@ -1448,24 +1442,10 @@ static BOOL tab_answer( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM
     if (!(data = ctl->data) || !data->decided)
     {
         data = tab_layout( ctl, TRUE );
-        if (data->sidebar) w2s_push( ctl, FALSE );
+        if (data->window) w2s_push( ctl, FALSE );
     }
-    if (!data->sidebar) return FALSE;       /* a strip: wine's tab row metrics fit it */
-    if (wparam)
-    {
-        /* display rect -> window rect */
-        rc->left -= data->width + data->pad;
-        rc->top -= data->pad;
-        rc->right += data->pad;
-        rc->bottom += data->pad;
-    }
-    else
-    {
-        rc->left += data->width + data->pad;
-        rc->top += data->pad;
-        rc->right -= data->pad;
-        rc->bottom -= data->pad;
-    }
+    if (!data->window) return FALSE;       /* a strip: wine's tab row metrics fit it */
+    /* a window sidebar: the page area is the tab control's whole rectangle */
     *ret = 0;
     return TRUE;
 }
@@ -1493,8 +1473,8 @@ static void tab_snapshot( struct w2s_control *ctl, struct json *j )
 {
     struct tab_data *data = tab_layout( ctl, FALSE );
 
-    json_str_a( j, "mode", data->sidebar ? "sidebar" : "strip" );
-    if (data->sidebar) json_int( j, "sidebarPx", data->width );
+    json_str_a( j, "mode", data->window ? "window" : "strip" );
+    if (data->window) json_int( j, "sidebarPx", data->width );
     tab_items( ctl, j );
 }
 
@@ -1511,7 +1491,6 @@ static void tab_apply( struct w2s_control *ctl, const struct w2s_event *ev )
 
 static void tab_release( struct w2s_control *ctl )
 {
-    RemovePropW( ctl->hwnd, native_sidebar_prop );
     HeapFree( GetProcessHeap(), 0, ctl->data );
 }
 
@@ -2018,7 +1997,7 @@ const struct w2s_kind *w2s_select_kind( HWND hwnd )
     {
         if (is_wizard_tab( hwnd )) return &kind_wizard;
         /* TCS_MULTILINE (every property sheet) is fine: several rows become a
-         * sidebar from macOS 13, and a strip scrolls before that */
+         * window sidebar from macOS 13, and a strip scrolls before that */
         if (style & (TCS_OWNERDRAWFIXED | TCS_BUTTONS | TCS_VERTICAL)) return NULL;
         return &kind_tab;
     }

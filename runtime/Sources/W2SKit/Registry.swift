@@ -92,7 +92,7 @@ struct Snapshot: Codable, Equatable {
     // tree view
     var nodes: [TreeNode]?
     var sidebar: Bool?
-    var mode: String?           // tab: "strip", "sidebar" (a property sheet, macOS 13+) or "wizard"
+    var mode: String?           // tab: "strip", "window" (a property sheet's real window sidebar) or "wizard"
     var sidebarPx: Double?
     // wizard: the active page's header, drawn above the page from headerPx (x, page top)
     var heading: String?
@@ -185,7 +185,8 @@ final class PassThroughHostingView<Content: View>: NSHostingView<Content> {
     }
 
     /// Where an entry's view takes clicks: decoration lets them all through, a
-    /// tab control only takes them on its tabs (strip or sidebar), not on the page.
+    /// tab control only takes them on its strip, not on the page (a sidebar
+    /// lives in the window, outside wine's content, and takes none here).
     static func region(for entry: String, model: ControlModel) -> ((NSPoint, NSSize) -> Bool)? {
         switch entry {
         case "static.text", "static.frame", "static.separator", "static.image", "button.groupbox", "progress":
@@ -194,14 +195,8 @@ final class PassThroughHostingView<Content: View>: NSHostingView<Content> {
             return { [weak model] point, size in
                 guard let snap = model?.snap else { return false }
                 switch snap.mode {
-                case "wizard":
-                    return false        // the steps and header can't be clicked
-                case "sidebar":
-                    let scale = size.width / CGFloat(max(1, snap.widthPx ?? Double(size.width)))
-                    let width = CGFloat(snap.sidebarPx ?? 0) * scale
-                    // on 26+ the floating panel sits 8 pt in from the left edge
-                    if W2S.osVersion.major >= 26 { return point.x >= 8 && point.x < 8 + width }
-                    return point.x < width
+                case "wizard", "sidebar", "window":
+                    return false        // the steps, header and sidebar can't be clicked here
                 default:
                     return point.y < 34 // the tab strip, over the top of the page (flipped)
                 }
@@ -265,6 +260,56 @@ final class ControlHost {
     var scale: CGFloat {
         guard let view = hosting, let px = model.snap.heightPx, px > 0, view.bounds.height > 0 else { return 1 }
         return view.bounds.height / CGFloat(px)
+    }
+}
+
+/// A tab control in mode "window": its WindowSidebar, hosted as the native
+/// sidebar of the window's split view (winemac's w2sAttachSidebar:). Kept in
+/// the host's `owned`, so it lives exactly as long as the control. Main thread.
+final class WindowSidebarAttach {
+    weak var host: ControlHost?
+    var controller: NSHostingController<WindowSidebar>?
+    private var retries = 0
+
+    init(host: ControlHost) { self.host = host }
+
+    /// Attach once the host view sits in a window; before that (or after a
+    /// snapshot that still says "window") retry briefly on the main thread.
+    func update() {
+        guard let host = host, controller == nil, host.model.snap.mode == "window" else { return }
+        guard let window = host.hosting?.window else {
+            guard W2S.control(host.handle) != nil, host.hosting != nil, retries < 100 else { return }
+            retries += 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.update() }
+            return
+        }
+        let vc = NSHostingController(rootView: WindowSidebar(model: host.model))
+        controller = vc
+        window.perform(NSSelectorFromString("w2sAttachSidebar:widthNumber:"),
+                       with: vc, with: NSNumber(value: host.model.snap.sidebarPx ?? 240))
+    }
+
+    /// The control is going (or stopped being a window sidebar): the split
+    /// view, toolbar and wine view go back to plain. Without a window there
+    /// is nothing to undo (a closed window drops them with itself).
+    func detach() {
+        guard controller != nil else { return }
+        controller = nil
+        host?.hosting?.window?.perform(NSSelectorFromString("w2sDetachSidebar"))
+    }
+
+    /// Collapse state for the tests' queries (nil without a window).
+    func collapsed() -> Bool? {
+        guard let window = host?.hosting?.window else { return nil }
+        let sel = NSSelectorFromString("w2sSidebarCollapsed")
+        guard window.responds(to: sel) else { return nil }
+        typealias GetBool = @convention(c) (AnyObject, Selector) -> Bool
+        return unsafeBitCast(window.method(for: sel), to: GetBool.self)(window, sel)
+    }
+
+    func setCollapsed(_ collapsed: Bool) {
+        host?.hosting?.window?.perform(NSSelectorFromString("w2sSetSidebarCollapsed:"),
+                                       with: NSNumber(value: collapsed))
     }
 }
 

@@ -898,6 +898,19 @@ static BOOL query_has( HWND hwnd, const char *needle )
     return ok;
 }
 
+/* a number field of the native model, or -1 */
+static int query_int( HWND hwnd, const char *key )
+{
+    char *q = pQuery( hwnd ), needle[64], *p;
+    int ret = -1;
+
+    snprintf( needle, sizeof(needle), "\"%s\":", key );
+    if (q && (p = strstr( q, needle ))) ret = atoi( p + strlen( needle ) );
+    if (ret == -1) printf( "      query (%s): %s\n", key, q ? q : "(null)" );
+    pFree( q );
+    return ret;
+}
+
 static BOOL query_lacks( HWND hwnd, const char *needle )
 {
     char *q = pQuery( hwnd );
@@ -1085,14 +1098,18 @@ static void selftest_look(void)
            query_has( ctl[ID_WHITECHECK], "\"appearance\":\"NSAppearanceNameAqua\"" ),
            "a control on a page the app paints white stays light" );
 
-    /* as if macOS switched to Dark Mode, then back */
+    /* as if macOS switched to Dark Mode, then back: from Light Mode, whatever the
+     * Mac shows now (an automatic appearance is dark at night) */
+    inject( ctl[ID_PUSH], "{\"t\":\"lookOverride\",\"s\":\"light\"}" );
+    pump( 800 );
     sys_before = got_syscolorchange;
     theme_before = got_themechanged;
     inject( ctl[ID_PUSH], "{\"t\":\"lookOverride\",\"s\":\"dark\"}" );
     pump( 800 );
-    printf( "      dark: COLOR_BTNFACE %06lx, COLOR_WINDOW %06lx, COLOR_WINDOWTEXT %06lx, COLOR_HIGHLIGHT %06lx\n",
+    printf( "      dark: COLOR_BTNFACE %06lx, COLOR_WINDOW %06lx, COLOR_WINDOWTEXT %06lx, COLOR_HIGHLIGHT %06lx;"
+            " WM_SYSCOLORCHANGE %d -> %d, WM_THEMECHANGED %d -> %d\n",
             GetSysColor( COLOR_BTNFACE ), GetSysColor( COLOR_WINDOW ), GetSysColor( COLOR_WINDOWTEXT ),
-            GetSysColor( COLOR_HIGHLIGHT ) );
+            GetSysColor( COLOR_HIGHLIGHT ), sys_before, got_syscolorchange, theme_before, got_themechanged );
     check( got_syscolorchange > sys_before && got_themechanged > theme_before && is_dark( GetSysColor( COLOR_BTNFACE ) ) &&
            is_dark( GetSysColor( COLOR_WINDOW ) ) && !is_dark( GetSysColor( COLOR_WINDOWTEXT ) ),
            "Dark Mode -> dark system colours, WM_SYSCOLORCHANGE and WM_THEMECHANGED" );
@@ -1620,45 +1637,45 @@ static int selftest(void)
 
     selftest2();
 
-    /* property sheets: more than 5 pages get the sidebar (macOS 13+), fewer keep the strip */
+    /* property sheets: more than 5 pages get the window's native sidebar (an
+     * NSSplitViewController, macOS 13+) outside wine's content; fewer keep the strip */
     {
         HWND sheet = property_sheet( 7, TRUE ), tab, page;
-        RECT tab_rc, page_rc;
+        RECT tab_rc, page_rc, sheet_rc, rc;
+        int x;
 
-        pump( 600 );
+        pump( 800 );
         tab = (HWND)SendMessageW( sheet, PSM_GETTABCONTROL, 0, 0 );
-        check( pIsTranslated( tab ) && query_has( tab, "\"mode\":\"sidebar\"" ), "a 7-page property sheet gets the native sidebar" );
+        check( pIsTranslated( tab ) && query_has( tab, "\"mode\":\"window\"" ) &&
+               query_has( tab, "\"windowSidebar\":true" ),
+               "a 7-page property sheet gets the window's native sidebar (split view)" );
+        x = query_int( tab, "wineViewX" );
+        check( x >= 150 && query_int( tab, "windowWidth" ) - query_int( tab, "wineViewWidth" ) == x,
+               "wine's content sits right of the sidebar, which is outside it" );
         page = (HWND)SendMessageW( sheet, PSM_GETCURRENTPAGEHWND, 0, 0 );
         GetWindowRect( tab, &tab_rc );
         GetWindowRect( page, &page_rc );
-        check( page_rc.left - tab_rc.left >= 140, "wine lays the pages out to the right of the sidebar" );
-        /* the sidebar spans the sheet's full client height, flush with the left edge */
-        {
-            RECT sheet_cr, tab_cr;
-            GetClientRect( sheet, &sheet_cr );
-            GetWindowRect( tab, &tab_cr );
-            MapWindowPoints( NULL, sheet, (POINT *)&tab_cr, 2 );
-            check( tab_cr.left == 0 && tab_cr.top == 0 && tab_cr.bottom == sheet_cr.bottom,
-                   "the tab control spans the sheet's full client height (full-height sidebar)" );
-        }
-        /* the OK button stays at the bottom right, right of the sidebar */
-        {
-            HWND ok = GetDlgItem( sheet, IDOK );
-            RECT ok_rc, sheet_rc;
-            GetWindowRect( ok, &ok_rc );
-            GetWindowRect( sheet, &sheet_rc );
-            check( ok_rc.left >= page_rc.left && ok_rc.top > page_rc.top &&
-                   sheet_rc.bottom - ok_rc.bottom < 60,
-                   "the OK button is at the bottom right, right of the sidebar" );
-        }
+        check( page_rc.left - tab_rc.left < 8, "the pages fill the tab control's area (its tabs are in the sidebar)" );
         inject( tab, "{\"t\":\"select\",\"v\":3}" );
         pump( 300 );
         page = (HWND)SendMessageW( sheet, PSM_GETCURRENTPAGEHWND, 0, 0 );
-        check( page && page == (HWND)SendMessageW( sheet, PSM_INDEXTOHWND, 3, 0 ) && IsWindowVisible( page ),
-               "a native sidebar click switches the page" );
-        GetWindowRect( page, &page_rc );
-        check( page_rc.left - tab_rc.left >= 140, "a page created later is placed right of the sidebar too" );
+        check( page && page == (HWND)SendMessageW( sheet, PSM_INDEXTOHWND, 3, 0 ) && IsWindowVisible( page ) &&
+               query_has( tab, "\"selection\":3" ),
+               "a native sidebar choice switches the page" );
+        /* the sidebar's toggle: the window grows and shrinks around wine's content */
+        GetWindowRect( sheet, &sheet_rc );
+        inject( tab, "{\"t\":\"sidebarCollapse\",\"v\":1}" );
+        pump( 800 );
+        GetWindowRect( sheet, &rc );
+        check( query_has( tab, "\"sidebarCollapsed\":true" ) && query_int( tab, "wineViewX" ) == 0 && EqualRect( &rc, &sheet_rc ),
+               "hiding the sidebar shrinks the window, wine's content and rect stay" );
+        inject( tab, "{\"t\":\"sidebarCollapse\",\"v\":0}" );
+        pump( 800 );
+        GetWindowRect( sheet, &rc );
+        check( query_has( tab, "\"sidebarCollapsed\":false" ) && query_int( tab, "wineViewX" ) == x && EqualRect( &rc, &sheet_rc ),
+               "showing it again grows the window back" );
         DestroyWindow( sheet );
+        pump( 200 );
 
         sheet = property_sheet( 3, TRUE );
         pump( 600 );

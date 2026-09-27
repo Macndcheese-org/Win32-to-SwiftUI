@@ -76,19 +76,20 @@ entries:
     improvised: true
     notes: >-
       Up to 5 pages: tabs, as in older macOS preference windows. More than 5 (winecfg has
-      8): from macOS 13 a sidebar, the System Settings layout. The runtime does it through
-      the sheet's own tab control: marked with __wine_native_sidebar, the tab control is
-      placed at (0,0) spanning the sheet's whole client height, flush with the left edge,
-      and wine's propsheet sizes the sheet and places every page from the tab control's
-      TCM_ADJUSTRECT, so the pages land right of the sidebar while OK/Cancel/Apply stay
-      at the bottom right. The rows are a real List(selection:) in the sidebar style on
-      the sidebar material: on macOS 26+ the sidebar floats like System Settings (8 pt in
-      from the top, left and bottom, 12 pt rounded corners), before that it is flush with
-      a hairline separator. Rows show SF Symbols only when every page title is a known
-      settings page in English or French, else none (Staging uses testtube.2: its flask
-      needs macOS 14). OK/Cancel/Apply stay,
-      because apps commit on PSN_APPLY; macOS settings would apply live, but that can't
-      be emulated safely.
+      8), from macOS 13, a top-level sheet gets the window's own sidebar, what
+      NavigationSplitView gives a SwiftUI app: winemac turns the window into an
+      NSSplitViewController (mnc_w2s.m, w2sAttachSidebar:) whose sidebar item is a SwiftUI
+      List(selection:) in the sidebar style, full height under the traffic lights, with the
+      system toggle (NSToolbarToggleSidebarItemIdentifier) in a unified toolbar; the system
+      gives it its material and, from macOS 26, Liquid Glass. Wine's content (the pages and
+      OK/Cancel/Apply) is the split view's detail pane; the window is wider than wine's
+      content by the sidebar and taller by the toolbar (WineWindow's frame/content rect
+      conversions), so Win32 geometry never sees them, and hiding the sidebar shrinks the
+      window instead of the fixed-size pages. The sheet's tab control is the model: its
+      items and selection fill the list, a row choice selects the tab, and TCM_ADJUSTRECT
+      leaves the page area its whole rectangle. Rows are plain text (Win32 pages have no
+      icons). OK/Cancel/Apply stay, because apps commit on PSN_APPLY; macOS settings would
+      apply live, but that can't be emulated safely.
   - id: propsheet.wizard
     kind: dialog
     title: Wizard (property sheet in wizard mode)
