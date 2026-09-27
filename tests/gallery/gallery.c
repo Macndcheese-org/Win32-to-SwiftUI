@@ -1,0 +1,389 @@
+/*
+ * Win32-to-SwiftUI gallery: one window with every control milestone 1
+ * translates, plus buttons for a message box and the open/save panels.
+ *
+ *   gallery.exe            interactive
+ *   gallery.exe /selftest  drives every control both ways through
+ *                          win32swiftui.dll's debug hooks and prints PASS/FAIL;
+ *                          the exit code is the number of failures
+ */
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <commctrl.h>
+#include <commdlg.h>
+#include <stdio.h>
+#include <string.h>
+
+enum
+{
+    ID_PUSH = 100, ID_DEFAULT, ID_CHECK, ID_RADIO1, ID_RADIO2, ID_GROUP, ID_LABEL, ID_SEP, ID_ICON,
+    ID_EDIT, ID_PASSWORD, ID_NUMBER, ID_READONLY, ID_COMBO, ID_LIST, ID_MULTI, ID_REPORT, ID_LVLIST,
+    ID_PROGRESS, ID_TRACK, ID_TAB, ID_MSGBOX, ID_OPEN, ID_SAVE, ID_PUSHLIKE,
+};
+
+static HWND ctl[ID_PUSHLIKE + 1];
+static HWND main_window;
+static int got_command[ID_PUSHLIKE + 1][16];   /* [id][notification code & 15] */
+static int got_hscroll, got_tabchange, got_lvchanged;
+
+static char *(WINAPI *pQuery)( HWND );
+static char *(WINAPI *pInject)( HWND, const char * );
+static void (WINAPI *pFree)( char * );
+static BOOL (WINAPI *pIsTranslated)( HWND );
+
+static HWND make( const WCHAR *cls, const WCHAR *text, DWORD style, int x, int y, int w, int h, int id )
+{
+    HWND hwnd = CreateWindowExW( 0, cls, text, WS_CHILD | WS_VISIBLE | style, x, y, w, h, main_window,
+                                 (HMENU)(INT_PTR)id, GetModuleHandleW( NULL ), NULL );
+    SendMessageW( hwnd, WM_SETFONT, (WPARAM)GetStockObject( DEFAULT_GUI_FONT ), TRUE );
+    ctl[id] = hwnd;
+    return hwnd;
+}
+
+static void create_controls(void)
+{
+    LVCOLUMNW col = { LVCF_TEXT | LVCF_WIDTH };
+    LVITEMW item = { LVIF_TEXT };
+    TCITEMW tab = { TCIF_TEXT };
+    int i;
+
+    make( L"Button", L"&Push button", BS_PUSHBUTTON | WS_TABSTOP, 16, 16, 120, 24, ID_PUSH );
+    make( L"Button", L"&Default", BS_DEFPUSHBUTTON | WS_TABSTOP, 144, 16, 120, 24, ID_DEFAULT );
+    make( L"Button", L"Push-&like", BS_AUTOCHECKBOX | BS_PUSHLIKE | WS_TABSTOP, 272, 16, 120, 24, ID_PUSHLIKE );
+    make( L"Button", L"Group", BS_GROUPBOX, 16, 48, 376, 96, ID_GROUP );
+    make( L"Button", L"&Check box", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 68, 160, 20, ID_CHECK );
+    make( L"Button", L"Radio &one", BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP, 28, 92, 160, 20, ID_RADIO1 );
+    make( L"Button", L"Radio &two", BS_AUTORADIOBUTTON, 28, 114, 160, 20, ID_RADIO2 );
+    make( L"Static", L"Static text that wraps onto a second line when it is long enough.", SS_LEFT, 200, 68, 180, 40, ID_LABEL );
+    make( L"Static", NULL, SS_ETCHEDHORZ, 16, 156, 376, 2, ID_SEP );
+    make( L"Static", NULL, SS_ICON, 352, 104, 32, 32, ID_ICON );
+    SendMessageW( ctl[ID_ICON], STM_SETICON, (WPARAM)LoadIconW( NULL, (LPCWSTR)IDI_INFORMATION ), 0 );
+
+    make( L"Edit", L"Editable", ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP, 16, 170, 180, 22, ID_EDIT );
+    SendMessageW( ctl[ID_EDIT], EM_SETCUEBANNER, TRUE, (LPARAM)L"Type here" );
+    make( L"Edit", L"secret", ES_PASSWORD | ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP, 212, 170, 180, 22, ID_PASSWORD );
+    make( L"Edit", L"42", ES_NUMBER | WS_BORDER | WS_TABSTOP, 16, 200, 180, 22, ID_NUMBER );
+    make( L"Edit", L"Read-only value", ES_READONLY | WS_BORDER, 212, 200, 180, 22, ID_READONLY );
+
+    make( L"ComboBox", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 16, 232, 180, 200, ID_COMBO );
+    SendMessageW( ctl[ID_COMBO], CB_ADDSTRING, 0, (LPARAM)L"Windows 10" );
+    SendMessageW( ctl[ID_COMBO], CB_ADDSTRING, 0, (LPARAM)L"Windows 7" );
+    SendMessageW( ctl[ID_COMBO], CB_ADDSTRING, 0, (LPARAM)L"Windows XP" );
+    SendMessageW( ctl[ID_COMBO], CB_SETCURSEL, 0, 0 );
+
+    make( L"ListBox", NULL, LBS_NOTIFY | WS_BORDER | WS_VSCROLL | WS_TABSTOP, 16, 264, 180, 90, ID_LIST );
+    make( L"ListBox", NULL, LBS_NOTIFY | LBS_EXTENDEDSEL | WS_BORDER | WS_VSCROLL | WS_TABSTOP, 212, 264, 180, 90, ID_MULTI );
+    for (i = 0; i < 6; i++)
+    {
+        WCHAR text[32];
+        swprintf( text, 32, L"Item %d", i + 1 );
+        SendMessageW( ctl[ID_LIST], LB_ADDSTRING, 0, (LPARAM)text );
+        SendMessageW( ctl[ID_MULTI], LB_ADDSTRING, 0, (LPARAM)text );
+    }
+
+    make( WC_LISTVIEWW, NULL, LVS_REPORT | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP, 408, 16, 300, 150, ID_REPORT );
+    make( WC_LISTVIEWW, NULL, LVS_LIST | LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 408, 176, 300, 90, ID_LVLIST );
+    col.pszText = (WCHAR *)L"Name";
+    col.cx = 160;
+    SendMessageW( ctl[ID_REPORT], LVM_INSERTCOLUMNW, 0, (LPARAM)&col );
+    col.pszText = (WCHAR *)L"Size";
+    col.cx = 100;
+    SendMessageW( ctl[ID_REPORT], LVM_INSERTCOLUMNW, 1, (LPARAM)&col );
+    for (i = 0; i < 5; i++)
+    {
+        WCHAR name[32], size[32];
+        swprintf( name, 32, L"file%d.txt", i + 1 );
+        swprintf( size, 32, L"%d KB", (i + 1) * 12 );
+        item.iItem = i;
+        item.iSubItem = 0;
+        item.pszText = name;
+        SendMessageW( ctl[ID_REPORT], LVM_INSERTITEMW, 0, (LPARAM)&item );
+        SendMessageW( ctl[ID_LVLIST], LVM_INSERTITEMW, 0, (LPARAM)&item );
+        item.iSubItem = 1;
+        item.pszText = size;
+        SendMessageW( ctl[ID_REPORT], LVM_SETITEMTEXTW, i, (LPARAM)&item );
+    }
+
+    make( PROGRESS_CLASSW, NULL, 0, 408, 276, 300, 18, ID_PROGRESS );
+    SendMessageW( ctl[ID_PROGRESS], PBM_SETPOS, 60, 0 );
+    make( TRACKBAR_CLASSW, NULL, TBS_AUTOTICKS | WS_TABSTOP, 408, 300, 300, 30, ID_TRACK );
+    SendMessageW( ctl[ID_TRACK], TBM_SETRANGE, TRUE, MAKELPARAM( 0, 100 ) );
+    SendMessageW( ctl[ID_TRACK], TBM_SETTICFREQ, 10, 0 );
+    SendMessageW( ctl[ID_TRACK], TBM_SETPOS, TRUE, 30 );
+
+    make( WC_TABCONTROLW, NULL, WS_TABSTOP, 408, 340, 300, 60, ID_TAB );
+    tab.pszText = (WCHAR *)L"General";
+    SendMessageW( ctl[ID_TAB], TCM_INSERTITEMW, 0, (LPARAM)&tab );
+    tab.pszText = (WCHAR *)L"Graphics";
+    SendMessageW( ctl[ID_TAB], TCM_INSERTITEMW, 1, (LPARAM)&tab );
+    tab.pszText = (WCHAR *)L"Audio";
+    SendMessageW( ctl[ID_TAB], TCM_INSERTITEMW, 2, (LPARAM)&tab );
+
+    make( L"Button", L"Message box…", BS_PUSHBUTTON | WS_TABSTOP, 16, 368, 120, 24, ID_MSGBOX );
+    make( L"Button", L"Open…", BS_PUSHBUTTON | WS_TABSTOP, 144, 368, 120, 24, ID_OPEN );
+    make( L"Button", L"Save…", BS_PUSHBUTTON | WS_TABSTOP, 272, 368, 120, 24, ID_SAVE );
+}
+
+static void open_file( BOOL save )
+{
+    WCHAR file[MAX_PATH] = L"";
+    OPENFILENAMEW ofn = { sizeof(ofn) };
+    ofn.hwndOwner = main_window;
+    ofn.lpstrFilter = L"Text files\0*.txt;*.log\0All files\0*.*\0\0";
+    ofn.lpstrFile = file;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.lpstrDefExt = L"txt";
+    ofn.Flags = OFN_EXPLORER | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
+    if (save ? GetSaveFileNameW( &ofn ) : GetOpenFileNameW( &ofn ))
+        MessageBoxW( main_window, file, save ? L"Save to" : L"Opened", MB_OK | MB_ICONINFORMATION );
+}
+
+static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    switch (msg)
+    {
+    case WM_COMMAND:
+    {
+        int id = LOWORD( wparam ), code = HIWORD( wparam );
+        if (id <= ID_PUSHLIKE && lparam) got_command[id][code & 15]++;
+        if (code == BN_CLICKED && id == ID_MSGBOX)
+        {
+            int r = MessageBoxW( hwnd, L"Do you want to save the changes you made?",
+                                 L"Gallery", MB_YESNOCANCEL | MB_ICONWARNING );
+            WCHAR text[64];
+            swprintf( text, 64, L"MessageBox returned %d", r );
+            SetWindowTextW( ctl[ID_LABEL], text );
+        }
+        if (code == BN_CLICKED && (id == ID_OPEN || id == ID_SAVE)) open_file( id == ID_SAVE );
+        return 0;
+    }
+    case WM_HSCROLL:
+        if ((HWND)lparam == ctl[ID_TRACK]) got_hscroll++;
+        return 0;
+    case WM_NOTIFY:
+    {
+        NMHDR *hdr = (NMHDR *)lparam;
+        if (hdr->hwndFrom == ctl[ID_TAB] && hdr->code == TCN_SELCHANGE) got_tabchange++;
+        if (hdr->hwndFrom == ctl[ID_REPORT] && hdr->code == LVN_ITEMCHANGED) got_lvchanged++;
+        return 0;
+    }
+    case WM_DESTROY:
+        PostQuitMessage( 0 );
+        return 0;
+    }
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
+}
+
+/* ---------- self-test ---------- */
+
+static int failures, passes;
+
+static void pump( int ms )
+{
+    DWORD end = GetTickCount() + ms;
+    MSG msg;
+    while ((int)(end - GetTickCount()) > 0)
+    {
+        MsgWaitForMultipleObjects( 0, NULL, FALSE, 10, QS_ALLINPUT );
+        while (PeekMessageW( &msg, 0, 0, 0, PM_REMOVE ))
+        {
+            TranslateMessage( &msg );
+            DispatchMessageW( &msg );
+        }
+    }
+}
+
+static void check( BOOL ok, const char *what )
+{
+    printf( "%s  %s\n", ok ? "PASS" : "FAIL", what );
+    fflush( stdout );
+    if (ok) passes++; else failures++;
+}
+
+static BOOL query_has( HWND hwnd, const char *needle )
+{
+    char *q = pQuery( hwnd );
+    BOOL ok = q && strstr( q, needle );
+    if (!ok) printf( "      query: %s\n", q ? q : "(null)" );
+    pFree( q );
+    return ok;
+}
+
+static void inject( HWND hwnd, const char *event )
+{
+    char *r = pInject( hwnd, event );
+    if (!r || !strstr( r, "ok" )) printf( "      inject %s: %s\n", event, r ? r : "(null)" );
+    pFree( r );
+}
+
+static void CALLBACK press_alert_button( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    KillTimer( hwnd, id );
+    inject( NULL, "{\"t\":\"alertButton\",\"v\":1}" );
+}
+
+static void CALLBACK choose_file( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    KillTimer( hwnd, id );
+    inject( NULL, "{\"t\":\"choose\",\"s\":\"/tmp/w2s-gallery-test.txt\"}" );
+}
+
+static int selftest(void)
+{
+    static const int ids[] = { ID_PUSH, ID_DEFAULT, ID_PUSHLIKE, ID_GROUP, ID_CHECK, ID_RADIO1, ID_RADIO2, ID_LABEL,
+                               ID_SEP, ID_ICON, ID_EDIT, ID_PASSWORD, ID_NUMBER, ID_READONLY, ID_COMBO, ID_LIST,
+                               ID_MULTI, ID_REPORT, ID_LVLIST, ID_PROGRESS, ID_TRACK, ID_TAB };
+    HMODULE w2s = GetModuleHandleW( L"win32swiftui.dll" );
+    WCHAR text[256], file[MAX_PATH] = L"";
+    OPENFILENAMEW ofn = { sizeof(ofn) };
+    char what[128];
+    unsigned int i;
+    int r;
+
+    check( w2s != NULL, "win32swiftui.dll is loaded (WINE_MNC_NATIVE_UI on)" );
+    if (!w2s) return failures;
+    pQuery = (void *)GetProcAddress( w2s, "W2SDebugQuery" );
+    pInject = (void *)GetProcAddress( w2s, "W2SDebugInject" );
+    pFree = (void *)GetProcAddress( w2s, "W2SDebugFree" );
+    pIsTranslated = (void *)GetProcAddress( w2s, "W2SIsTranslated" );
+    pump( 1500 );
+
+    for (i = 0; i < ARRAYSIZE(ids); i++)
+    {
+        snprintf( what, sizeof(what), "control %d is translated and in its window", ids[i] );
+        check( pIsTranslated( ctl[ids[i]] ) && query_has( ctl[ids[i]], "\"inWindow\":true" ), what );
+    }
+
+    /* Win32 -> native */
+    SendMessageW( ctl[ID_CHECK], BM_SETCHECK, BST_CHECKED, 0 );
+    pump( 150 );
+    check( query_has( ctl[ID_CHECK], "\"checked\":1" ), "BM_SETCHECK reaches the native check box" );
+    SetWindowTextW( ctl[ID_EDIT], L"from Win32" );
+    pump( 150 );
+    check( query_has( ctl[ID_EDIT], "from Win32" ), "WM_SETTEXT reaches the native text field" );
+    SendMessageW( ctl[ID_COMBO], CB_SETCURSEL, 2, 0 );
+    pump( 150 );
+    check( query_has( ctl[ID_COMBO], "\"selection\":2" ), "CB_SETCURSEL reaches the native pop-up" );
+    SendMessageW( ctl[ID_LIST], LB_SETCURSEL, 3, 0 );
+    pump( 150 );
+    check( query_has( ctl[ID_LIST], "\"selection\":3" ), "LB_SETCURSEL reaches the native list" );
+    SendMessageW( ctl[ID_PROGRESS], PBM_SETPOS, 80, 0 );
+    pump( 150 );
+    check( query_has( ctl[ID_PROGRESS], "\"value\":80" ), "PBM_SETPOS reaches the native progress bar" );
+    SendMessageW( ctl[ID_TRACK], TBM_SETPOS, TRUE, 70 );
+    pump( 150 );
+    check( query_has( ctl[ID_TRACK], "\"value\":70" ), "TBM_SETPOS reaches the native slider" );
+    SendMessageW( ctl[ID_TAB], TCM_SETCURSEL, 2, 0 );
+    pump( 150 );
+    check( query_has( ctl[ID_TAB], "\"selection\":2" ), "TCM_SETCURSEL reaches the native tabs" );
+    ShowWindow( ctl[ID_PUSH], SW_HIDE );
+    pump( 150 );
+    check( query_has( ctl[ID_PUSH], "\"hidden\":true" ), "hiding the control hides the native view" );
+    ShowWindow( ctl[ID_PUSH], SW_SHOW );
+    pump( 150 );
+    check( query_has( ctl[ID_PUSH], "\"hidden\":false" ), "showing it shows the native view again" );
+    EnableWindow( ctl[ID_DEFAULT], FALSE );
+    pump( 150 );
+    check( query_has( ctl[ID_DEFAULT], "\"enabled\":false" ), "EnableWindow reaches the native button" );
+    EnableWindow( ctl[ID_DEFAULT], TRUE );
+
+    /* native -> Win32 */
+    inject( ctl[ID_PUSH], "{\"t\":\"click\"}" );
+    pump( 200 );
+    check( got_command[ID_PUSH][BN_CLICKED] == 1, "native click -> BN_CLICKED" );
+    inject( ctl[ID_CHECK], "{\"t\":\"click\"}" );
+    pump( 200 );
+    check( SendMessageW( ctl[ID_CHECK], BM_GETCHECK, 0, 0 ) == BST_UNCHECKED, "native check box click toggles the Win32 state" );
+    inject( ctl[ID_RADIO2], "{\"t\":\"click\"}" );
+    pump( 200 );
+    check( SendMessageW( ctl[ID_RADIO2], BM_GETCHECK, 0, 0 ) == BST_CHECKED &&
+           query_has( ctl[ID_RADIO2], "\"checked\":1" ), "native radio click checks it" );
+    inject( ctl[ID_EDIT], "{\"t\":\"text\",\"s\":\"typed natively\"}" );
+    pump( 200 );
+    GetWindowTextW( ctl[ID_EDIT], text, ARRAYSIZE(text) );
+    check( !wcscmp( text, L"typed natively" ) && got_command[ID_EDIT][EN_CHANGE & 15] > 0,
+           "native typing -> Win32 text + EN_CHANGE" );
+    inject( ctl[ID_NUMBER], "{\"t\":\"text\",\"s\":\"42x\"}" );
+    pump( 200 );
+    GetWindowTextW( ctl[ID_NUMBER], text, ARRAYSIZE(text) );
+    check( query_has( ctl[ID_NUMBER], "\"text\"" ), "ES_NUMBER field answers after native typing" );
+    inject( ctl[ID_COMBO], "{\"t\":\"select\",\"v\":1}" );
+    pump( 200 );
+    check( SendMessageW( ctl[ID_COMBO], CB_GETCURSEL, 0, 0 ) == 1 && got_command[ID_COMBO][CBN_SELCHANGE & 15] > 0,
+           "native pop-up choice -> CB_GETCURSEL + CBN_SELCHANGE" );
+    inject( ctl[ID_LIST], "{\"t\":\"select\",\"v\":5}" );
+    pump( 200 );
+    check( SendMessageW( ctl[ID_LIST], LB_GETCURSEL, 0, 0 ) == 5 && got_command[ID_LIST][LBN_SELCHANGE & 15] > 0,
+           "native list selection -> LB_GETCURSEL + LBN_SELCHANGE" );
+    inject( ctl[ID_MULTI], "{\"t\":\"selectMany\",\"a\":[1,3]}" );
+    pump( 200 );
+    check( SendMessageW( ctl[ID_MULTI], LB_GETSELCOUNT, 0, 0 ) == 2, "native multiple selection -> LB_GETSELCOUNT 2" );
+    inject( ctl[ID_REPORT], "{\"t\":\"selectMany\",\"a\":[2]}" );
+    pump( 200 );
+    check( SendMessageW( ctl[ID_REPORT], LVM_GETNEXTITEM, -1, LVNI_SELECTED ) == 2 && got_lvchanged > 0,
+           "native table selection -> LVN_ITEMCHANGED" );
+    inject( ctl[ID_TRACK], "{\"t\":\"valueEnd\",\"v\":40}" );
+    pump( 200 );
+    check( SendMessageW( ctl[ID_TRACK], TBM_GETPOS, 0, 0 ) == 40 && got_hscroll > 0, "native slider -> TBM_GETPOS + WM_HSCROLL" );
+    inject( ctl[ID_TAB], "{\"t\":\"select\",\"v\":1}" );
+    pump( 200 );
+    check( SendMessageW( ctl[ID_TAB], TCM_GETCURSEL, 0, 0 ) == 1 && got_tabchange > 0, "native tab -> TCN_SELCHANGE" );
+
+    /* message box -> NSAlert: press the second button ("No") */
+    SetTimer( main_window, 1, 800, press_alert_button );
+    r = MessageBoxW( main_window, L"Save changes?", L"Gallery test", MB_YESNO | MB_ICONQUESTION );
+    check( r == IDNO, "native alert returns IDNO for its second button" );
+
+    /* open panel: choose a Unix path, get a drive path back */
+    CloseHandle( CreateFileW( L"Z:\\tmp\\w2s-gallery-test.txt", GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL ) );
+    ofn.hwndOwner = main_window;
+    ofn.lpstrFilter = L"Text files\0*.txt\0\0";
+    ofn.lpstrFile = file;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_EXPLORER | OFN_NOCHANGEDIR;
+    SetTimer( main_window, 2, 1200, choose_file );
+    r = GetOpenFileNameW( &ofn );
+    printf( "      open panel returned %d: %ls\n", r, file );
+    check( r && file[1] == ':' && wcsstr( file, L"w2s-gallery-test.txt" ) && ofn.nFileOffset > 0,
+           "native open panel returns a Windows path" );
+
+    printf( "%d passed, %d failed\n", passes, failures );
+    return failures;
+}
+
+int WINAPI wWinMain( HINSTANCE inst, HINSTANCE prev, WCHAR *cmdline, int show )
+{
+    INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_WIN95_CLASSES | ICC_TAB_CLASSES | ICC_BAR_CLASSES };
+    WNDCLASSW wc = { 0 };
+    MSG msg;
+    int ret = 0;
+
+    InitCommonControlsEx( &icc );
+    wc.lpfnWndProc = wndproc;
+    wc.hInstance = inst;
+    wc.hCursor = LoadCursorW( NULL, (LPCWSTR)IDC_ARROW );
+    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    wc.lpszClassName = L"W2SGallery";
+    RegisterClassW( &wc );
+    main_window = CreateWindowExW( 0, L"W2SGallery", L"Win32-to-SwiftUI gallery", WS_OVERLAPPEDWINDOW,
+                                   CW_USEDEFAULT, CW_USEDEFAULT, 740, 450, NULL, NULL, inst, NULL );
+    create_controls();
+    ShowWindow( main_window, SW_SHOW );
+    UpdateWindow( main_window );
+
+    if (wcsstr( cmdline, L"/selftest" ))
+    {
+        ret = selftest();
+        if (!wcsstr( cmdline, L"/stay" ))
+        {
+            DestroyWindow( main_window );
+            return ret;
+        }
+    }
+    while (GetMessageW( &msg, NULL, 0, 0 ))
+    {
+        TranslateMessage( &msg );
+        DispatchMessageW( &msg );
+    }
+    return ret;
+}

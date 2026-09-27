@@ -1,0 +1,9 @@
+LIBRARY win32swiftui.dll
+EXPORTS
+    W2SWindowCreated
+    W2SMessageBox
+    W2SFileDialog
+    W2SDebugQuery
+    W2SDebugInject
+    W2SDebugFree
+    W2SIsTranslated
