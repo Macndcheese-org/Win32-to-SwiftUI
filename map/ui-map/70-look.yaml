@@ -1,10 +1,19 @@
 # System colours, fonts and the visual parts that aren't a control of their own.
 #
-# Colours: wine's system colour table (GetSysColor, HKCU\Control Panel\Colors) is written
-# from these NSColors resolved against NSApp.effectiveAppearance, and rewritten with
-# WM_SYSCOLORCHANGE + WM_THEMECHANGED on NSSystemColorsDidChangeNotification and on
-# appearance changes. Whatever an app still draws itself (owner-draw, custom windows)
-# then follows Light/Dark mode and the accent colour.
+# Colours: wine's system colour table (GetSysColor) is written from these NSColors resolved
+# against NSApp.effectiveAppearance (a translucent one as it shows on the window background),
+# and written again on NSSystemColorsDidChangeNotification (the accent colour) and on
+# appearance changes: the runtime calls SetSysColors, which sends WM_SYSCOLORCHANGE and
+# repaints, and sends WM_THEMECHANGED to the process's windows. SetSysColors leaves the saved
+# colours (HKCU\Control Panel\Colors) alone, so the change lasts for the wine session.
+# Whatever an app still draws itself (owner-draw, custom windows) then follows Light/Dark
+# mode and the accent colour.
+#
+# Each translated control takes the appearance that reads on what is painted behind it:
+# its parent's WM_CTLCOLORSTATIC brush, which is wine's COLOR_3DFACE for a plain dialog
+# (so it follows macOS) and the app's own colour where the app paints a page itself (a white
+# installer page keeps light controls in Dark Mode). A hollow brush leaves the control on
+# the window's appearance.
 
 flags:
   COLOR_WINDOW: {nscolor: "NSColor.textBackgroundColor"}

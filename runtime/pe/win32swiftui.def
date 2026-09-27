@@ -11,3 +11,7 @@ EXPORTS
     W2SItemDialog
     W2SBrowseForFolder
     W2STrackPopupMenu
+    W2SChooseColor
+    W2SChooseFont
+    W2SPrintDlg
+    W2SPrintDlgEx

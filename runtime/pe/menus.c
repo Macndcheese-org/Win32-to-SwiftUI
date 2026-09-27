@@ -36,8 +36,6 @@ struct w2s_frame
     int shrink;             /* menu bar height to take off a fixed-size window, pending */
 };
 
-#define W2S_WAKE_SHRINK 2   /* w2s_wake_message wparam on a frame: apply frame->shrink */
-
 /* ---------- snapshot ---------- */
 
 static void json_menu( struct json *j, HMENU menu, int depth );
@@ -117,7 +115,7 @@ static void send_menu( struct w2s_frame *frame, BOOL force )
         return;
     }
     params.handle = frame->handle;
-    params.json = snap;
+    params.json = W2S_PTR( snap );
     params.json_len = strlen( snap );
     w2s_call( unix_w2s_control_update, &params );
     if (frame->last) HeapFree( GetProcessHeap(), 0, frame->last );
@@ -178,8 +176,8 @@ static BOOL create_menubar( struct w2s_frame *frame )
     params.window = frame->host.window;
     params.post_wake = frame->host.post_wake;
     params.hwnd = (UINT_PTR)frame->hwnd;
-    params.entry = "menubar";
-    params.json = snap;
+    params.entry = W2S_PTR( "menubar" );
+    params.json = W2S_PTR( snap );
     params.json_len = strlen( snap );
     params.handle = 0;
     w2s_call( unix_w2s_control_create, &params );
@@ -226,14 +224,14 @@ static void apply_menu_events( struct w2s_frame *frame )
     int i, count;
 
     params.handle = frame->handle;
-    params.buffer = small;
+    params.buffer = W2S_PTR( small );
     params.size = sizeof(small);
     params.len = 0;
     w2s_call( unix_w2s_pop_events, &params );
     if (params.len > params.size)
     {
         buf = HeapAlloc( GetProcessHeap(), 0, params.len );
-        params.buffer = buf;
+        params.buffer = W2S_PTR( buf );
         params.size = params.len;
         w2s_call( unix_w2s_pop_events, &params );
     }
@@ -273,6 +271,7 @@ static LRESULT CALLBACK frame_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     if (msg == w2s_wake_message && w2s_wake_message)
     {
         if (wparam == W2S_WAKE_SHRINK) shrink_frame( frame );
+        else if (wparam == W2S_WAKE_LOOK) w2s_sync_look();
         else if (frame->handle) apply_menu_events( frame );
         return 0;
     }

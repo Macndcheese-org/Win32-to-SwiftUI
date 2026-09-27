@@ -132,6 +132,13 @@ void w2s_common_snapshot( struct w2s_control *ctl, struct json *j )
     GetClientRect( ctl->hwnd, &rc );
     json_int( j, "widthPx", rc.right );
     json_int( j, "heightPx", rc.bottom );
+    /* light or dark as what is behind it (look.c) */
+    if (ctl->backdrop_stale)
+    {
+        ctl->backdrop_stale = FALSE;
+        ctl->backdrop = w2s_backdrop( ctl->hwnd );
+    }
+    if (ctl->backdrop != CLR_INVALID) json_int( j, "backdrop", ctl->backdrop );
     if ((help = w2s_tool_text( ctl->hwnd )))
     {
         json_str( j, "help", help );
@@ -191,7 +198,7 @@ void w2s_push( struct w2s_control *ctl, BOOL force )
             if (want) DeleteObject( want );
         }
         params.handle = ctl->handle;
-        params.json = snap;
+        params.json = W2S_PTR( snap );
         params.json_len = strlen( snap );
         w2s_call( unix_w2s_control_update, &params );
         if (ctl->last) HeapFree( GetProcessHeap(), 0, ctl->last );
@@ -215,7 +222,7 @@ const char *w2s_native_state( struct w2s_control *ctl, BOOL *changed )
     if (!ctl->handle) return NULL;
     params.handle = ctl->handle;
     params.version = ctl->native_version;
-    params.buffer = ctl->native;
+    params.buffer = W2S_PTR( ctl->native );
     params.size = ctl->native ? ctl->native_size : 0;
     params.len = 0;
     w2s_call( unix_w2s_control_state, &params );
@@ -227,7 +234,7 @@ const char *w2s_native_state( struct w2s_control *ctl, BOOL *changed )
         ctl->native = buf;
         ctl->native_size = params.len + 256;
         params.version = ctl->native_version;
-        params.buffer = ctl->native;
+        params.buffer = W2S_PTR( ctl->native );
         params.size = ctl->native_size;
         params.len = 0;
         w2s_call( unix_w2s_control_state, &params );
@@ -264,14 +271,14 @@ static void apply_events( struct w2s_control *ctl )
 
     if (!ctl->handle) return;
     params.handle = ctl->handle;
-    params.buffer = small;
+    params.buffer = W2S_PTR( small );
     params.size = sizeof(small);
     params.len = 0;
     w2s_call( unix_w2s_pop_events, &params );
     if (params.len > params.size)
     {
         buf = HeapAlloc( GetProcessHeap(), 0, params.len );
-        params.buffer = buf;
+        params.buffer = W2S_PTR( buf );
         params.size = params.len;
         w2s_call( unix_w2s_pop_events, &params );
     }
@@ -359,6 +366,7 @@ static BOOL activate( struct w2s_control *ctl, const struct w2s_kind *kind )
 
     if (!set_kind( ctl, kind )) return FALSE;
     ctl->active = TRUE;
+    ctl->backdrop_stale = TRUE;
     clip_wine_drawing( ctl, TRUE );
 
     if (!w2s_get_host( ctl->hwnd, &ctl->host ))
@@ -372,8 +380,8 @@ static BOOL activate( struct w2s_control *ctl, const struct w2s_kind *kind )
     params.window = ctl->host.window;
     params.post_wake = ctl->host.post_wake;
     params.hwnd = (UINT_PTR)ctl->hwnd;
-    params.entry = kind->entry;
-    params.json = snap;
+    params.entry = W2S_PTR( kind->entry );
+    params.json = W2S_PTR( snap );
     params.json_len = strlen( snap );
     params.handle = 0;
     w2s_call( unix_w2s_control_create, &params );
@@ -385,6 +393,9 @@ static BOOL activate( struct w2s_control *ctl, const struct w2s_kind *kind )
         return FALSE;
     }
     TRACE( "attached %p as %s: %s\n", ctl->hwnd, kind->entry, snap );
+    /* the native side has resolved wine's colours since we last wrote them:
+     * write them once the control's creation is over */
+    if (w2s_look_pending()) PostMessageW( ctl->hwnd, w2s_wake_message, W2S_WAKE_LOOK, 0 );
     return TRUE;
 }
 
@@ -441,6 +452,7 @@ static LRESULT CALLBACK subclass_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
     if (msg == w2s_wake_message && w2s_wake_message)
     {
         if (wparam == W2S_WAKE_REFRESH) w2s_push( ctl, FALSE );
+        else if (wparam == W2S_WAKE_LOOK) w2s_sync_look();
         else apply_events( ctl );
         return 0;
     }
@@ -540,6 +552,7 @@ void WINAPI W2SWindowCreated( HWND hwnd )
     }
     if (!(GetWindowLongW( hwnd, GWL_STYLE ) & WS_CHILD))
     {
+        w2s_sync_look();                /* look.c: wine's colours follow macOS */
         w2s_frame_created( hwnd );      /* menus.c: its menu goes to the Mac menu bar */
         return;
     }
@@ -563,10 +576,11 @@ static char *debug_call( HWND hwnd, const char *json )
     params.handle = 0;
     if (hwnd && ctl && ctl->handle) params.handle = ctl->handle;
     else if (hwnd && !(params.handle = w2s_frame_handle( hwnd ))) return NULL;
-    params.json = json;
+    params.json = W2S_PTR( json );
     params.json_len = strlen( json );
     params.size = 65536;
-    params.buffer = buf = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, params.size );
+    buf = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, params.size );
+    params.buffer = W2S_PTR( buf );
     params.len = 0;
     w2s_call( unix_w2s_debug, &params );
     return buf;

@@ -17,6 +17,7 @@
 #include <commdlg.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <winspool.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -34,6 +35,8 @@ enum
     ID_DATETIME, ID_MONTHCAL, ID_STATUS, ID_LVCHECK, ID_LVICON, ID_TOOLTIP,
     /* dialogs (milestone 2) */
     ID_TASKDLG, ID_FOLDER, ID_COLOR, ID_FONT, ID_PRINT, ID_ITEMDLG, ID_PROPSHEET, ID_WIZARD,
+    /* light and dark */
+    ID_WHITEPANEL, ID_WHITECHECK,
     ID_LAST
 };
 
@@ -44,6 +47,9 @@ static int got_hscroll, got_tabchange, got_lvchanged, got_dropdown, got_status_c
 static int got_menu_new, got_initmenupopup, status_bar_checked = 1;
 static int got_expanding, got_treesel, got_deltapos, got_vscroll, got_datechange, got_mcselchange, got_mcselect;
 static int got_dispinfo, got_check_changed, got_icon_changed, got_icon_activate;
+static int got_wiznext, got_wizback;
+static int got_syscolorchange, got_themechanged;
+static HWND test_wizard;
 static HTREEITEM tree_fruits, tree_apple, tree_pear, tree_veg;
 static BOOL in_selftest;
 
@@ -414,6 +420,13 @@ static void create_controls2(void)
             make( L"Button", titles[i], BS_PUSHBUTTON | WS_TABSTOP, 16 + i * 128, 544, 120, 24, ID_TASKDLG + i );
     }
     make( L"Static", NULL, SS_ETCHEDFRAME, 724, 112, 120, 60, ID_FRAME );
+    {
+        HWND panel = make( L"W2SWhitePanel", NULL, 0, 16, 580, 376, 56, ID_WHITEPANEL );
+        ctl[ID_WHITECHECK] = CreateWindowExW( 0, L"Button", L"A check box on a page the app paints white",
+                                              WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX, 12, 18, 340, 20,
+                                              panel, (HMENU)ID_WHITECHECK, GetModuleHandleW( NULL ), NULL );
+        SendMessageW( ctl[ID_WHITECHECK], WM_SETFONT, (WPARAM)GetStockObject( DEFAULT_GUI_FONT ), TRUE );
+    }
     make( L"Static", NULL, SS_GRAYRECT, 852, 112, 40, 60, ID_RECT );
 
     {
@@ -506,8 +519,206 @@ static HWND property_sheet( int pages, BOOL modeless )
     psh.nPages = pages;
     psh.phpage = hpages;
     sheet = (HWND)PropertySheetW( &psh );
-    for (i = 0; i < pages; i++) free( tmpl[i] );
+    /* a page is created when first shown: a modeless sheet's templates must
+     * outlive it (they're small; the test leaks them) */
+    if (!modeless) for (i = 0; i < pages; i++) free( tmpl[i] );
     return modeless ? sheet : NULL;
+}
+
+/* a Wizard97 wizard: a welcome page without a header, then two with one */
+static const WCHAR *wizard_titles[] = { L"Introduction", L"License", L"Install" };
+static const WCHAR *wizard_headers[] = { NULL, L"License agreement", L"Ready to install" };
+static const WCHAR *wizard_subheaders[] = { NULL, L"Please read the terms.", L"Gallery will be installed." };
+
+static INT_PTR CALLBACK wizard_page_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    static const DWORD buttons[] = { PSWIZB_NEXT, PSWIZB_BACK | PSWIZB_NEXT, PSWIZB_BACK | PSWIZB_FINISH };
+
+    if (msg == WM_INITDIALOG)
+    {
+        SetWindowLongPtrW( hwnd, DWLP_USER, ((PROPSHEETPAGEW *)lparam)->lParam );
+        return TRUE;
+    }
+    if (msg == WM_NOTIFY)
+    {
+        NMHDR *hdr = (NMHDR *)lparam;
+        int index = (int)GetWindowLongPtrW( hwnd, DWLP_USER );
+
+        switch (hdr->code)
+        {
+        case PSN_SETACTIVE:
+            SendMessageW( GetParent( hwnd ), PSM_SETWIZBUTTONS, 0, buttons[index] );
+            break;
+        case PSN_WIZNEXT:
+            got_wiznext++;
+            break;
+        case PSN_WIZBACK:
+            got_wizback++;
+            break;
+        }
+        SetWindowLongPtrW( hwnd, DWLP_MSGRESULT, 0 );
+        return TRUE;
+    }
+    return FALSE;
+}
+
+/* what a native wizard's Back or Next should display: wine's text without its
+ * arrow, or the macOS word when wine's is the English one */
+static const char *wizard_word( HWND button, const char *english, const char *mac )
+{
+    static char needle[2][160];
+    static int n;
+    WCHAR text[64], *p = text, *end;
+    char *out = needle[n++ % 2], word[128];
+
+    GetWindowTextW( button, text, ARRAYSIZE(text) );
+    while (*p == '<' || *p == ' ') p++;
+    end = p + wcslen( p );
+    while (end > p && (end[-1] == '>' || end[-1] == ' ')) *--end = 0;
+    WideCharToMultiByte( CP_UTF8, 0, p, -1, word, sizeof(word), NULL, NULL );
+    snprintf( out, sizeof(needle[0]), "\"display\":\"%s\"",
+              !strcmp( word[0] == '&' ? word + 1 : word, english ) ? mac : word );
+    return out;
+}
+
+/* PSH_MODELESS: returns the wizard; otherwise runs it and returns NULL */
+static HWND wizard_sheet( BOOL modeless )
+{
+    HPROPSHEETPAGE hpages[3];
+    DLGTEMPLATE *tmpl[3];
+    PROPSHEETHEADERW psh = { sizeof(psh) };
+    HWND sheet;
+    int i;
+
+    for (i = 0; i < 3; i++)
+    {
+        PROPSHEETPAGEW psp = { sizeof(psp) };
+        WCHAR text[64];
+        swprintf( text, 64, L"This is the %ls step.", wizard_titles[i] );
+        tmpl[i] = page_template( text );
+        psp.dwFlags = PSP_DLGINDIRECT | PSP_USETITLE;
+        if (wizard_headers[i]) psp.dwFlags |= PSP_USEHEADERTITLE | PSP_USEHEADERSUBTITLE;
+        else psp.dwFlags |= PSP_HIDEHEADER;
+        psp.pResource = tmpl[i];
+        psp.pszTitle = wizard_titles[i];
+        psp.pszHeaderTitle = wizard_headers[i];
+        psp.pszHeaderSubTitle = wizard_subheaders[i];
+        psp.pfnDlgProc = wizard_page_proc;
+        psp.lParam = i;
+        hpages[i] = CreatePropertySheetPageW( &psp );
+    }
+    psh.dwFlags = PSH_WIZARD97 | PSH_HEADER | (modeless ? PSH_MODELESS : 0);
+    psh.hwndParent = main_window;
+    psh.pszCaption = L"Gallery installer";
+    psh.nPages = 3;
+    psh.phpage = hpages;
+    sheet = (HWND)PropertySheetW( &psh );
+    /* as in property_sheet(): a modeless wizard creates its pages later */
+    if (!modeless) for (i = 0; i < 3; i++) free( tmpl[i] );
+    return modeless ? sheet : NULL;
+}
+
+/* ---------- colour, font and print ---------- */
+
+static COLORREF custom_colors[16];
+static int color_runs, font_runs, print_runs;
+static BOOL color_ok, font_ok, print_ok;
+static CHOOSECOLORW last_color;
+static CHOOSEFONTW last_cf;
+static LOGFONTW last_font;
+static PRINTDLGW last_print;
+
+static void choose_color(void)
+{
+    CHOOSECOLORW cc = { sizeof(cc) };
+    WCHAR text[64];
+
+    cc.hwndOwner = main_window;
+    cc.rgbResult = RGB( 10, 20, 30 );
+    cc.lpCustColors = custom_colors;
+    cc.Flags = CC_RGBINIT | CC_FULLOPEN;
+    color_ok = ChooseColorW( &cc );
+    last_color = cc;
+    color_runs++;
+    swprintf( text, 64, L"Colour: %d, #%06lx", color_ok, cc.rgbResult );
+    SetWindowTextW( ctl[ID_LABEL], text );
+}
+
+static void choose_font( DWORD extra_flags )
+{
+    CHOOSEFONTW cf = { sizeof(cf) };
+    LOGFONTW lf = { 0 };
+    HDC hdc = GetDC( NULL );
+    WCHAR text[96];
+
+    lf.lfHeight = -MulDiv( 12, GetDeviceCaps( hdc, LOGPIXELSY ), 72 );
+    ReleaseDC( NULL, hdc );
+    lf.lfWeight = FW_NORMAL;
+    wcscpy( lf.lfFaceName, L"Arial" );
+    cf.hwndOwner = main_window;
+    cf.lpLogFont = &lf;
+    cf.Flags = CF_SCREENFONTS | CF_EFFECTS | CF_INITTOLOGFONTSTRUCT | extra_flags;
+    font_ok = ChooseFontW( &cf );
+    last_cf = cf;
+    last_font = lf;
+    font_runs++;
+    swprintf( text, 96, L"Font: %d, %ls %d.%d pt", font_ok, lf.lfFaceName, cf.iPointSize / 10, cf.iPointSize % 10 );
+    SetWindowTextW( ctl[ID_LABEL], text );
+}
+
+static void print_dialog(void)
+{
+    PRINTDLGW pd = { sizeof(pd) };
+    WCHAR text[160];
+
+    pd.hwndOwner = main_window;
+    pd.Flags = PD_RETURNDC | PD_NOSELECTION;
+    pd.nMinPage = 1;
+    pd.nMaxPage = 9;
+    pd.nFromPage = 1;
+    pd.nToPage = 9;
+    pd.nCopies = 1;
+    print_ok = PrintDlgW( &pd );
+    last_print = pd;
+    print_runs++;
+    if (print_ok && pd.hDevNames)
+    {
+        DEVNAMES *dn = GlobalLock( pd.hDevNames );
+        swprintf( text, 160, L"Print: %ls, %d copies, pages %d-%d", (WCHAR *)dn + dn->wDeviceOffset,
+                  pd.nCopies, pd.nFromPage, pd.nToPage );
+        GlobalUnlock( pd.hDevNames );
+    }
+    else swprintf( text, 160, L"Print: %d (%#lx)", print_ok, CommDlgExtendedError() );
+    SetWindowTextW( ctl[ID_LABEL], text );
+    if (!in_selftest)
+    {
+        if (pd.hDC) DeleteDC( pd.hDC );
+        if (pd.hDevMode) GlobalFree( pd.hDevMode );
+        if (pd.hDevNames) GlobalFree( pd.hDevNames );
+    }
+}
+
+/* a page the app paints white itself, whatever the system colours say */
+static LRESULT CALLBACK white_panel_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    switch (msg)
+    {
+    case WM_ERASEBKGND:
+    {
+        RECT rc;
+        GetClientRect( hwnd, &rc );
+        FillRect( (HDC)wparam, &rc, GetStockObject( WHITE_BRUSH ) );
+        return 1;
+    }
+    case WM_CTLCOLORSTATIC:
+    case WM_CTLCOLORBTN:
+        SetTextColor( (HDC)wparam, RGB( 0, 0, 0 ) );
+        SetBkColor( (HDC)wparam, RGB( 255, 255, 255 ) );
+        return (LRESULT)GetStockObject( WHITE_BRUSH );
+    case WM_COMMAND:
+        return SendMessageW( main_window, msg, wparam, lparam );    /* counted there */
+    }
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
 }
 
 static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
@@ -535,6 +746,12 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                 SetWindowTextW( ctl[ID_LABEL], path );
         }
         if (code == BN_CLICKED && id == ID_PROPSHEET && !in_selftest) property_sheet( 7, FALSE );
+        /* the self-test opens it modeless, to drive it */
+        if (code == BN_CLICKED && id == ID_WIZARD) test_wizard = wizard_sheet( in_selftest );
+        if (code == BN_CLICKED && id == ID_COLOR) choose_color();
+        /* the self-test checks that a proportional font can't be chosen then */
+        if (code == BN_CLICKED && id == ID_FONT) choose_font( in_selftest ? CF_FIXEDPITCHONLY : 0 );
+        if (code == BN_CLICKED && id == ID_PRINT) print_dialog();
         if (code == BN_CLICKED && id == ID_TASKDLG && !in_selftest)
         {
             int button = 0, radio = 0;
@@ -548,6 +765,12 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     }
     case WM_SIZE:
         if (ctl[ID_STATUS]) SendMessageW( ctl[ID_STATUS], WM_SIZE, 0, 0 );
+        return 0;
+    case WM_SYSCOLORCHANGE:
+        got_syscolorchange++;
+        return 0;
+    case WM_THEMECHANGED:
+        got_themechanged++;
         return 0;
     case WM_DRAWITEM:
     {
@@ -746,6 +969,204 @@ static void CALLBACK choose_file( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
 {
     KillTimer( hwnd, id );
     inject( NULL, "{\"t\":\"choose\",\"s\":\"/tmp/w2s-gallery-test.txt\"}" );
+}
+
+static void pump_until( const int *counter, int target, int ms )
+{
+    DWORD end = GetTickCount() + ms;
+    while (*counter < target && (int)(end - GetTickCount()) > 0) pump( 50 );
+}
+
+static void CALLBACK panel_cancel( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    KillTimer( hwnd, id );
+    inject( NULL, "{\"t\":\"cancel\"}" );
+}
+
+static BOOL color_native_ok, font_native_ok, print_native_ok;
+
+static void CALLBACK color_panel_ok( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    KillTimer( hwnd, id );
+    color_native_ok = query_has( NULL, "\"color\":[10,20,30]" ) && query_has( NULL, "\"custom\":[1,2,3," ) &&
+                      query_has( NULL, "\"alpha\":false" );
+    inject( NULL, "{\"t\":\"custom\",\"a\":[1,200,0,0]}" );
+    inject( NULL, "{\"t\":\"pick\",\"a\":[200,100,50]}" );
+    inject( NULL, "{\"t\":\"ok\"}" );
+}
+
+static void CALLBACK font_panel_ok( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    KillTimer( hwnd, id );
+    /* CF_FIXEDPITCHONLY: Arial can't be taken, Menlo can */
+    font_native_ok = query_has( NULL, "\"family\":\"Arial\"" ) && query_has( NULL, "\"size\":12" ) &&
+                     query_has( NULL, "\"valid\":false" ) && query_has( NULL, "\"effects\":true" );
+    inject( NULL, "{\"t\":\"font\",\"s\":\"Menlo\",\"v\":14}" );
+    font_native_ok = font_native_ok && query_has( NULL, "\"valid\":true" );
+    inject( NULL, "{\"t\":\"underline\",\"v\":1}" );
+    inject( NULL, "{\"t\":\"pick\",\"a\":[0,0,255]}" );
+    inject( NULL, "{\"t\":\"ok\"}" );
+}
+
+static void CALLBACK print_panel_ok( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    KillTimer( hwnd, id );
+    print_native_ok = query_has( NULL, "\"open\":true" ) && query_has( NULL, "\"copies\":1" );
+    inject( NULL, "{\"t\":\"print\",\"copies\":2,\"from\":2,\"to\":3}" );
+}
+
+static int CALLBACK font_exists_proc( const LOGFONTW *lf, const TEXTMETRICW *tm, DWORD type, LPARAM lparam )
+{
+    *(BOOL *)lparam = TRUE;
+    return 0;
+}
+
+static BOOL font_exists( const WCHAR *face )
+{
+    LOGFONTW lf = { 0 };
+    HDC hdc = GetDC( NULL );
+    BOOL found = FALSE;
+
+    lf.lfCharSet = DEFAULT_CHARSET;
+    wcscpy( lf.lfFaceName, face );
+    EnumFontFamiliesExW( hdc, &lf, font_exists_proc, (LPARAM)&found, 0 );
+    ReleaseDC( NULL, hdc );
+    return found;
+}
+
+static BOOL near_rgb( COLORREF a, COLORREF b )
+{
+    return abs( GetRValue( a ) - GetRValue( b ) ) <= 1 && abs( GetGValue( a ) - GetGValue( b ) ) <= 1 &&
+           abs( GetBValue( a ) - GetBValue( b ) ) <= 1;
+}
+
+static BOOL is_dark( COLORREF c )
+{
+    return 0.2126 * GetRValue( c ) + 0.7152 * GetGValue( c ) + 0.0722 * GetBValue( c ) < 0.5 * 255;
+}
+
+/* Light and Dark mode: wine's colours from NSColor, each control light or dark as what's behind it */
+static void selftest_look(void)
+{
+    char want[96];
+    COLORREF face;
+    int sys_before, theme_before;
+
+    pump( 300 );
+    face = GetSysColor( COLOR_BTNFACE );
+    snprintf( want, sizeof(want), "\"btnFace\":%lu", face );
+    check( query_has( ctl[ID_PUSH], want ), "wine's COLOR_BTNFACE is the native table's (NSColor.windowBackgroundColor)" );
+    snprintf( want, sizeof(want), "\"appearance\":\"%s\"", is_dark( face ) ? "NSAppearanceNameDarkAqua" : "NSAppearanceNameAqua" );
+    check( query_has( ctl[ID_PUSH], want ), "a control on wine's dialog background is as light or dark as it" );
+    check( query_has( ctl[ID_WHITECHECK], "\"backdrop\":16777215" ) &&
+           query_has( ctl[ID_WHITECHECK], "\"appearance\":\"NSAppearanceNameAqua\"" ),
+           "a control on a page the app paints white stays light" );
+
+    /* as if macOS switched to Dark Mode, then back */
+    sys_before = got_syscolorchange;
+    theme_before = got_themechanged;
+    inject( ctl[ID_PUSH], "{\"t\":\"lookOverride\",\"s\":\"dark\"}" );
+    pump( 800 );
+    printf( "      dark: COLOR_BTNFACE %06lx, COLOR_WINDOW %06lx, COLOR_WINDOWTEXT %06lx, COLOR_HIGHLIGHT %06lx\n",
+            GetSysColor( COLOR_BTNFACE ), GetSysColor( COLOR_WINDOW ), GetSysColor( COLOR_WINDOWTEXT ),
+            GetSysColor( COLOR_HIGHLIGHT ) );
+    check( got_syscolorchange > sys_before && got_themechanged > theme_before && is_dark( GetSysColor( COLOR_BTNFACE ) ) &&
+           is_dark( GetSysColor( COLOR_WINDOW ) ) && !is_dark( GetSysColor( COLOR_WINDOWTEXT ) ),
+           "Dark Mode -> dark system colours, WM_SYSCOLORCHANGE and WM_THEMECHANGED" );
+    check( query_has( ctl[ID_PUSH], "\"appearance\":\"NSAppearanceNameDarkAqua\"" ) &&
+           query_has( ctl[ID_WHITECHECK], "\"appearance\":\"NSAppearanceNameAqua\"" ),
+           "then controls on the dialog go dark, the one on the white page stays light" );
+    inject( ctl[ID_PUSH], "{\"t\":\"lookOverride\",\"s\":\"light\"}" );
+    pump( 800 );
+    check( !is_dark( GetSysColor( COLOR_BTNFACE ) ) && is_dark( GetSysColor( COLOR_WINDOWTEXT ) ) &&
+           query_has( ctl[ID_PUSH], "\"appearance\":\"NSAppearanceNameAqua\"" ),
+           "Light Mode -> light colours and light controls again" );
+    inject( ctl[ID_PUSH], "{\"t\":\"lookOverride\",\"s\":\"\"}" );
+    pump( 500 );
+
+    /* the white page's check box, both ways */
+    inject( ctl[ID_WHITECHECK], "{\"t\":\"click\"}" );
+    pump( 200 );
+    check( SendMessageW( ctl[ID_WHITECHECK], BM_GETCHECK, 0, 0 ) == BST_CHECKED &&
+           got_command[ID_WHITECHECK][BN_CLICKED] == 1, "native click on the white page's check box -> BN_CLICKED" );
+    SendMessageW( ctl[ID_WHITECHECK], BM_SETCHECK, BST_UNCHECKED, 0 );
+    pump( 200 );
+    check( query_has( ctl[ID_WHITECHECK], "\"checked\":0" ), "BM_SETCHECK -> the white page's native check box" );
+}
+
+/* ChooseColor, ChooseFont and PrintDlg as the macOS panels */
+static void selftest_pickers(void)
+{
+    DWORD needed = 0, count = 0;
+    HDC hdc;
+    int dpi;
+
+    custom_colors[0] = RGB( 1, 2, 3 );
+    SetTimer( main_window, 7, 1000, color_panel_ok );
+    inject( ctl[ID_COLOR], "{\"t\":\"click\"}" );
+    pump_until( &color_runs, 1, 8000 );
+    printf( "      colour panel returned %d: #%06lx\n", color_ok, last_color.rgbResult );
+    check( got_command[ID_COLOR][BN_CLICKED] == 1 && color_native_ok,
+           "native click on Colour… -> BN_CLICKED; the colour panel starts at the app's colour and custom colours" );
+    check( color_ok && near_rgb( last_color.rgbResult, RGB( 200, 100, 50 ) ) && custom_colors[1] == RGB( 200, 0, 0 ),
+           "the colour panel's OK -> rgbResult and the edited custom colours" );
+    SetTimer( main_window, 7, 1000, panel_cancel );
+    choose_color();
+    check( color_runs == 2 && !color_ok, "Cancel on the colour panel -> FALSE" );
+
+    SetTimer( main_window, 8, 1000, font_panel_ok );
+    inject( ctl[ID_FONT], "{\"t\":\"click\"}" );
+    pump_until( &font_runs, 1, 8000 );
+    hdc = GetDC( NULL );
+    dpi = GetDeviceCaps( hdc, LOGPIXELSY );
+    ReleaseDC( NULL, hdc );
+    printf( "      font panel returned %d: %ls, %d, height %ld\n", font_ok, last_font.lfFaceName, last_cf.iPointSize,
+            last_font.lfHeight );
+    check( got_command[ID_FONT][BN_CLICKED] == 1 && font_native_ok,
+           "native click on Font… -> BN_CLICKED; the font panel starts at the app's font, CF_FIXEDPITCHONLY holds OK back" );
+    check( font_ok && last_cf.iPointSize == 140 && last_font.lfHeight == -MulDiv( 14, dpi, 72 ) && last_font.lfUnderline &&
+           last_cf.rgbColors == RGB( 0, 0, 255 ) &&
+           (font_exists( L"Menlo" ) ? !wcscmp( last_font.lfFaceName, L"Menlo" ) : last_font.lfFaceName[0] != 0),
+           "the font panel's OK -> a LOGFONT GDI can make, iPointSize, underline and colour" );
+
+    EnumPrintersW( PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS, NULL, 2, NULL, 0, &needed, &count );
+    if (!needed)
+    {
+        printf( "      no printer in this wine prefix: the print panel checks are skipped\n" );
+        return;
+    }
+    SetTimer( main_window, 9, 1200, print_panel_ok );
+    inject( ctl[ID_PRINT], "{\"t\":\"click\"}" );
+    pump_until( &print_runs, 1, 10000 );
+    check( got_command[ID_PRINT][BN_CLICKED] == 1 && print_native_ok,
+           "native click on Print… -> BN_CLICKED; the print panel opens as a sheet with the app's copies" );
+    {
+        BOOL devices = FALSE;
+        if (print_ok && last_print.hDevNames && last_print.hDevMode)
+        {
+            DEVNAMES *dn = GlobalLock( last_print.hDevNames );
+            DEVMODEW *dm = GlobalLock( last_print.hDevMode );
+            HANDLE printer;
+            if (OpenPrinterW( (WCHAR *)dn + dn->wDeviceOffset, &printer, NULL ))
+            {
+                devices = !wcsncmp( dm->dmDeviceName, (WCHAR *)dn + dn->wDeviceOffset, CCHDEVICENAME - 1 );
+                ClosePrinter( printer );
+            }
+            printf( "      print panel: %ls on %ls, %d copies, pages %d-%d\n", (WCHAR *)dn + dn->wDeviceOffset,
+                    (WCHAR *)dn + dn->wOutputOffset, last_print.nCopies, last_print.nFromPage, last_print.nToPage );
+            GlobalUnlock( last_print.hDevMode );
+            GlobalUnlock( last_print.hDevNames );
+        }
+        check( print_ok && devices && (last_print.Flags & PD_PAGENUMS) && last_print.nFromPage == 2 &&
+               last_print.nToPage == 3 && last_print.nCopies == 2 && last_print.hDC,
+               "Print -> the page range, copies, a wine printer's DEVMODE/DEVNAMES and its DC" );
+        if (last_print.hDC) DeleteDC( last_print.hDC );
+        if (last_print.hDevMode) GlobalFree( last_print.hDevMode );
+        if (last_print.hDevNames) GlobalFree( last_print.hDevNames );
+    }
+    SetTimer( main_window, 9, 1200, panel_cancel );
+    print_dialog();
+    check( print_runs == 2 && !print_ok, "Cancel on the print panel -> FALSE" );
 }
 
 /* milestone 2 controls, both ways */
@@ -1165,6 +1586,52 @@ static int selftest(void)
         pump( 200 );
     }
 
+    /* wizards: the macOS Installer layout, steps and header native, pages placed by wine */
+    {
+        HWND tab, page, back, next;
+        RECT tab_rc, page_rc;
+
+        inject( ctl[ID_WIZARD], "{\"t\":\"click\"}" );
+        pump( 600 );
+        check( got_command[ID_WIZARD][BN_CLICKED] == 1 && test_wizard, "native click on Wizard… -> BN_CLICKED" );
+        tab = (HWND)SendMessageW( test_wizard, PSM_GETTABCONTROL, 0, 0 );
+        check( pIsTranslated( tab ) && IsWindowVisible( tab ) && query_has( tab, "\"mode\":\"wizard\"" ) &&
+               query_has( tab, "\"items\":[\"Introduction\",\"License\",\"Install\"]" ),
+               "a wizard's tab control shows the steps natively" );
+        page = (HWND)SendMessageW( test_wizard, PSM_GETCURRENTPAGEHWND, 0, 0 );
+        GetWindowRect( tab, &tab_rc );
+        GetWindowRect( page, &page_rc );
+        check( page_rc.left - tab_rc.left >= 150, "wine lays the wizard's pages out right of the steps (TCM_ADJUSTRECT)" );
+        back = GetDlgItem( test_wizard, 12323 );
+        next = GetDlgItem( test_wizard, 12324 );
+        check( query_has( back, wizard_word( back, "Back", "Go Back" ) ) &&
+               query_has( next, wizard_word( next, "Next", "Continue" ) ),
+               "wine's Back and Next read Go Back and Continue (in English; other languages keep wine's word)" );
+        check( query_has( tab, "\"heading\":\"\"" ), "the welcome page (PSP_HIDEHEADER) has no header" );
+        inject( next, "{\"t\":\"click\"}" );
+        pump( 300 );
+        check( got_wiznext == 1 &&
+               (HWND)SendMessageW( test_wizard, PSM_GETCURRENTPAGEHWND, 0, 0 ) == (HWND)SendMessageW( test_wizard, PSM_INDEXTOHWND, 1, 0 ) &&
+               query_has( tab, "\"selection\":1" ) && query_has( tab, "\"heading\":\"License agreement\"" ) &&
+               query_has( tab, "\"subheading\":\"Please read the terms.\"" ),
+               "native Continue -> PSN_WIZNEXT; the next page, its step and its header show" );
+        SendMessageW( test_wizard, PSM_SETHEADERTITLEW, 1, (LPARAM)L"Read the license" );
+        pump( 200 );
+        check( query_has( tab, "\"heading\":\"Read the license\"" ) &&
+               query_has( tab, "\"subheading\":\"Please read the terms.\"" ),
+               "PSM_SETHEADERTITLE reaches the native header (the subtitle stays)" );
+        inject( back, "{\"t\":\"click\"}" );
+        pump( 300 );
+        check( got_wizback == 1 && query_has( tab, "\"selection\":0" ), "native Go Back -> PSN_WIZBACK, the first step" );
+        SendMessageW( test_wizard, PSM_SETCURSEL, 2, 0 );
+        pump( 200 );
+        check( query_has( tab, "\"selection\":2" ) && query_has( tab, "\"heading\":\"Ready to install\"" ),
+               "PSM_SETCURSEL moves the native steps and header" );
+        DestroyWindow( test_wizard );
+        test_wizard = NULL;
+        pump( 200 );
+    }
+
     /* menus: the window's menu is in the Mac menu bar; the window keeps no strip for it */
     {
         RECT wr, cr, adj = { 0, 0, 100, 100 };
@@ -1257,6 +1724,9 @@ static int selftest(void)
         check( hr == S_OK && !_wcsicmp( path, L"Z:\\tmp" ), "IFileOpenDialog (FOS_PICKFOLDERS) returns the chosen folder" );
     }
 
+    selftest_pickers();
+    selftest_look();
+
     printf( "%d passed, %d failed\n", passes, failures );
     return failures;
 }
@@ -1274,6 +1744,10 @@ int WINAPI wWinMain( HINSTANCE inst, HINSTANCE prev, WCHAR *cmdline, int show )
     wc.hCursor = LoadCursorW( NULL, (LPCWSTR)IDC_ARROW );
     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
     wc.lpszClassName = L"W2SGallery";
+    RegisterClassW( &wc );
+    wc.lpfnWndProc = white_panel_proc;
+    wc.hbrBackground = NULL;
+    wc.lpszClassName = L"W2SWhitePanel";
     RegisterClassW( &wc );
     main_window = CreateWindowExW( 0, L"W2SGallery", L"Win32-to-SwiftUI gallery", WS_OVERLAPPEDWINDOW,
                                    CW_USEDEFAULT, CW_USEDEFAULT, 1150, 720, NULL, NULL, inst, NULL );

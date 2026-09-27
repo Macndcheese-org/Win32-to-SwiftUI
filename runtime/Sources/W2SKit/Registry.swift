@@ -27,6 +27,8 @@ struct Snapshot: Codable, Equatable {
     var widthPx: Double?
     var heightPx: Double?
     var help: String?           // the text of the tooltip tool this control is
+    var display: String?        // shown instead of text (a native wizard's Go Back / Continue)
+    var backdrop: Int?          // COLORREF the app paints behind the control (Look.appearance)
     // buttons
     var checked: Int?
     var isDefault: Bool?
@@ -88,8 +90,12 @@ struct Snapshot: Codable, Equatable {
     // tree view
     var nodes: [TreeNode]?
     var sidebar: Bool?
-    var mode: String?           // tab: "strip" or "sidebar" (a property sheet, macOS 13+)
+    var mode: String?           // tab: "strip", "sidebar" (a property sheet, macOS 13+) or "wizard"
     var sidebarPx: Double?
+    // wizard: the active page's header, drawn above the page from headerPx (x, page top)
+    var heading: String?
+    var subheading: String?
+    var headerPx: [Double]?
     // status bar
     var panes: [Pane]?
     var simple: Bool?
@@ -237,7 +243,7 @@ final class Request {
 }
 
 enum W2S {
-    static let protocolVersion: UInt32 = 2
+    static let protocolVersion: UInt32 = 3     // w2s_protocol.h
 
     /// The running macOS; an app linked against an SDK older than 26 is told
     /// 16 for 26 (the version compatibility shim), so 16 means 26.
@@ -257,6 +263,14 @@ enum W2S {
         let id = nextID
         nextID += 1
         return id
+    }
+
+    /// Wake the Win32 side through any live control (Look: the system colours changed).
+    static func wakeAny(cookie: UInt64) {
+        lock.lock()
+        let host = controls.values.filter { $0.postWake != nil }.min { $0.handle < $1.handle }
+        lock.unlock()
+        if let host = host { host.postWake?(host.hostView, cookie) }
     }
 
     static func control(_ handle: UInt64) -> ControlHost? {
