@@ -11,9 +11,12 @@
  *                          the exit code is the number of failures
  */
 #define WIN32_LEAN_AND_MEAN
+#define COBJMACROS
 #include <windows.h>
 #include <commctrl.h>
 #include <commdlg.h>
+#include <shlobj.h>
+#include <shobjidl.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -75,6 +78,66 @@ static BOOL v6_begin( ULONG_PTR *cookie )
 static void v6_end( ULONG_PTR cookie )
 {
     DeactivateActCtx( 0, cookie );
+}
+
+/* ---------- folder pickers ---------- */
+
+static int bff_selchanged, bff_native_ok;
+
+static int CALLBACK browse_callback( HWND hwnd, UINT msg, LPARAM lparam, LPARAM data )
+{
+    if (msg == BFFM_INITIALIZED)
+    {
+        SendMessageW( hwnd, BFFM_SETSELECTIONW, TRUE, (LPARAM)L"Z:\\tmp" );
+        SendMessageW( hwnd, BFFM_SETOKTEXT, 0, (LPARAM)L"Use Folder" );
+    }
+    if (msg == BFFM_SELCHANGED) bff_selchanged++;
+    return 0;
+}
+
+static BOOL browse_for_folder( WCHAR *path )
+{
+    BROWSEINFOW bi = { 0 };
+    WCHAR name[MAX_PATH];
+    LPITEMIDLIST pidl;
+    BOOL ok;
+
+    bi.hwndOwner = main_window;
+    bi.pszDisplayName = name;
+    bi.lpszTitle = L"Choose the folder to export to";
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+    bi.lpfn = browse_callback;
+    if (!(pidl = SHBrowseForFolderW( &bi ))) return FALSE;
+    ok = SHGetPathFromIDListW( pidl, path );
+    CoTaskMemFree( pidl );
+    return ok;
+}
+
+static HRESULT item_dialog_folder( WCHAR *path )
+{
+    IFileOpenDialog *dialog;
+    IShellItem *item;
+    WCHAR *name;
+    DWORD options;
+    HRESULT hr;
+
+    hr = CoCreateInstance( &CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, &IID_IFileOpenDialog, (void **)&dialog );
+    if (FAILED(hr)) return hr;
+    IFileOpenDialog_GetOptions( dialog, &options );
+    IFileOpenDialog_SetOptions( dialog, options | FOS_PICKFOLDERS );
+    IFileOpenDialog_SetTitle( dialog, L"Pick a folder" );
+    hr = IFileOpenDialog_Show( dialog, main_window );
+    if (SUCCEEDED(hr) && SUCCEEDED(hr = IFileOpenDialog_GetResult( dialog, &item )))
+    {
+        if (SUCCEEDED(hr = IShellItem_GetDisplayName( item, SIGDN_FILESYSPATH, &name )))
+        {
+            lstrcpynW( path, name, MAX_PATH );
+            CoTaskMemFree( name );
+        }
+        IShellItem_Release( item );
+    }
+    IFileOpenDialog_Release( dialog );
+    return hr;
 }
 
 /* ---------- task dialog (comctl32 v6 only) ---------- */
@@ -389,6 +452,12 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
             SetWindowTextW( ctl[ID_LABEL], text );
         }
         if (code == BN_CLICKED && (id == ID_OPEN || id == ID_SAVE)) open_file( id == ID_SAVE );
+        if (code == BN_CLICKED && (id == ID_FOLDER || id == ID_ITEMDLG) && !in_selftest)
+        {
+            WCHAR path[MAX_PATH] = L"";
+            if (id == ID_FOLDER ? browse_for_folder( path ) : SUCCEEDED(item_dialog_folder( path )))
+                SetWindowTextW( ctl[ID_LABEL], path );
+        }
         if (code == BN_CLICKED && id == ID_TASKDLG && !in_selftest)
         {
             int button = 0, radio = 0;
@@ -559,6 +628,26 @@ static void CALLBACK task_dialog_first( HWND hwnd, UINT msg, UINT_PTR id, DWORD 
     inject( NULL, "{\"t\":\"verify\",\"v\":1}" );
     inject( NULL, "{\"t\":\"press\",\"v\":1002}" );    /* refused by the callback */
     SetTimer( hwnd, 4, 500, task_dialog_second );
+}
+
+/* while the folder picker is up: check what the callback set, browse, choose */
+static void CALLBACK folder_panel( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    char *q = pQuery( NULL );
+
+    KillTimer( hwnd, id );
+    bff_native_ok = q && strstr( q, "\"prompt\":\"Use Folder\"" ) && strstr( q, "\"folders\":true" ) &&
+                    strstr( q, "Choose the folder to export to" ) && strstr( q, "tmp" );
+    if (!bff_native_ok) printf( "      folder panel: %s\n", q ? q : "(null)" );
+    pFree( q );
+    inject( NULL, "{\"t\":\"look\",\"s\":\"/tmp\"}" );
+    inject( NULL, "{\"t\":\"choose\",\"s\":\"/tmp\"}" );
+}
+
+static void CALLBACK choose_folder( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    KillTimer( hwnd, id );
+    inject( NULL, "{\"t\":\"choose\",\"s\":\"/tmp\"}" );
 }
 
 static void CALLBACK choose_file( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
@@ -972,6 +1061,31 @@ static int selftest(void)
     printf( "      open panel returned %d: %ls\n", r, file );
     check( r && file[1] == ':' && wcsstr( file, L"w2s-gallery-test.txt" ) && ofn.nFileOffset > 0,
            "native open panel returns a Windows path" );
+
+    /* SHBrowseForFolder -> the open panel in folder mode, with the app's callback */
+    {
+        WCHAR path[MAX_PATH] = L"";
+        BOOL ok;
+
+        SetTimer( main_window, 5, 1200, folder_panel );
+        ok = browse_for_folder( path );
+        printf( "      folder picker returned %d: %ls\n", ok, path );
+        check( bff_native_ok, "BFFM_SETSELECTION / BFFM_SETOKTEXT and the title reach the folder panel" );
+        check( ok && !_wcsicmp( path, L"Z:\\tmp" ) && bff_selchanged > 0,
+               "the chosen folder comes back as a PIDL; browsing raised BFFM_SELCHANGED" );
+    }
+
+    /* IFileOpenDialog with FOS_PICKFOLDERS -> the same panel */
+    {
+        WCHAR path[MAX_PATH] = L"";
+        HRESULT hr;
+
+        CoInitialize( NULL );
+        SetTimer( main_window, 6, 1200, choose_folder );
+        hr = item_dialog_folder( path );
+        printf( "      IFileOpenDialog returned %#lx: %ls\n", hr, path );
+        check( hr == S_OK && !_wcsicmp( path, L"Z:\\tmp" ), "IFileOpenDialog (FOS_PICKFOLDERS) returns the chosen folder" );
+    }
 
     printf( "%d passed, %d failed\n", passes, failures );
     return failures;

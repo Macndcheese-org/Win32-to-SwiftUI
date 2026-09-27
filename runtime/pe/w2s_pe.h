@@ -9,6 +9,8 @@
 #include <winternl.h>
 #include <commctrl.h>
 #include <commdlg.h>
+#include <shlobj.h>
+#include <shobjidl.h>
 #include <uxtheme.h>
 #include <stdint.h>
 #include <stdio.h>

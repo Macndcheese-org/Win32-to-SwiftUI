@@ -8,3 +8,5 @@ EXPORTS
     W2SDebugFree
     W2SIsTranslated
     W2STaskDialog
+    W2SItemDialog
+    W2SBrowseForFolder

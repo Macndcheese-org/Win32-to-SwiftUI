@@ -36,7 +36,7 @@ codesign -f -s - $OUT/win32swiftui.so 2>/dev/null
 
 echo "=== gallery.exe"
 x86_64-w64-mingw32-gcc -O2 -Wall -municode -mwindows -o $OUT/gallery.exe tests/gallery/gallery.c \
-  -lcomctl32 -lcomdlg32 -lgdi32 -luser32
+  -lcomctl32 -lcomdlg32 -lshell32 -lole32 -luuid -lgdi32 -luser32
 
 echo "=== install into $DEST"
 mkdir -p "$DEST/dlls/win32swiftui/x86_64-windows"

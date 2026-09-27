@@ -1422,7 +1422,7 @@ p.message = note
 p.beginSheetModal(for: window) { response in _ = response == .OK ? p.url : nil }
 ```
 
-SHBrowseForFolder's tree dialog and IFileOpenDialog with FOS_PICKFOLDERS both become the macOS open panel in folder mode. BFFM_SETSELECTION sets directoryURL.
+SHBrowseForFolder's tree dialog and IFileOpenDialog with FOS_PICKFOLDERS both become the macOS open panel in folder mode. BFFM_SETSELECTION sets directoryURL. The app's callback gets a hidden window of the runtime: BFFM_SETSELECTION, BFFM_SETOKTEXT (the prompt), BFFM_SETSTATUSTEXT (under the message) and BFFM_ENABLEOK (validation holds the button back) work before and while the panel is up; browsing raises BFFM_SELCHANGED with the folder's PIDL. IFileDialog's Show hands its state to the same panel code as an OPENFILENAMEW plus FOS_* options; OnFileOk may refuse the choice and the panel comes back. Dialogs with IFileDialogCustomize controls, and computer or printer pickers, keep wine's dialogs.
 
 ### Colour picker
 <a id="colordialog"></a>`colordialog` · AppKit · Liquid Glass: automatic on 26+

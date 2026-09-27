@@ -236,8 +236,32 @@ enum Requests {
         return exts.compactMap { UTType(filenameExtension: $0) }
     }
 
+    /// Reports what the user looks at (SHBrowseForFolder's BFFM_SELCHANGED) and
+    /// holds the OK button back while the app says so (BFFM_ENABLEOK).
+    final class PanelDelegate: NSObject, NSOpenSavePanelDelegate {
+        var okEnabled = true
+        var events = false
+        let request: Request
+        init(request: Request) { self.request = request }
+
+        func panelSelectionDidChange(_ sender: Any?) {
+            guard events, let panel = sender as? NSSavePanel else { return }
+            if let url = panel.url ?? panel.directoryURL { request.emit(["t": "selchange", "s": url.path]) }
+        }
+
+        func panel(_ sender: Any, didChangeToDirectoryURL url: URL?) {
+            if events, let url = url { request.emit(["t": "selchange", "s": url.path]) }
+        }
+
+        func panel(_ sender: Any, validate url: URL) throws {
+            // a cancelled-by-user error blocks OK without an alert
+            if !okEnabled { throw CocoaError(.userCancelled) }
+        }
+    }
+
     static func panel(_ params: [String: Any], save: Bool, owner: NSWindow?, request: Request) {
         let filters = params["filters"] as? [[String: Any]] ?? []
+        let folders = params["folders"] as? Bool ?? false
         var filterIndex = max(1, params["filterIndex"] as? Int ?? 1)
         if filterIndex > filters.count { filterIndex = max(1, filters.count) }
 
@@ -249,21 +273,34 @@ enum Requests {
             panel = s
         } else {
             let o = NSOpenPanel()
-            o.canChooseFiles = true
-            o.canChooseDirectories = false
+            // folder pickers (SHBrowseForFolder, FOS_PICKFOLDERS) are the same panel
+            o.canChooseFiles = !folders || (params["files"] as? Bool ?? false)
+            o.canChooseDirectories = folders
+            o.canCreateDirectories = folders && (params["newFolder"] as? Bool ?? true)
             o.allowsMultipleSelection = params["multi"] as? Bool ?? false
             o.resolvesAliases = params["resolveLinks"] as? Bool ?? true
             panel = o
         }
         panel.showsHiddenFiles = params["showHidden"] as? Bool ?? false
-        if let title = params["title"] as? String, !title.isEmpty { panel.message = title }
+        let message = params["message"] as? String ?? params["title"] as? String ?? ""
+        var status = ""
+        func showMessage() {
+            panel.message = [message, status].filter { !$0.isEmpty }.joined(separator: "\n")
+        }
+        showMessage()
+        if let prompt = params["prompt"] as? String, !prompt.isEmpty { panel.prompt = prompt }
+        if let title = params["windowTitle"] as? String, !title.isEmpty { panel.title = title }
         if let dir = params["dir"] as? String { panel.directoryURL = URL(fileURLWithPath: dir, isDirectory: true) }
+        let delegate = PanelDelegate(request: request)
+        delegate.events = params["events"] as? Bool ?? false
+        delegate.okEnabled = params["okEnabled"] as? Bool ?? true
+        panel.delegate = delegate
 
         func applyFilter(_ index: Int) {
             filterIndex = index + 1
             let types = index < filters.count ? contentTypes(filters[index]) : []
             panel.allowedContentTypes = types
-            if save { panel.allowsOtherFileTypes = types.isEmpty }
+            if save { panel.allowsOtherFileTypes = types.isEmpty || !(params["strict"] as? Bool ?? false) }
         }
         var target: FilterTarget?
         if filters.count > 1 {
@@ -290,16 +327,35 @@ enum Requests {
             }
             finish(request, ["paths": paths, "filterIndex": filterIndex])
             _ = target
+            _ = delegate
+        }
+        request.update = { p in
+            // the app, while the panel is up (BFFM_SETSELECTION, BFFM_SETOKTEXT, ...)
+            if let dir = p["dir"] as? String { panel.directoryURL = URL(fileURLWithPath: dir, isDirectory: true) }
+            if let prompt = p["prompt"] as? String { panel.prompt = prompt }
+            if let text = p["status"] as? String { status = text; showMessage() }
+            if let ok = p["okEnabled"] as? Bool { delegate.okEnabled = ok }
         }
         request.inject = { event in
             // tests: {"t":"choose","s":"/unix/path"} or {"t":"cancel"}
             guard let e = event as? [String: Any] else { return }
             if e["t"] as? String == "choose", let path = e["s"] as? String {
+                if !delegate.okEnabled { return }
                 finish(request, ["paths": [path], "filterIndex": filterIndex])
                 panel.cancel(nil)
+            } else if e["t"] as? String == "look", let path = e["s"] as? String {
+                // what browsing to a folder reports
+                panel.directoryURL = URL(fileURLWithPath: path, isDirectory: true)
+                if delegate.events { request.emit(["t": "selchange", "s": path]) }
             } else {
                 panel.cancel(nil)
             }
+        }
+        request.query = {
+            ["message": panel.message ?? "", "prompt": panel.prompt ?? "", "dir": panel.directoryURL?.path ?? "",
+             "folders": (panel as? NSOpenPanel)?.canChooseDirectories ?? false,
+             "multi": (panel as? NSOpenPanel)?.allowsMultipleSelection ?? false,
+             "okEnabled": delegate.okEnabled]
         }
         if let owner = owner {
             panel.beginSheetModal(for: owner, completionHandler: complete)
@@ -513,7 +569,7 @@ enum Debug {
             return W2S.json(out)
         case "inject":
             guard let event = op["event"] as? [String: Any] else { return "{\"error\":\"no event\"}" }
-            if handle == 0 || ["alertButton", "choose", "cancel", "press"].contains(event["t"] as? String ?? "") {
+            if handle == 0 || ["alertButton", "choose", "cancel", "press", "look"].contains(event["t"] as? String ?? "") {
                 guard let request = Requests.latestOpen() else { return "{\"error\":\"no open request\"}" }
                 request.inject?(event)
                 return "{\"ok\":true}"
