@@ -15,7 +15,7 @@
 #include "w2s_pe.h"
 #include "w2s_map_tables.h"
 
-BOOL w2s_debug;
+int w2s_debug;
 UINT w2s_wake_message;
 static BOOL unix_ready;
 static const WCHAR prop_name[] = L"Win32ToSwiftUI.Control";
@@ -90,11 +90,13 @@ static char *build_snapshot( struct w2s_control *ctl )
     struct json j;
     char *copy;
 
+    ctl->snapshotting++;
     json_init( &j );
     json_obj_begin( &j );
     w2s_common_snapshot( ctl, &j );
     ctl->kind->snapshot( ctl, &j );
     json_obj_end( &j );
+    ctl->snapshotting--;
     copy = HeapAlloc( GetProcessHeap(), 0, j.len + 1 );
     memcpy( copy, j.buf, j.len + 1 );
     json_free( &j );
@@ -116,7 +118,9 @@ void w2s_push( struct w2s_control *ctl, BOOL force )
     params.handle = ctl->handle;
     params.json = snap;
     params.json_len = strlen( snap );
+    TRACE( "  update %p -> unix\n", ctl->hwnd );
     w2s_call( unix_w2s_control_update, &params );
+    TRACE( "  update %p <- unix\n", ctl->hwnd );
     if (ctl->last) HeapFree( GetProcessHeap(), 0, ctl->last );
     ctl->last = snap;
     TRACE( "push %p %s\n", ctl->hwnd, snap );
@@ -193,6 +197,7 @@ static LRESULT CALLBACK subclass_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
     LRESULT ret;
 
     if (!ctl) return DefWindowProcW( hwnd, msg, wparam, lparam );
+    if (w2s_debug > 1) TRACE( "  msg %p %#x\n", hwnd, msg );
 
     if (msg == w2s_wake_message && w2s_wake_message)
     {
@@ -237,7 +242,7 @@ static LRESULT CALLBACK subclass_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
         struct w2s_control_focus_params params = { ctl->handle, msg == WM_SETFOCUS };
         w2s_call( unix_w2s_control_focus, &params );
     }
-    if (!ctl->applying && is_state_message( ctl, msg )) w2s_push( ctl, FALSE );
+    if (!ctl->applying && !ctl->snapshotting && is_state_message( ctl, msg )) w2s_push( ctl, FALSE );
     return ret;
 }
 
@@ -259,6 +264,7 @@ void WINAPI W2SWindowCreated( HWND hwnd )
         return;
     }
 
+    TRACE( "attach %p as %s\n", hwnd, kind->entry );
     ctl = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*ctl) );
     ctl->hwnd = hwnd;
     ctl->kind = kind;
@@ -266,7 +272,9 @@ void WINAPI W2SWindowCreated( HWND hwnd )
     ctl->state_in_count = entry->state_in_count;
     SetPropW( hwnd, prop_name, ctl );
     ctl->orig = (WNDPROC)SetWindowLongPtrW( hwnd, GWLP_WNDPROC, (LONG_PTR)subclass_proc );
+    TRACE( "  subclassed\n" );
     SetWindowPos( hwnd, 0, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE );
+    TRACE( "  frame changed\n" );
 
     if (!w2s_get_host( hwnd, &ctl->host ))
     {
@@ -274,7 +282,9 @@ void WINAPI W2SWindowCreated( HWND hwnd )
         goto fail;
     }
 
+    TRACE( "  host view %#llx window %#llx\n", (unsigned long long)ctl->host.view, (unsigned long long)ctl->host.window );
     snap = build_snapshot( ctl );
+    TRACE( "  snapshot %s\n", snap );
     params.host_view = ctl->host.view;
     params.window = ctl->host.window;
     params.post_wake = ctl->host.post_wake;
@@ -312,8 +322,9 @@ static char *debug_call( HWND hwnd, const char *json )
     struct w2s_debug_params params;
     char *buf;
 
-    if (!ctl || !ctl->handle) return NULL;
-    params.handle = ctl->handle;
+    /* no window: the open alert or panel */
+    if (hwnd && (!ctl || !ctl->handle)) return NULL;
+    params.handle = hwnd ? ctl->handle : 0;
     params.json = json;
     params.json_len = strlen( json );
     params.size = 65536;
@@ -359,7 +370,7 @@ BOOL WINAPI DllMain( HINSTANCE instance, DWORD reason, void *reserved )
         struct w2s_init_params params = { W2S_PROTOCOL_VERSION, 0 };
 
         DisableThreadLibraryCalls( instance );
-        w2s_debug = GetEnvironmentVariableA( "W2S_DEBUG", value, sizeof(value) ) && value[0] == '1';
+        if (GetEnvironmentVariableA( "W2S_DEBUG", value, sizeof(value) )) w2s_debug = atoi( value );
         if (__wine_init_unix_call())
         {
             TRACE( "no unix side\n" );

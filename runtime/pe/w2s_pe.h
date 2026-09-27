@@ -12,6 +12,7 @@
 #include <uxtheme.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
 
@@ -29,7 +30,7 @@ static inline NTSTATUS w2s_call( enum w2s_unix_func code, void *args )
 }
 
 /* debug output: WINEDEBUG isn't ours to parse; W2S_DEBUG=1 turns this on */
-extern BOOL w2s_debug;
+extern int w2s_debug;
 #define TRACE(...) do { if (w2s_debug) { char _b[512]; snprintf( _b, sizeof(_b), "w2s: " __VA_ARGS__ ); OutputDebugStringA( _b ); fputs( _b, stderr ); } } while (0)
 
 /* json.c: a small UTF-8 JSON writer and an event reader */
@@ -103,6 +104,7 @@ struct w2s_control
     WNDPROC orig;
     char *last;             /* last snapshot sent */
     int applying;
+    int snapshotting;       /* building a snapshot sends queries to the control */
 };
 
 const struct w2s_kind *w2s_select_kind( HWND hwnd );

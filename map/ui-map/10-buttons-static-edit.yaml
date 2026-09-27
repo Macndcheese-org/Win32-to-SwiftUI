@@ -53,7 +53,7 @@ entries:
       - since: 12
         code: "Toggle(title, isOn: $isOn).toggleStyle(.checkbox)"
     glass: automatic
-    state_in: [WM_SETTEXT, WM_ENABLE, BM_SETCHECK, BM_GETCHECK]
+    state_in: [WM_SETTEXT, WM_ENABLE, BM_SETCHECK]
     events_out: {toggle: WM_COMMAND/BN_CLICKED}
     notes: >-
       BS_CHECKBOX (not auto) does not flip itself: the click is sent as BN_CLICKED and the
@@ -313,7 +313,8 @@ entries:
       - since: 15
         code: "TextEditor(text: $text, selection: $textSelection)"
     glass: none
-    state_in: [WM_SETTEXT, EM_SETSEL, EM_GETSEL, EM_REPLACESEL, EM_LINEFROMCHAR, EM_LINEINDEX, EM_GETLINECOUNT, EM_POSFROMCHAR, EM_SCROLLCARET, EM_LINESCROLL]
+    state_in: [WM_SETTEXT, EM_SETSEL, EM_REPLACESEL, EM_SCROLLCARET, EM_LINESCROLL]
+    answers: [EM_GETSEL, EM_LINEFROMCHAR, EM_LINEINDEX, EM_GETLINECOUNT, EM_POSFROMCHAR]
     events_out: {edit: WM_COMMAND/EN_CHANGE, scroll: EN_VSCROLL/EN_HSCROLL}
     notes: >-
       Apps query the caret, selection and line layout synchronously (EM_GETSEL,

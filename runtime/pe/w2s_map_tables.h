@@ -11,7 +11,7 @@ struct w2s_map_entry
 
 static const UINT w2s_state_button_push[] = { WM_SETTEXT, WM_ENABLE, WM_SETFONT, BM_SETSTYLE, BM_SETSTATE, BM_SETIMAGE, BM_CLICK };
 static const UINT w2s_state_button_default[] = { WM_SETTEXT, WM_ENABLE, BM_SETSTYLE, DM_SETDEFID };
-static const UINT w2s_state_button_checkbox[] = { WM_SETTEXT, WM_ENABLE, BM_SETCHECK, BM_GETCHECK };
+static const UINT w2s_state_button_checkbox[] = { WM_SETTEXT, WM_ENABLE, BM_SETCHECK };
 static const UINT w2s_state_button_3state[] = { BM_SETCHECK };
 static const UINT w2s_state_button_pushlike[] = { BM_SETCHECK };
 static const UINT w2s_state_button_radio[] = { BM_SETCHECK, WM_SETTEXT, WM_ENABLE };
@@ -26,7 +26,7 @@ static const UINT w2s_state_edit_single[] = { WM_SETTEXT, EM_SETSEL, EM_REPLACES
 static const UINT w2s_state_edit_password[] = { WM_SETTEXT, EM_SETPASSWORDCHAR };
 static const UINT w2s_state_edit_number[] = { WM_SETTEXT };
 static const UINT w2s_state_edit_readonly[] = { WM_SETTEXT, EM_SETREADONLY };
-static const UINT w2s_state_edit_multiline[] = { WM_SETTEXT, EM_SETSEL, EM_GETSEL, EM_REPLACESEL, EM_LINEFROMCHAR, EM_LINEINDEX, EM_GETLINECOUNT, EM_POSFROMCHAR, EM_SCROLLCARET, EM_LINESCROLL };
+static const UINT w2s_state_edit_multiline[] = { WM_SETTEXT, EM_SETSEL, EM_REPLACESEL, EM_SCROLLCARET, EM_LINESCROLL };
 static const UINT w2s_state_edit_balloon[] = { EM_SHOWBALLOONTIP, EM_HIDEBALLOONTIP };
 static const UINT w2s_state_listbox_single[] = { LB_ADDSTRING, LB_INSERTSTRING, LB_DELETESTRING, LB_RESETCONTENT, LB_SETCURSEL, LB_SETTOPINDEX, LB_SETITEMDATA, WM_SETREDRAW };
 static const UINT w2s_state_listbox_multi[] = { LB_SETSEL, LB_SELITEMRANGE, LB_SETANCHORINDEX, LB_SETCARETINDEX };
@@ -44,7 +44,7 @@ static const UINT w2s_state_listview_groups[] = { LVM_ENABLEGROUPVIEW, LVM_INSER
 static const UINT w2s_state_listview_empty[] = { 0 };
 static const UINT w2s_state_treeview[] = { TVM_INSERTITEMA, TVM_INSERTITEMW, TVM_DELETEITEM, TVM_SETITEMA, TVM_SETITEMW, TVM_EXPAND, TVM_SELECTITEM, TVM_ENSUREVISIBLE, TVM_SETIMAGELIST };
 static const UINT w2s_state_header[] = { HDM_INSERTITEMA, HDM_INSERTITEMW, HDM_SETITEMA, HDM_SETITEMW, HDM_LAYOUT };
-static const UINT w2s_state_tab[] = { TCM_INSERTITEMA, TCM_INSERTITEMW, TCM_SETITEMA, TCM_SETITEMW, TCM_DELETEITEM, TCM_SETCURSEL, TCM_SETCURFOCUS, TCM_ADJUSTRECT, TCM_GETITEMRECT };
+static const UINT w2s_state_tab[] = { TCM_INSERTITEMA, TCM_INSERTITEMW, TCM_SETITEMA, TCM_SETITEMW, TCM_DELETEITEM, TCM_SETCURSEL, TCM_SETCURFOCUS };
 static const UINT w2s_state_propsheet[] = { PSM_SETCURSEL, PSM_ADDPAGE, PSM_REMOVEPAGE, PSM_CHANGED, PSM_UNCHANGED, PSM_SETTITLEA, PSM_SETTITLEW, PSM_SETWIZBUTTONS };
 static const UINT w2s_state_propsheet_wizard[] = { PSM_SETWIZBUTTONS, PSM_SETHEADERTITLEA, PSM_SETHEADERTITLEW, PSM_SETHEADERSUBTITLEA, PSM_SETHEADERSUBTITLEW, PSM_SETFINISHTEXTA, PSM_SETFINISHTEXTW, PSM_PRESSBUTTON };
 static const UINT w2s_state_dialog[] = { WM_INITDIALOG, DM_SETDEFID, WM_NEXTDLGCTL };
@@ -96,7 +96,7 @@ static const struct w2s_map_entry w2s_map_entries[] =
 {
     { "button.push", w2s_state_button_push, 7 },
     { "button.default", w2s_state_button_default, 4 },
-    { "button.checkbox", w2s_state_button_checkbox, 4 },
+    { "button.checkbox", w2s_state_button_checkbox, 3 },
     { "button.3state", w2s_state_button_3state, 1 },
     { "button.pushlike", w2s_state_button_pushlike, 1 },
     { "button.radio", w2s_state_button_radio, 3 },
@@ -111,7 +111,7 @@ static const struct w2s_map_entry w2s_map_entries[] =
     { "edit.password", w2s_state_edit_password, 2 },
     { "edit.number", w2s_state_edit_number, 1 },
     { "edit.readonly", w2s_state_edit_readonly, 2 },
-    { "edit.multiline", w2s_state_edit_multiline, 10 },
+    { "edit.multiline", w2s_state_edit_multiline, 5 },
     { "edit.balloon", w2s_state_edit_balloon, 2 },
     { "listbox.single", w2s_state_listbox_single, 8 },
     { "listbox.multi", w2s_state_listbox_multi, 4 },
@@ -129,7 +129,7 @@ static const struct w2s_map_entry w2s_map_entries[] =
     { "listview.empty", w2s_state_listview_empty, 0 },
     { "treeview", w2s_state_treeview, 9 },
     { "header", w2s_state_header, 5 },
-    { "tab", w2s_state_tab, 9 },
+    { "tab", w2s_state_tab, 7 },
     { "propsheet", w2s_state_propsheet, 8 },
     { "propsheet.wizard", w2s_state_propsheet_wizard, 8 },
     { "dialog", w2s_state_dialog, 3 },

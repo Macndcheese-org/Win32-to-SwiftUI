@@ -213,6 +213,7 @@ static void inject( HWND hwnd, const char *event )
 {
     char *r = pInject( hwnd, event );
     if (!r || !strstr( r, "ok" )) printf( "      inject %s: %s\n", event, r ? r : "(null)" );
+    fflush( stdout );
     pFree( r );
 }
 

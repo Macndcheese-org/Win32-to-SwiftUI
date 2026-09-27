@@ -25,7 +25,8 @@ entries:
             Spacer(minLength: 0)
           }
     glass: automatic
-    state_in: [TCM_INSERTITEM, TCM_SETITEM, TCM_DELETEITEM, TCM_SETCURSEL, TCM_SETCURFOCUS, TCM_ADJUSTRECT, TCM_GETITEMRECT]
+    state_in: [TCM_INSERTITEM, TCM_SETITEM, TCM_DELETEITEM, TCM_SETCURSEL, TCM_SETCURFOCUS]
+    answers: [TCM_ADJUSTRECT, TCM_GETITEMRECT]
     events_out: {select: WM_NOTIFY/TCN_SELCHANGING (the app may veto) then TCN_SELCHANGE}
     not_translated_when: [TCS_OWNERDRAWFIXED]
     notes: >-

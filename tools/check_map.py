@@ -74,6 +74,11 @@ def main():
             err(f"{eid}: glass must be explicit | automatic | none")
         if e.get("glass") == "explicit" and not any(re.search(r"glass|Glass", s["code"]) for s in aslist(e.get("swiftui")) + aslist(e.get("appkit"))):
             err(f"{eid}: glass: explicit but no glass API in its code")
+        # state_in drives when the runtime re-reads the control: a query there
+        # re-reads on every read, forever. Queries the control must answer go in `answers`.
+        for m_ in aslist(e.get("state_in")):
+            if re.match(r"[A-Z]+_(GET|.*FROMCHAR|LINEINDEX|ADJUSTRECT|HITTEST)", str(m_)):
+                err(f"{eid}: state_in {m_} is a query; list it under answers")
         for n in aslist(e.get("not_translated_when")):
             if n not in flag_owner:
                 err(f"{eid}: not_translated_when names unknown flag {n}")

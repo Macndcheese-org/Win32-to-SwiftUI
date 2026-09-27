@@ -78,7 +78,8 @@ An entry:
   appkit:                       # Swift statements, one per tier (optional)
     - {since: 12, code: '...'}
   glass: automatic              # explicit | automatic | none
-  state_in: [WM_SETTEXT, ...]   # Windows messages the view must follow
+  state_in: [WM_SETTEXT, ...]   # Windows messages that change what the view shows (never queries)
+  answers: [EM_GETSEL, ...]     # queries the Win32 control must answer from the native view
   events_out: {activate: WM_COMMAND/BN_CLICKED}   # what the view sends back
   not_translated_when: [BS_OWNERDRAW]
   improvised: false

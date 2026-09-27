@@ -4,13 +4,13 @@
 #   <tree>/dlls/win32swiftui/x86_64-windows/win32swiftui.dll
 #   <tree>/dlls/win32swiftui/win32swiftui.so
 #
-#   ./build.sh [install-tree]    default: ~/mnc-11.18/build
+#   ./build.sh [install-tree]    default: $WINE_BUILD
 # WINE_SRC and WINE_BUILD point at the wine source and build trees (for the
 # map-table check and libwinecrt0.a).
 set -e
 cd "${0:A:h}"
-WINE_SRC=${WINE_SRC:-/Users/maitr/MacNdCheese-WineEngine-PRIVATE/.claude/worktrees/ecstatic-easley-10dfe7}
-WINE_BUILD=${WINE_BUILD:-/Users/maitr/mnc-11.18/build}
+WINE_SRC=${WINE_SRC:?set WINE_SRC to the MNC wine source tree (branch w2s)}
+WINE_BUILD=${WINE_BUILD:?set WINE_BUILD to that tree's x86_64 build directory}
 DEST=${1:-$WINE_BUILD}
 OUT=build
 
