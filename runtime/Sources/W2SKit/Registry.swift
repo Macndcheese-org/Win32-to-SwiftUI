@@ -6,9 +6,9 @@ import SwiftUI
 typealias PostWake = @convention(c) (UnsafeMutableRawPointer?, UInt64) -> Void
 
 /// What the native view knows about its Win32 control; mirrors the PE side's
-/// JSON snapshot (runtime/pe/controls.c).
-struct Snapshot: Decodable, Equatable {
-    struct Column: Decodable, Equatable { var title: String; var width: Int?; var index: Int?; var align: String? }
+/// JSON snapshot (runtime/pe/controls.c). Encodable for the tests' queries.
+struct Snapshot: Codable, Equatable {
+    struct Column: Codable, Equatable { var title: String; var width: Int?; var index: Int?; var align: String? }
 
     var entry: String?
     var ack: UInt64?            // the last native event the PE side has taken
@@ -22,6 +22,8 @@ struct Snapshot: Decodable, Equatable {
     var isDefault: Bool?
     var leftText: Bool?
     var isCancel: Bool?
+    var note: String?           // command link
+    var noSplit: Bool?          // split button: BCSS_NOSPLIT
     // static / edit
     var align: String?
     var wrap: Bool?
@@ -57,10 +59,22 @@ final class ControlModel: ObservableObject {
     @Published var snap: Snapshot
     @Published var focusRequest = 0
     let emit: ([String: Any]) -> Void
+    private var clickQueued = false
 
     init(snap: Snapshot, emit: @escaping ([String: Any]) -> Void) {
         self.snap = snap
         self.emit = emit
+    }
+
+    /// One click per user action, however many times SwiftUI writes the binding
+    /// (a mixed Toggle(sources:) sets each of its sources).
+    func clickOnce() {
+        guard !clickQueued else { return }
+        clickQueued = true
+        DispatchQueue.main.async {
+            self.clickQueued = false
+            self.emit(["t": "click"])
+        }
     }
 }
 

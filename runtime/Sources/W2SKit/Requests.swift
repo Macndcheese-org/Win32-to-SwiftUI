@@ -191,15 +191,14 @@ enum Debug {
             }
             guard let host = W2S.control(handle) else { return "{\"error\":\"no control\"}" }
             let snap = host.model.snap
-            var out: [String: Any] = ["entry": host.entry, "attached": host.hosting?.superview != nil,
-                                      "os": W2S.osVersion.major]
-            if let v = snap.text { out["text"] = v }
-            if let v = snap.checked { out["checked"] = v }
-            if let v = snap.selection { out["selection"] = v }
-            if let v = snap.selections { out["selections"] = v }
-            if let v = snap.items { out["items"] = v }
-            if let v = snap.value { out["value"] = v }
-            if let v = snap.enabled { out["enabled"] = v }
+            // the native model as it stands (optimistic changes included), minus the pixels
+            var out: [String: Any] = (try? JSONEncoder().encode(snap))
+                .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+            out["imageBGRA"] = nil
+            out["images"] = nil
+            out["entry"] = host.entry
+            out["attached"] = host.hosting?.superview != nil || host.owned != nil
+            out["os"] = W2S.osVersion.major
             if let v = snap.rows { out["rowCount"] = v.count }
             if let v = snap.columns { out["columns"] = v.filter { ($0.width ?? 1) > 0 }.map { $0.title } }
             if let hosting = host.hosting {

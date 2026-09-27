@@ -1,6 +1,9 @@
 /*
- * Win32-to-SwiftUI gallery: one window with every control milestone 1
- * translates, plus buttons for a message box and the open/save panels.
+ * Win32-to-SwiftUI gallery: one window with every control the runtime
+ * translates (milestones 1 and 2), plus buttons for the dialogs it replaces.
+ * Split buttons, command links and task dialogs only exist in comctl32 v6;
+ * the gallery creates those under a v6 activation context and leaves the
+ * rest on the classic classes, as most older apps get them.
  *
  *   gallery.exe            interactive
  *   gallery.exe /selftest  drives every control both ways through
@@ -19,12 +22,55 @@ enum
     ID_PUSH = 100, ID_DEFAULT, ID_CHECK, ID_RADIO1, ID_RADIO2, ID_GROUP, ID_LABEL, ID_SEP, ID_ICON,
     ID_EDIT, ID_PASSWORD, ID_NUMBER, ID_READONLY, ID_COMBO, ID_LIST, ID_MULTI, ID_REPORT, ID_LVLIST,
     ID_PROGRESS, ID_TRACK, ID_TAB, ID_MSGBOX, ID_OPEN, ID_SAVE, ID_PUSHLIKE,
+    /* milestone 2 */
+    ID_3STATE, ID_SPLIT, ID_CMDLINK, ID_FRAME, ID_RECT, ID_MLEDIT, ID_ECOMBO, ID_TREE, ID_UDEDIT, ID_UPDOWN,
+    ID_DATETIME, ID_MONTHCAL, ID_STATUS, ID_LVCHECK, ID_LVICON, ID_TOOLTIP,
+    ID_LAST
 };
 
-static HWND ctl[ID_PUSHLIKE + 1];
+static HWND ctl[ID_LAST];
 static HWND main_window;
-static int got_command[ID_PUSHLIKE + 1][16];   /* [id][notification code & 15] */
-static int got_hscroll, got_tabchange, got_lvchanged;
+static int got_command[ID_LAST][16];   /* [id][notification code & 15] */
+static int got_hscroll, got_tabchange, got_lvchanged, got_dropdown;
+static BOOL in_selftest;
+
+/* comctl32 v6 for the controls only it has */
+static HANDLE v6_context;
+
+static BOOL v6_begin( ULONG_PTR *cookie )
+{
+    static const char manifest[] =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"
+        "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">\n"
+        "<dependency><dependentAssembly><assemblyIdentity type=\"win32\" name=\"Microsoft.Windows.Common-Controls\" "
+        "version=\"6.0.0.0\" processorArchitecture=\"*\" publicKeyToken=\"6595b64144ccf1df\" language=\"*\"/>"
+        "</dependentAssembly></dependency>\n</assembly>\n";
+
+    if (!v6_context)
+    {
+        WCHAR path[MAX_PATH];
+        ACTCTXW actctx = { sizeof(actctx) };
+        HANDLE file;
+        DWORD written;
+
+        GetTempPathW( MAX_PATH, path );
+        wcscat( path, L"w2s-gallery-v6.manifest" );
+        file = CreateFileW( path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL );
+        if (file == INVALID_HANDLE_VALUE) return FALSE;
+        WriteFile( file, manifest, sizeof(manifest) - 1, &written, NULL );
+        CloseHandle( file );
+        actctx.lpSource = path;
+        v6_context = CreateActCtxW( &actctx );
+        if (v6_context == INVALID_HANDLE_VALUE) v6_context = NULL;
+        if (!v6_context) return FALSE;
+    }
+    return ActivateActCtx( v6_context, cookie );
+}
+
+static void v6_end( ULONG_PTR cookie )
+{
+    DeactivateActCtx( 0, cookie );
+}
 
 static char *(WINAPI *pQuery)( HWND );
 static char *(WINAPI *pInject)( HWND, const char * );
@@ -39,6 +85,8 @@ static HWND make( const WCHAR *cls, const WCHAR *text, DWORD style, int x, int y
     ctl[id] = hwnd;
     return hwnd;
 }
+
+static void create_controls2(void);
 
 static void create_controls(void)
 {
@@ -122,6 +170,24 @@ static void create_controls(void)
     make( L"Button", L"Message box…", BS_PUSHBUTTON | WS_TABSTOP, 16, 368, 120, 24, ID_MSGBOX );
     make( L"Button", L"Open…", BS_PUSHBUTTON | WS_TABSTOP, 144, 368, 120, 24, ID_OPEN );
     make( L"Button", L"Save…", BS_PUSHBUTTON | WS_TABSTOP, 272, 368, 120, 24, ID_SAVE );
+
+    create_controls2();
+}
+
+/* milestone 2, in the third column (x 724..1124) and along the bottom */
+static void create_controls2(void)
+{
+    ULONG_PTR cookie;
+
+    make( L"Button", L"Three-&state", BS_AUTO3STATE | WS_TABSTOP, 724, 16, 180, 20, ID_3STATE );
+    SendMessageW( ctl[ID_3STATE], BM_SETCHECK, BST_INDETERMINATE, 0 );
+    if (v6_begin( &cookie ))
+    {
+        make( L"Button", L"&Split", BS_SPLITBUTTON | WS_TABSTOP, 916, 14, 150, 26, ID_SPLIT );
+        make( L"Button", L"Command &link", BS_COMMANDLINK | WS_TABSTOP, 724, 48, 392, 56, ID_CMDLINK );
+        SendMessageW( ctl[ID_CMDLINK], BCM_SETNOTE, 0, (LPARAM)L"With a note under the title" );
+        v6_end( cookie );
+    }
 }
 
 static void open_file( BOOL save )
@@ -165,6 +231,21 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         NMHDR *hdr = (NMHDR *)lparam;
         if (hdr->hwndFrom == ctl[ID_TAB] && hdr->code == TCN_SELCHANGE) got_tabchange++;
         if (hdr->hwndFrom == ctl[ID_REPORT] && hdr->code == LVN_ITEMCHANGED) got_lvchanged++;
+        if (hdr->hwndFrom == ctl[ID_SPLIT] && hdr->code == BCN_DROPDOWN)
+        {
+            NMBCDROPDOWN *nm = (NMBCDROPDOWN *)lparam;
+            got_dropdown++;
+            if (!in_selftest)
+            {
+                HMENU menu = CreatePopupMenu();
+                POINT pt = { nm->rcButton.left, nm->rcButton.bottom };
+                AppendMenuW( menu, MF_STRING, 1, L"First choice" );
+                AppendMenuW( menu, MF_STRING, 2, L"Second choice" );
+                ClientToScreen( hdr->hwndFrom, &pt );
+                TrackPopupMenu( menu, TPM_LEFTALIGN | TPM_TOPALIGN, pt.x, pt.y, 0, hwnd, NULL );
+                DestroyMenu( menu );
+            }
+        }
         return 0;
     }
     case WM_DESTROY:
@@ -229,11 +310,49 @@ static void CALLBACK choose_file( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
     inject( NULL, "{\"t\":\"choose\",\"s\":\"/tmp/w2s-gallery-test.txt\"}" );
 }
 
+/* milestone 2 controls, both ways */
+static void selftest2(void)
+{
+    WCHAR text[256];
+
+    /* three-state check box */
+    check( query_has( ctl[ID_3STATE], "\"checked\":2" ), "BST_INDETERMINATE reaches the native check box" );
+    inject( ctl[ID_3STATE], "{\"t\":\"click\"}" );
+    pump( 200 );
+    check( SendMessageW( ctl[ID_3STATE], BM_GETCHECK, 0, 0 ) != BST_INDETERMINATE &&
+           got_command[ID_3STATE][BN_CLICKED] > 0, "native click moves the three-state box on (BN_CLICKED)" );
+
+    /* split button */
+    {
+        BUTTON_SPLITINFO info = { BCSIF_STYLE };
+        info.uSplitStyle = BCSS_NOSPLIT;
+        SendMessageW( ctl[ID_SPLIT], BCM_SETSPLITINFO, 0, (LPARAM)&info );
+        pump( 150 );
+        check( query_has( ctl[ID_SPLIT], "\"noSplit\":true" ), "BCM_SETSPLITINFO reaches the native split button" );
+        info.uSplitStyle = 0;
+        SendMessageW( ctl[ID_SPLIT], BCM_SETSPLITINFO, 0, (LPARAM)&info );
+    }
+    inject( ctl[ID_SPLIT], "{\"t\":\"click\"}" );
+    inject( ctl[ID_SPLIT], "{\"t\":\"dropdown\"}" );
+    pump( 200 );
+    check( got_command[ID_SPLIT][BN_CLICKED] > 0 && got_dropdown > 0, "native split button -> BN_CLICKED and BCN_DROPDOWN" );
+
+    /* command link */
+    SendMessageW( ctl[ID_CMDLINK], BCM_SETNOTE, 0, (LPARAM)L"A new note" );
+    pump( 150 );
+    check( query_has( ctl[ID_CMDLINK], "\"note\":\"A new note\"" ), "BCM_SETNOTE reaches the native command link" );
+    inject( ctl[ID_CMDLINK], "{\"t\":\"click\"}" );
+    pump( 200 );
+    check( got_command[ID_CMDLINK][BN_CLICKED] > 0, "native command link click -> BN_CLICKED" );
+    (void)text;
+}
+
 static int selftest(void)
 {
     static const int ids[] = { ID_PUSH, ID_DEFAULT, ID_PUSHLIKE, ID_GROUP, ID_CHECK, ID_RADIO1, ID_RADIO2, ID_LABEL,
                                ID_SEP, ID_ICON, ID_EDIT, ID_PASSWORD, ID_NUMBER, ID_READONLY, ID_COMBO, ID_LIST,
-                               ID_MULTI, ID_REPORT, ID_LVLIST, ID_PROGRESS, ID_TRACK, ID_TAB };
+                               ID_MULTI, ID_REPORT, ID_LVLIST, ID_PROGRESS, ID_TRACK, ID_TAB,
+                               ID_3STATE, ID_SPLIT, ID_CMDLINK };
     HMODULE w2s = GetModuleHandleW( L"win32swiftui.dll" );
     WCHAR text[256], file[MAX_PATH] = L"";
     OPENFILENAMEW ofn = { sizeof(ofn) };
@@ -352,6 +471,8 @@ static int selftest(void)
     pump( 200 );
     check( SendMessageW( ctl[ID_TAB], TCM_GETCURSEL, 0, 0 ) == 1 && got_tabchange > 0, "native tab -> TCN_SELCHANGE" );
 
+    selftest2();
+
     /* message box -> NSAlert: press the second button ("No") */
     SetTimer( main_window, 1, 800, press_alert_button );
     r = MessageBoxW( main_window, L"Save changes?", L"Gallery test", MB_YESNO | MB_ICONQUESTION );
@@ -389,13 +510,14 @@ int WINAPI wWinMain( HINSTANCE inst, HINSTANCE prev, WCHAR *cmdline, int show )
     wc.lpszClassName = L"W2SGallery";
     RegisterClassW( &wc );
     main_window = CreateWindowExW( 0, L"W2SGallery", L"Win32-to-SwiftUI gallery", WS_OVERLAPPEDWINDOW,
-                                   CW_USEDEFAULT, CW_USEDEFAULT, 740, 450, NULL, NULL, inst, NULL );
+                                   CW_USEDEFAULT, CW_USEDEFAULT, 1150, 720, NULL, NULL, inst, NULL );
     create_controls();
     ShowWindow( main_window, SW_SHOW );
     UpdateWindow( main_window );
 
     if (wcsstr( cmdline, L"/selftest" ))
     {
+        in_selftest = TRUE;
         ret = selftest();
         if (!wcsstr( cmdline, L"/stay" ))
         {

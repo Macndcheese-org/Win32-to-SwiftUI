@@ -150,12 +150,21 @@ entries:
           } primaryAction: {
             action()
           }.menuStyle(.button)
+    appkit:
+      - since: 12
+        code: |-
+          let s = NSSegmentedControl(labels: [title, ""], trackingMode: .momentary, target: nil, action: nil)
+          s.setImage(NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil), forSegment: 1)
+          s.setWidth(22, forSegment: 1)
     glass: automatic
     state_in: [WM_SETTEXT, BCM_SETSPLITINFO]
     events_out: {activate: WM_COMMAND/BN_CLICKED, menu: WM_NOTIFY/BCN_DROPDOWN then the app's TrackPopupMenu}
     notes: >-
       The arrow half raises BCN_DROPDOWN; the app then calls TrackPopupMenu, and that menu
-      is translated by menu.popup and shown from the arrow.
+      is translated by menu.popup and shown from the arrow. Because the items only exist
+      once the app has answered, the runtime draws the button as a momentary two-segment
+      control (the appkit item), the main part and a chevron, rather than a Menu whose
+      items must be known up front. BCSS_NOSPLIT makes both segments open the menu.
 
   - id: button.commandlink
     kind: control

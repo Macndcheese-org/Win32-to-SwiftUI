@@ -66,12 +66,61 @@ static void nothing_apply( struct w2s_control *ctl, const struct w2s_event *ev )
 {
 }
 
-static const struct w2s_kind kind_button_push = { "button.push", button_snapshot, button_apply };
-static const struct w2s_kind kind_button_default = { "button.default", button_snapshot, button_apply };
+/* BS_SPLITBUTTON: the arrow half raises BCN_DROPDOWN; the app answers with its
+ * own TrackPopupMenu (a native menu too, see menu.popup) */
+static void split_snapshot( struct w2s_control *ctl, struct json *j )
+{
+    DWORD style = GetWindowLongW( ctl->hwnd, GWL_STYLE );
+    BUTTON_SPLITINFO info = { BCSIF_STYLE };
+
+    button_snapshot( ctl, j );
+    json_bool( j, "isDefault", (style & BS_TYPEMASK) == BS_DEFSPLITBUTTON );
+    if (!SendMessageW( ctl->hwnd, BCM_GETSPLITINFO, 0, (LPARAM)&info )) info.uSplitStyle = 0;
+    json_bool( j, "noSplit", (info.uSplitStyle & BCSS_NOSPLIT) != 0 );
+}
+
+static void split_apply( struct w2s_control *ctl, const struct w2s_event *ev )
+{
+    if (!strcmp( ev->type, "click" )) SendMessageW( ctl->hwnd, BM_CLICK, 0, 0 );
+    else if (!strcmp( ev->type, "dropdown" ))
+    {
+        NMBCDROPDOWN nm = { { 0 } };
+        GetClientRect( ctl->hwnd, &nm.rcButton );
+        w2s_notify_parent( ctl->hwnd, BCN_DROPDOWN, &nm.hdr );
+    }
+}
+
+/* BS_COMMANDLINK: the title and the note under it (BCM_SETNOTE) */
+static void commandlink_snapshot( struct w2s_control *ctl, struct json *j )
+{
+    DWORD style = GetWindowLongW( ctl->hwnd, GWL_STYLE );
+    DWORD len = SendMessageW( ctl->hwnd, BCM_GETNOTELENGTH, 0, 0 );
+    WCHAR small[256], *note = small;
+
+    button_snapshot( ctl, j );
+    json_bool( j, "isDefault", (style & BS_TYPEMASK) == BS_DEFCOMMANDLINK );
+    if (len >= ARRAYSIZE(small)) note = HeapAlloc( GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR) );
+    note[0] = 0;
+    if (len)
+    {
+        DWORD size = len + 1;
+        SendMessageW( ctl->hwnd, BCM_GETNOTE, (WPARAM)&size, (LPARAM)note );
+    }
+    json_str( j, "note", note );
+    if (note != small) HeapFree( GetProcessHeap(), 0, note );
+}
+
+/* push and default buttons share a view: the default moves between buttons
+ * with the focus (DM_SETDEFID, BM_SETSTYLE) and must not rebuild the view */
+static const struct w2s_kind kind_button_push = { "button.push", button_snapshot, button_apply, NULL, "button.push" };
+static const struct w2s_kind kind_button_default = { "button.default", button_snapshot, button_apply, NULL, "button.push" };
 static const struct w2s_kind kind_button_checkbox = { "button.checkbox", button_snapshot, button_apply };
+static const struct w2s_kind kind_button_3state = { "button.3state", button_snapshot, button_apply };
 static const struct w2s_kind kind_button_pushlike = { "button.pushlike", button_snapshot, button_apply };
 static const struct w2s_kind kind_button_radio = { "button.radio", button_snapshot, button_apply };
 static const struct w2s_kind kind_button_groupbox = { "button.groupbox", groupbox_snapshot, nothing_apply };
+static const struct w2s_kind kind_button_split = { "button.split", split_snapshot, split_apply };
+static const struct w2s_kind kind_button_commandlink = { "button.commandlink", commandlink_snapshot, button_apply };
 
 /* ---------- Static ---------- */
 
@@ -535,10 +584,16 @@ const struct w2s_kind *w2s_select_kind( HWND hwnd )
         case BS_DEFPUSHBUTTON: return &kind_button_default;
         case BS_CHECKBOX:
         case BS_AUTOCHECKBOX: return (style & BS_PUSHLIKE) ? &kind_button_pushlike : &kind_button_checkbox;
+        case BS_3STATE:
+        case BS_AUTO3STATE: return (style & BS_PUSHLIKE) ? &kind_button_pushlike : &kind_button_3state;
         case BS_RADIOBUTTON:
         case BS_AUTORADIOBUTTON: return (style & BS_PUSHLIKE) ? &kind_button_pushlike : &kind_button_radio;
         case BS_GROUPBOX: return &kind_button_groupbox;
-        default: return NULL; /* owner-draw, 3-state, split, command link: later */
+        case BS_SPLITBUTTON:
+        case BS_DEFSPLITBUTTON: return &kind_button_split;
+        case BS_COMMANDLINK:
+        case BS_DEFCOMMANDLINK: return &kind_button_commandlink;
+        default: return NULL; /* owner-draw, user button */
         }
     }
     if (is_class( name, L"Static" ))

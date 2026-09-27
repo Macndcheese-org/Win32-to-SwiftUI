@@ -5,11 +5,13 @@ import SwiftUI
 
 enum ControlViews {
     // map: button.push button.default button.checkbox button.pushlike button.radio button.groupbox
+    // map: button.3state button.split button.commandlink
     // map: static.text static.separator static.image edit.single edit.password edit.number edit.readonly
     // map: combobox.dropdownlist listbox.single listbox.multi listview.list listview.report
     // map: progress trackbar tab
     static let entries: Set<String> = [
         "button.push", "button.default", "button.checkbox", "button.pushlike", "button.radio", "button.groupbox",
+        "button.3state", "button.split", "button.commandlink",
         "static.text", "static.separator", "static.image",
         "edit.single", "edit.password", "edit.number", "edit.readonly",
         "combobox.dropdownlist", "listbox.single", "listbox.multi", "listview.list", "listview.report",
@@ -83,6 +85,13 @@ struct ControlRoot: View {
             PushLike(model: model, label: label)
         case "button.radio":
             RadioButton(model: model, label: label, fontSize: metrics.fontSize, controlSize: metrics.controlSize)
+        case "button.3state":
+            TriStateBox(model: model, label: label, fontSize: metrics.fontSize, controlSize: metrics.controlSize)
+        case "button.split":
+            SplitButton(model: model, label: label, fontSize: metrics.fontSize, controlSize: metrics.controlSize)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case "button.commandlink":
+            CommandLink(model: model, label: label)
         case "button.groupbox":
             GroupBox(label: Text(label)) { Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity) }
                 .allowsHitTesting(false)
@@ -209,6 +218,154 @@ struct RadioButton: NSViewRepresentable {
         button.controlSize = nsControlSize(controlSize)
         button.state = (model.snap.checked ?? 0) == 1 ? .on : .off
         button.isEnabled = model.snap.enabled ?? true
+    }
+}
+
+/// BS_3STATE: a Toggle(sources:) whose sources disagree shows the mixed dash
+/// (13+), so an indeterminate button is fed [true, false]; macOS 12 uses
+/// NSButton's mixed state. The Win32 button cycles its own state
+/// (BS_AUTO3STATE) or the app sets it: the view only sends the click.
+struct TriStateBox: View {
+    @ObservedObject var model: ControlModel
+    let label: String
+    let fontSize: CGFloat
+    let controlSize: ControlSize
+
+    var body: some View {
+        Group {
+            if #available(macOS 13, *) {
+                Toggle(sources: Binding(
+                    get: { model.snap.checked == 2 ? [true, false] : [(model.snap.checked ?? 0) == 1] },
+                    set: { (_: [Bool]) in model.clickOnce() }),
+                       isOn: \.self) {
+                    Text(label).lineLimit(1)
+                }
+                .toggleStyle(.checkbox)
+            } else {
+                MixedCheckBox(model: model, label: label, fontSize: fontSize, controlSize: controlSize)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+}
+
+struct MixedCheckBox: NSViewRepresentable {
+    @ObservedObject var model: ControlModel
+    let label: String
+    let fontSize: CGFloat
+    let controlSize: ControlSize
+
+    final class Coordinator: NSObject {
+        var model: ControlModel
+        init(model: ControlModel) { self.model = model }
+        @objc func clicked(_ sender: NSButton) { model.emit(["t": "click"]) }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(model: model) }
+
+    func makeNSView(context: Context) -> NSButton {
+        let button = NSButton(checkboxWithTitle: label, target: context.coordinator,
+                              action: #selector(Coordinator.clicked(_:)))
+        button.allowsMixedState = true
+        button.lineBreakMode = .byTruncatingTail
+        return button
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) {
+        context.coordinator.model = model
+        button.title = label
+        button.font = NSFont.systemFont(ofSize: fontSize)
+        button.controlSize = nsControlSize(controlSize)
+        switch model.snap.checked ?? 0 {
+        case 1: button.state = .on
+        case 2: button.state = .mixed
+        default: button.state = .off
+        }
+        button.isEnabled = model.snap.enabled ?? true
+    }
+}
+
+/// BS_SPLITBUTTON. The arrow half raises BCN_DROPDOWN and the app shows its own
+/// menu (TrackPopupMenu, native too: menu.popup), so the arrow can't open a
+/// SwiftUI Menu whose items would have to be known beforehand: the button is a
+/// momentary two-segment control, the main part and a chevron.
+struct SplitButton: NSViewRepresentable {
+    @ObservedObject var model: ControlModel
+    let label: String
+    let fontSize: CGFloat
+    let controlSize: ControlSize
+    static let arrowWidth: CGFloat = 22
+
+    final class Coordinator: NSObject {
+        var model: ControlModel
+        init(model: ControlModel) { self.model = model }
+        @objc func pressed(_ sender: NSSegmentedControl) {
+            let arrow = sender.selectedSegment == 1 || (model.snap.noSplit ?? false)
+            model.emit(["t": arrow ? "dropdown" : "click"])
+        }
+    }
+
+    /// The main segment takes the width the arrow leaves.
+    final class Control: NSSegmentedControl {
+        override func setFrameSize(_ newSize: NSSize) {
+            super.setFrameSize(newSize)
+            let main = max(24, newSize.width - SplitButton.arrowWidth - 8)
+            if segmentCount == 2 && abs(width(forSegment: 0) - main) > 0.5 { setWidth(main, forSegment: 0) }
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(model: model) }
+
+    func makeNSView(context: Context) -> NSSegmentedControl {
+        let control = Control(labels: [label, ""], trackingMode: .momentary, target: context.coordinator,
+                              action: #selector(Coordinator.pressed(_:)))
+        control.setImage(NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil), forSegment: 1)
+        control.setWidth(SplitButton.arrowWidth, forSegment: 1)
+        control.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        control.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return control
+    }
+
+    func updateNSView(_ control: NSSegmentedControl, context: Context) {
+        context.coordinator.model = model
+        control.setLabel(label, forSegment: 0)
+        control.font = NSFont.systemFont(ofSize: fontSize)
+        control.controlSize = nsControlSize(controlSize)
+        control.isEnabled = model.snap.enabled ?? true
+    }
+}
+
+/// BS_COMMANDLINK: macOS has none; Setup Assistant's choices (a large button
+/// with a title and a secondary line) are the closest. Glass on 26.
+struct CommandLink: View {
+    @ObservedObject var model: ControlModel
+    let label: String
+
+    var body: some View {
+        let note = model.snap.note ?? ""
+        let content = VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.headline).lineLimit(1)
+            if !note.isEmpty { Text(note).font(.callout).foregroundStyle(.secondary).lineLimit(2) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        let click = { model.emit(["t": "click"]) }
+        Group {
+            if model.snap.isDefault == true {
+                if #available(macOS 26, *) {
+                    Button(action: click) { content }.buttonStyle(.glassProminent)
+                } else {
+                    Button(action: click) { content }.buttonStyle(.borderedProminent)
+                }
+            } else {
+                if #available(macOS 26, *) {
+                    Button(action: click) { content }.buttonStyle(.glass)
+                } else {
+                    Button(action: click) { content }.buttonStyle(.bordered)
+                }
+            }
+        }
+        .controlSize(.large)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
