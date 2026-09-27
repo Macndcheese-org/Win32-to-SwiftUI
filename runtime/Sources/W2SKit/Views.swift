@@ -1708,8 +1708,8 @@ struct HideScrollBackground: ViewModifier {
 /// Optional SF Symbols in the sidebar rows, only when every page title is a
 /// known settings page (English or French); otherwise none at all. Every name
 /// below exists at the macOS 12 floor (name_availability.plist, year <=
-/// 2021.1). Staging's flask is 2023-only (macOS 14), so Staging has no symbol
-/// and a sheet with a Staging page (like winecfg) shows no icons at all.
+/// 2021.1): flask (Staging's lab flask) is 2023-only, so Staging uses
+/// testtube.2 (2021) instead.
 enum SidebarIcon {
     static func symbols(for titles: [String]) -> [String?]? {
         var out: [String?] = []
@@ -1730,6 +1730,7 @@ enum SidebarIcon {
         case "Applications": return "square.grid.2x2"
         case "Desktop Integration", "Intégration avec le bureau": return "menubar.dock.rectangle"
         case "About", "À propos": return "info.circle"
+        case "Staging": return "testtube.2"
         default: return nil
         }
     }
