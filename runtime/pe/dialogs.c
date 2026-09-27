@@ -40,13 +40,59 @@ static BOOL CALLBACK disable_proc( HWND hwnd, LPARAM lparam )
     return TRUE;
 }
 
+/* one poll: the result (done), the events raised meanwhile, or nothing */
+static char *poll_request( UINT64 id, BOOL *done, UINT32 *len )
+{
+    struct w2s_request_poll_params poll;
+    char small[4096], *buf;
+
+    poll.id = id;
+    poll.buffer = small;
+    poll.size = sizeof(small);
+    poll.len = 0;
+    poll.done = 0;
+    w2s_call( unix_w2s_request_poll, &poll );
+    while (poll.len > poll.size)
+    {
+        char *big = HeapAlloc( GetProcessHeap(), 0, poll.len );
+        poll.buffer = big;
+        poll.size = poll.len;
+        poll.len = 0;
+        poll.done = 0;
+        w2s_call( unix_w2s_request_poll, &poll );
+        if (poll.len <= poll.size)
+        {
+            *done = poll.done;
+            *len = poll.len;
+            return big;
+        }
+        HeapFree( GetProcessHeap(), 0, big );   /* it grew meanwhile */
+    }
+    *done = poll.done;
+    *len = poll.len;
+    buf = HeapAlloc( GetProcessHeap(), 0, poll.len + 1 );
+    memcpy( buf, small, poll.len );
+    buf[poll.len] = 0;
+    return buf;
+}
+
+void w2s_request_update( UINT64 id, const char *json )
+{
+    struct w2s_request_update_params params = { id, json, strlen( json ) };
+    w2s_call( unix_w2s_request_update, &params );
+}
+
 BOOL w2s_run_request( const char *kind, HWND owner, const char *json, char **result )
 {
+    return w2s_run_request_ex( kind, owner, json, NULL, result );
+}
+
+BOOL w2s_run_request_ex( const char *kind, HWND owner, const char *json, struct w2s_request_handler *handler,
+                         char **result )
+{
     struct w2s_request_start_params start;
-    struct w2s_request_poll_params poll;
     struct w2s_host owner_host = { 0 };
     struct thread_windows disabled = { 0 };
-    char small[4096];
     BOOL have_host = FALSE;
     MSG msg;
     int i;
@@ -72,30 +118,26 @@ BOOL w2s_run_request( const char *kind, HWND owner, const char *json, char **res
 
     for (;;)
     {
-        poll.id = start.id;
-        poll.buffer = small;
-        poll.size = sizeof(small);
-        poll.len = 0;
-        poll.done = 0;
-        w2s_call( unix_w2s_request_poll, &poll );
-        if (poll.done)
+        BOOL done;
+        UINT32 len;
+        char *text = poll_request( start.id, &done, &len );
+
+        if (done)
         {
-            if (poll.len > poll.size)
-            {
-                char *big = HeapAlloc( GetProcessHeap(), 0, poll.len );
-                poll.buffer = big;
-                poll.size = poll.len;
-                w2s_call( unix_w2s_request_poll, &poll );
-                *result = big;
-            }
-            else
-            {
-                *result = HeapAlloc( GetProcessHeap(), 0, poll.len + 1 );
-                memcpy( *result, small, poll.len );
-                (*result)[poll.len] = 0;
-            }
+            *result = text;
             break;
         }
+        if (len && handler && handler->event)
+        {
+            struct w2s_event *events;
+            int count = json_parse_events( text, &events );
+            TRACE( "request %s events %s\n", kind, text );
+            for (i = 0; i < count; i++) handler->event( handler, start.id, &events[i] );
+            json_free_events( events, count );
+        }
+        HeapFree( GetProcessHeap(), 0, text );
+        if (handler && handler->idle) handler->idle( handler, start.id );
+
         MsgWaitForMultipleObjectsEx( 0, NULL, 30, QS_ALLINPUT, MWMO_INPUTAVAILABLE );
         while (PeekMessageW( &msg, 0, 0, 0, PM_REMOVE ))
         {
@@ -121,7 +163,7 @@ BOOL w2s_run_request( const char *kind, HWND owner, const char *json, char **res
 
 /* The button labels wine shows, in its current language: taken from user32's
  * MSGBOX dialog template, so a French wine gets French buttons. */
-static WCHAR *label_from_template( LANGID lang, int id )
+WCHAR *w2s_msgbox_label( LANGID lang, int id )
 {
     HMODULE user32 = GetModuleHandleW( L"user32.dll" );
     HRSRC res = FindResourceExW( user32, (LPCWSTR)RT_DIALOG, L"MSGBOX", lang );
@@ -172,7 +214,7 @@ static WCHAR *label_from_template( LANGID lang, int id )
     return NULL;
 }
 
-static WCHAR *resource_string( HINSTANCE inst, const WCHAR *s )
+WCHAR *w2s_resource_string( HINSTANCE inst, const WCHAR *s )
 {
     WCHAR buf[1024];
     if (!s) return NULL;
@@ -183,7 +225,7 @@ static WCHAR *resource_string( HINSTANCE inst, const WCHAR *s )
 
 static void add_button( struct json *j, LANGID lang, int id, BOOL is_default, BOOL is_cancel )
 {
-    WCHAR *label = label_from_template( lang, id );
+    WCHAR *label = w2s_msgbox_label( lang, id );
     json_obj_begin( j );
     json_str( j, "title", label ? label : L"OK" );
     json_int( j, "id", id );
@@ -225,8 +267,8 @@ BOOL WINAPI W2SMessageBox( const MSGBOXPARAMSW *params, INT *ret )
     if (!cancel_id && n == 1) cancel_id = sets[type][0]; /* Escape closes a lone OK */
     if (def >= (UINT)n) def = 0;
 
-    text = resource_string( params->hInstance, params->lpszText );
-    caption = resource_string( params->hInstance, params->lpszCaption );
+    text = w2s_resource_string( params->hInstance, params->lpszText );
+    caption = w2s_resource_string( params->hInstance, params->lpszCaption );
 
     /* macOS alerts show the app icon, so a caption that's just the program's
      * name adds nothing: the text becomes the bold message. Otherwise the
@@ -339,10 +381,34 @@ static void set_path_result( OPENFILENAMEW *ofn, const WCHAR *path )
     }
 }
 
+static BOOL file_dialog( OPENFILENAMEW *ofn, BOOL save, DWORD fos, BOOL *ret );
+
 /***********************************************************************
  *      W2SFileDialog  (win32swiftui.@)
  */
 BOOL WINAPI W2SFileDialog( OPENFILENAMEW *ofn, BOOL save, BOOL *ret )
+{
+    return file_dialog( ofn, save, 0, ret );
+}
+
+/***********************************************************************
+ *      W2SItemDialog  (win32swiftui.@)
+ *
+ * IFileOpenDialog / IFileSaveDialog (comdlg32's itemdlg.c): the dialog's
+ * state comes as an OPENFILENAMEW plus its FOS_* options; the result is the
+ * same as GetOpenFileName's ("dir\0name\0name\0\0" for several files).
+ */
+BOOL WINAPI W2SItemDialog( OPENFILENAMEW *ofn, BOOL save, DWORD fos, BOOL *ret )
+{
+    ofn->Flags = OFN_EXPLORER;
+    if (fos & FOS_ALLOWMULTISELECT) ofn->Flags |= OFN_ALLOWMULTISELECT;
+    if (fos & FOS_FORCESHOWHIDDEN) ofn->Flags |= OFN_FORCESHOWHIDDEN;
+    if (fos & FOS_NODEREFERENCELINKS) ofn->Flags |= OFN_NODEREFERENCELINKS;
+    if (fos & FOS_NOCHANGEDIR) ofn->Flags |= OFN_NOCHANGEDIR;
+    return file_dialog( ofn, save, fos, ret );
+}
+
+static BOOL file_dialog( OPENFILENAMEW *ofn, BOOL save, DWORD fos, BOOL *ret )
 {
     struct json j;
     char *result;
@@ -350,6 +416,7 @@ BOOL WINAPI W2SFileDialog( OPENFILENAMEW *ofn, BOOL save, BOOL *ret )
     double filter_index;
     int count, i;
     BOOL multi = (ofn->Flags & OFN_ALLOWMULTISELECT) && !save;
+    BOOL folders = (fos & FOS_PICKFOLDERS) && !save;
 
     if (ofn->Flags & (OFN_ENABLEHOOK | OFN_ENABLETEMPLATE | OFN_ENABLETEMPLATEHANDLE)) return FALSE;
     if (multi && !(ofn->Flags & OFN_EXPLORER)) return FALSE; /* old space-separated list */
@@ -363,8 +430,10 @@ BOOL WINAPI W2SFileDialog( OPENFILENAMEW *ofn, BOOL save, BOOL *ret )
     json_bool( &j, "multi", multi );
     json_bool( &j, "showHidden", (ofn->Flags & OFN_FORCESHOWHIDDEN) != 0 );
     json_bool( &j, "resolveLinks", !(ofn->Flags & OFN_NODEREFERENCELINKS) );
+    json_bool( &j, "folders", folders );
+    json_bool( &j, "strict", (fos & FOS_STRICTFILETYPES) != 0 );
     if (ofn->lpstrTitle) json_str( &j, "title", ofn->lpstrTitle );
-    json_filters( &j, ofn->lpstrFilter );
+    if (!folders) json_filters( &j, ofn->lpstrFilter );
     json_int( &j, "filterIndex", ofn->nFilterIndex ? ofn->nFilterIndex : 1 );
     if (ofn->lpstrDefExt) json_str( &j, "defExt", ofn->lpstrDefExt );
 
@@ -466,6 +535,211 @@ BOOL WINAPI W2SFileDialog( OPENFILENAMEW *ofn, BOOL save, BOOL *ret )
         }
         for (i = 0; i < count; i++) if (dos[i]) HeapFree( GetProcessHeap(), 0, dos[i] );
         HeapFree( GetProcessHeap(), 0, dos );
+    }
+    for (i = 0; i < count; i++) HeapFree( GetProcessHeap(), 0, paths[i] );
+    if (paths) HeapFree( GetProcessHeap(), 0, paths );
+    return TRUE;
+}
+
+/* ---------- SHBrowseForFolder ---------- */
+
+/* The app's callback gets a hidden window of ours: BFFM_SETSELECTION,
+ * BFFM_SETOKTEXT, BFFM_SETSTATUSTEXT and BFFM_ENABLEOK sent to it before the
+ * panel opens (in BFFM_INITIALIZED) set it up; sent later, they update it. */
+struct folder_dialog
+{
+    struct w2s_request_handler handler;     /* first: the handler is the state */
+    BROWSEINFOW *bi;
+    HWND hwnd;
+    UINT64 id;              /* 0 until the panel is up */
+    WCHAR selection[MAX_PATH];
+    WCHAR ok_text[64];
+    WCHAR status[512];
+    WCHAR title[256];
+    BOOL ok_enabled;
+};
+
+static BOOL (WINAPI *p_SHGetPathFromIDListW)( LPCITEMIDLIST, WCHAR * );
+static LPITEMIDLIST (WINAPI *p_ILCreateFromPathW)( const WCHAR * );
+static void (WINAPI *p_ILFree)( LPITEMIDLIST );
+
+static void folder_update( struct folder_dialog *fd, const char *key, const WCHAR *value, BOOL unix_path )
+{
+    struct json j;
+
+    if (!fd->id) return;
+    json_init( &j );
+    json_obj_begin( &j );
+    if (unix_path) json_unix_path( &j, key, value );
+    else json_str( &j, key, value );
+    json_obj_end( &j );
+    w2s_request_update( fd->id, j.buf );
+    json_free( &j );
+}
+
+static void folder_text( WCHAR *dst, int size, LPARAM lparam, BOOL ansi )
+{
+    if (!lparam) dst[0] = 0;
+    else if (ansi) MultiByteToWideChar( CP_ACP, 0, (const char *)lparam, -1, dst, size );
+    else lstrcpynW( dst, (const WCHAR *)lparam, size );
+}
+
+static LRESULT CALLBACK folder_dialog_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    struct folder_dialog *fd = (struct folder_dialog *)GetWindowLongPtrW( hwnd, GWLP_USERDATA );
+    char json[64];
+
+    if (!fd) return DefWindowProcW( hwnd, msg, wparam, lparam );
+    switch (msg)
+    {
+    case BFFM_SETSELECTIONA:
+    case BFFM_SETSELECTIONW:
+        if (!wparam)    /* a PIDL */
+        {
+            if (!p_SHGetPathFromIDListW || !p_SHGetPathFromIDListW( (LPCITEMIDLIST)lparam, fd->selection )) return FALSE;
+        }
+        else folder_text( fd->selection, MAX_PATH, lparam, msg == BFFM_SETSELECTIONA );
+        folder_update( fd, "dir", fd->selection, TRUE );
+        return TRUE;
+    case BFFM_SETOKTEXT:
+        folder_text( fd->ok_text, ARRAYSIZE(fd->ok_text), lparam, FALSE );
+        folder_update( fd, "prompt", fd->ok_text, FALSE );
+        return TRUE;
+    case BFFM_SETSTATUSTEXTA:
+    case BFFM_SETSTATUSTEXTW:
+        folder_text( fd->status, ARRAYSIZE(fd->status), lparam, msg == BFFM_SETSTATUSTEXTA );
+        folder_update( fd, "status", fd->status, FALSE );
+        return TRUE;
+    case BFFM_ENABLEOK:
+        fd->ok_enabled = lparam != 0;
+        snprintf( json, sizeof(json), "{\"okEnabled\":%s}", lparam ? "true" : "false" );
+        if (fd->id) w2s_request_update( fd->id, json );
+        return TRUE;
+    case BFFM_SETEXPANDED:
+        return TRUE;
+    case WM_SETTEXT:    /* the dialog's caption, which apps often set in BFFM_INITIALIZED */
+        folder_text( fd->title, ARRAYSIZE(fd->title), lparam, FALSE );
+        break;
+    }
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
+}
+
+static void folder_event( struct w2s_request_handler *handler, UINT64 id, const struct w2s_event *ev )
+{
+    struct folder_dialog *fd = (struct folder_dialog *)handler;
+    char *utf8;
+    WCHAR *dos;
+    LPITEMIDLIST pidl;
+
+    fd->id = id;
+    if (strcmp( ev->type, "selchange" ) || !ev->string || !fd->bi->lpfn || !p_ILCreateFromPathW) return;
+    utf8 = utf8_from_wide( ev->string, -1 );
+    dos = p_wine_get_dos_file_name( utf8 );
+    HeapFree( GetProcessHeap(), 0, utf8 );
+    if (!dos) return;
+    if ((pidl = p_ILCreateFromPathW( dos )))
+    {
+        fd->bi->lpfn( fd->hwnd, BFFM_SELCHANGED, (LPARAM)pidl, fd->bi->lParam );
+        p_ILFree( pidl );
+    }
+    HeapFree( GetProcessHeap(), 0, dos );
+}
+
+static void folder_idle( struct w2s_request_handler *handler, UINT64 id )
+{
+    ((struct folder_dialog *)handler)->id = id;
+}
+
+/***********************************************************************
+ *      W2SBrowseForFolder  (win32swiftui.@)
+ *
+ * shell32's SHBrowseForFolderW asks first. TRUE: handled, and *chosen says
+ * whether path (MAX_PATH) holds the chosen folder, which shell32 turns into
+ * the PIDL it returns. FALSE: wine's dialog runs.
+ */
+BOOL WINAPI W2SBrowseForFolder( BROWSEINFOW *bi, WCHAR *path, BOOL *chosen )
+{
+    static ATOM atom;
+    HMODULE shell32 = GetModuleHandleW( L"shell32.dll" );
+    struct folder_dialog fd;
+    struct json j;
+    WCHAR **paths, message[1024];
+    char *result;
+    int count, i;
+    BOOL ok;
+
+    *chosen = FALSE;
+    /* computers and printers aren't file-system choices */
+    if (bi->ulFlags & (BIF_BROWSEFORCOMPUTER | BIF_BROWSEFORPRINTER)) return FALSE;
+    init_path_funcs();
+    if (!p_wine_get_dos_file_name || !p_wine_get_unix_file_name || !shell32) return FALSE;
+    p_SHGetPathFromIDListW = (void *)GetProcAddress( shell32, "SHGetPathFromIDListW" );
+    p_ILCreateFromPathW = (void *)GetProcAddress( shell32, "ILCreateFromPathW" );
+    p_ILFree = (void *)GetProcAddress( shell32, "ILFree" );
+    if (!atom)
+    {
+        WNDCLASSW wc = { 0 };
+        wc.lpfnWndProc = folder_dialog_proc;
+        wc.hInstance = GetModuleHandleW( L"win32swiftui.dll" );
+        wc.lpszClassName = L"Win32ToSwiftUI.BrowseForFolder";
+        atom = RegisterClassW( &wc );
+    }
+
+    memset( &fd, 0, sizeof(fd) );
+    fd.handler.event = folder_event;
+    fd.handler.idle = folder_idle;
+    fd.bi = bi;
+    fd.ok_enabled = TRUE;
+    fd.hwnd = CreateWindowExW( 0, L"Win32ToSwiftUI.BrowseForFolder", NULL, WS_POPUP, 0, 0, 0, 0, bi->hwndOwner,
+                               NULL, GetModuleHandleW( L"win32swiftui.dll" ), NULL );
+    if (!fd.hwnd) return FALSE;
+    SetWindowLongPtrW( fd.hwnd, GWLP_USERDATA, (LONG_PTR)&fd );
+
+    /* the root is where the panel starts, unless the callback picks a folder */
+    if (bi->pidlRoot && !IS_INTRESOURCE( bi->pidlRoot ) && p_SHGetPathFromIDListW)
+        p_SHGetPathFromIDListW( bi->pidlRoot, fd.selection );
+    if (bi->lpfn) bi->lpfn( fd.hwnd, BFFM_INITIALIZED, 0, bi->lParam );
+
+    message[0] = 0;
+    if (bi->lpszTitle) lstrcpynW( message, bi->lpszTitle, ARRAYSIZE(message) );
+    if (fd.status[0])
+    {
+        if (message[0]) wcsncat( message, L"\n", ARRAYSIZE(message) - wcslen( message ) - 1 );
+        wcsncat( message, fd.status, ARRAYSIZE(message) - wcslen( message ) - 1 );
+    }
+    json_init( &j );
+    json_obj_begin( &j );
+    json_bool( &j, "folders", TRUE );
+    json_bool( &j, "files", (bi->ulFlags & BIF_BROWSEINCLUDEFILES) != 0 );
+    json_bool( &j, "newFolder", !(bi->ulFlags & BIF_NONEWFOLDERBUTTON) );
+    json_bool( &j, "resolveLinks", !(bi->ulFlags & BIF_NOTRANSLATETARGETS) );
+    json_bool( &j, "events", bi->lpfn != NULL );
+    json_bool( &j, "okEnabled", fd.ok_enabled );
+    if (message[0]) json_str( &j, "message", message );
+    if (fd.ok_text[0]) json_str( &j, "prompt", fd.ok_text );
+    if (fd.title[0]) json_str( &j, "windowTitle", fd.title );
+    if (fd.selection[0]) json_unix_path( &j, "dir", fd.selection );
+    json_obj_end( &j );
+
+    ok = w2s_run_request_ex( "open", bi->hwndOwner, j.buf, &fd.handler, &result );
+    json_free( &j );
+    SetWindowLongPtrW( fd.hwnd, GWLP_USERDATA, 0 );
+    DestroyWindow( fd.hwnd );
+    if (!ok) return FALSE;
+
+    count = json_get_str_array( result, "paths", &paths );
+    HeapFree( GetProcessHeap(), 0, result );
+    if (count > 0)
+    {
+        char *utf8 = utf8_from_wide( paths[0], -1 );
+        WCHAR *dos = p_wine_get_dos_file_name( utf8 );
+        HeapFree( GetProcessHeap(), 0, utf8 );
+        if (dos && wcslen( dos ) < MAX_PATH)
+        {
+            wcscpy( path, dos );
+            *chosen = TRUE;
+        }
+        if (dos) HeapFree( GetProcessHeap(), 0, dos );
     }
     for (i = 0; i < count; i++) HeapFree( GetProcessHeap(), 0, paths[i] );
     if (paths) HeapFree( GetProcessHeap(), 0, paths );

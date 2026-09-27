@@ -5,6 +5,9 @@
  * is on. For a window the map translates, we:
  *   - subclass it (under any subclass the app adds later),
  *   - drop its non-client area, so the native view covers everything,
+ *   - give it an empty window region, so nothing wine draws for it shows
+ *     (button and combo box code paints outside WM_PAINT too) and the parent
+ *     paints what is behind it,
  *   - ask winemac for a host view over it (W2S_ESCAPE_GET_HOST),
  *   - create the SwiftUI view in win32swiftui.so from a JSON snapshot.
  * The Win32 control keeps running and stays authoritative. After each
@@ -17,6 +20,7 @@
 
 int w2s_debug;
 UINT w2s_wake_message;
+UINT w2s_os_major = 12, w2s_os_minor;
 static BOOL unix_ready;
 static const WCHAR prop_name[] = L"Win32ToSwiftUI.Control";
 
@@ -67,22 +71,79 @@ void w2s_release_host( HWND hwnd, const struct w2s_host *host )
     ReleaseDC( hwnd, hdc );
 }
 
+/* An empty window region clips everything wine draws for the control, inside
+ * WM_PAINT or not, and takes the control out of its parent's clipping, so the
+ * parent paints its own background behind the native view. SetWindowRgn owns
+ * the region and sends SWP_FRAMECHANGED, so the non-client area goes (or comes
+ * back) through our WM_NCCALCSIZE at the same time. */
+static HRGN wine_region( struct w2s_control *ctl )
+{
+    HRGN rgn = ctl->kind && ctl->kind->region ? ctl->kind->region( ctl ) : NULL;
+    return rgn ? rgn : CreateRectRgn( 0, 0, 0, 0 );
+}
+
+static void clip_wine_drawing( struct w2s_control *ctl, BOOL clip )
+{
+    HWND hwnd = ctl->hwnd, parent = GetParent( hwnd );
+    DWORD style = GetWindowLongW( hwnd, GWL_STYLE );
+    RECT rc;
+
+    /* Button, Static, Edit and ComboBox are CS_PARENTDC classes: their DCs clip
+     * with the parent's region, which ignores the control's own window region,
+     * so wine kept drawing them under the native view. win32u drops parent
+     * clipping for WS_CLIPSIBLINGS windows (dce.c), and then the empty region
+     * holds for every DC the control gets, in WM_PAINT or not. */
+    /* our own style change must not look like the app's (reselect_kind) */
+    ctl->reselecting++;
+    if (clip && !(style & WS_CLIPSIBLINGS))
+    {
+        ctl->added_clipsiblings = TRUE;
+        SetWindowLongW( hwnd, GWL_STYLE, style | WS_CLIPSIBLINGS );
+    }
+    else if (!clip && ctl->added_clipsiblings)
+    {
+        ctl->added_clipsiblings = FALSE;
+        SetWindowLongW( hwnd, GWL_STYLE, style & ~WS_CLIPSIBLINGS );
+    }
+    ctl->reselecting--;
+    SetWindowRgn( hwnd, clip ? wine_region( ctl ) : NULL, FALSE );
+    if (!parent || !IsWindowVisible( hwnd )) return;
+    GetWindowRect( hwnd, &rc );
+    MapWindowPoints( NULL, parent, (POINT *)&rc, 2 );
+    RedrawWindow( parent, &rc, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN );
+}
+
 void w2s_common_snapshot( struct w2s_control *ctl, struct json *j )
 {
-    WCHAR text[1024];
+    WCHAR text[1024], *help;
     HFONT font = (HFONT)SendMessageW( ctl->hwnd, WM_GETFONT, 0, 0 );
     LOGFONTW lf;
     RECT rc;
 
-    GetWindowTextW( ctl->hwnd, text, ARRAYSIZE(text) );
     json_str_a( j, "entry", ctl->kind->entry );
-    json_str( j, "text", text );
+    if (!(ctl->kind->flags & W2S_OWN_TEXT))
+    {
+        GetWindowTextW( ctl->hwnd, text, ARRAYSIZE(text) );
+        json_str( j, "text", text );
+    }
     json_bool( j, "enabled", IsWindowEnabled( ctl->hwnd ) );
     if (!font) font = GetStockObject( DEFAULT_GUI_FONT );
     if (GetObjectW( font, sizeof(lf), &lf )) json_int( j, "fontPx", abs( lf.lfHeight ) ? abs( lf.lfHeight ) : 11 );
     GetClientRect( ctl->hwnd, &rc );
     json_int( j, "widthPx", rc.right );
     json_int( j, "heightPx", rc.bottom );
+    if ((help = w2s_tool_text( ctl->hwnd )))
+    {
+        json_str( j, "help", help );
+        HeapFree( GetProcessHeap(), 0, help );
+    }
+}
+
+const UINT *w2s_map_state_in( const char *entry, unsigned int *count )
+{
+    const struct w2s_map_entry *e = map_entry( entry );
+    *count = e ? e->state_in_count : 0;
+    return e ? e->state_in : NULL;
 }
 
 static char *build_snapshot( struct w2s_control *ctl )
@@ -94,6 +155,7 @@ static char *build_snapshot( struct w2s_control *ctl )
     json_init( &j );
     json_obj_begin( &j );
     w2s_common_snapshot( ctl, &j );
+    json_int( &j, "ack", ctl->ack );
     ctl->kind->snapshot( ctl, &j );
     json_obj_end( &j );
     ctl->snapshotting--;
@@ -113,17 +175,70 @@ void w2s_push( struct w2s_control *ctl, BOOL force )
     if (!force && ctl->last && !strcmp( ctl->last, snap ))
     {
         HeapFree( GetProcessHeap(), 0, snap );
-        return;
     }
+    else
+    {
+        if (ctl->kind->region)
+        {
+            /* the part wine draws may have moved with the change */
+            HRGN now = CreateRectRgn( 0, 0, 0, 0 ), want = wine_region( ctl );
+            if (GetWindowRgn( ctl->hwnd, now ) == ERROR || !EqualRgn( now, want ))
+            {
+                SetWindowRgn( ctl->hwnd, want, TRUE );
+                want = NULL;
+            }
+            DeleteObject( now );
+            if (want) DeleteObject( want );
+        }
+        params.handle = ctl->handle;
+        params.json = snap;
+        params.json_len = strlen( snap );
+        w2s_call( unix_w2s_control_update, &params );
+        if (ctl->last) HeapFree( GetProcessHeap(), 0, ctl->last );
+        ctl->last = snap;
+        TRACE( "push %p %s\n", ctl->hwnd, snap );
+    }
+    if (ctl->follower) w2s_push( ctl->follower, force );
+}
+
+/***********************************************************************
+ *      w2s_native_state
+ *
+ * What the native view published for the entry's answers (a JSON object),
+ * fetched again only when it changed. Never waits for the main thread.
+ */
+const char *w2s_native_state( struct w2s_control *ctl, BOOL *changed )
+{
+    struct w2s_control_state_params params;
+
+    if (changed) *changed = FALSE;
+    if (!ctl->handle) return NULL;
     params.handle = ctl->handle;
-    params.json = snap;
-    params.json_len = strlen( snap );
-    TRACE( "  update %p -> unix\n", ctl->hwnd );
-    w2s_call( unix_w2s_control_update, &params );
-    TRACE( "  update %p <- unix\n", ctl->hwnd );
-    if (ctl->last) HeapFree( GetProcessHeap(), 0, ctl->last );
-    ctl->last = snap;
-    TRACE( "push %p %s\n", ctl->hwnd, snap );
+    params.version = ctl->native_version;
+    params.buffer = ctl->native;
+    params.size = ctl->native ? ctl->native_size : 0;
+    params.len = 0;
+    w2s_call( unix_w2s_control_state, &params );
+    if (params.len > params.size)
+    {
+        char *buf = ctl->native ? HeapReAlloc( GetProcessHeap(), 0, ctl->native, params.len + 256 )
+                                : HeapAlloc( GetProcessHeap(), 0, params.len + 256 );
+        if (!buf) return ctl->native;
+        ctl->native = buf;
+        ctl->native_size = params.len + 256;
+        params.version = ctl->native_version;
+        params.buffer = ctl->native;
+        params.size = ctl->native_size;
+        params.len = 0;
+        w2s_call( unix_w2s_control_state, &params );
+        if (params.len > params.size) return NULL;  /* grew again meanwhile; next time */
+    }
+    if (params.len)
+    {
+        ctl->native_version = params.version;
+        if (changed) *changed = TRUE;
+    }
+    return ctl->native;
 }
 
 void w2s_notify_parent_command( HWND hwnd, UINT code )
@@ -147,6 +262,7 @@ static void apply_events( struct w2s_control *ctl )
     char *buf = small;
     int i, count;
 
+    if (!ctl->handle) return;
     params.handle = ctl->handle;
     params.buffer = small;
     params.size = sizeof(small);
@@ -159,13 +275,20 @@ static void apply_events( struct w2s_control *ctl )
         params.size = params.len;
         w2s_call( unix_w2s_pop_events, &params );
     }
-    if (!params.len) return;
+    if (!params.len || params.len > params.size)
+    {
+        if (buf != small) HeapFree( GetProcessHeap(), 0, buf );
+        return;
+    }
 
     count = json_parse_events( buf, &events );
     TRACE( "events %p %s\n", ctl->hwnd, buf );
     ctl->applying++;
-    for (i = 0; i < count && IsWindow( ctl->hwnd ); i++)
+    for (i = 0; i < count; i++)
     {
+        /* taken, even if the control is gone or the app refuses it */
+        if (events[i].seq > ctl->ack) ctl->ack = events[i].seq;
+        if (!IsWindow( ctl->hwnd ) || !ctl->active) continue;
         if (!strcmp( events[i].type, "focus" ))
         {
             if (GetFocus() != ctl->hwnd) SetFocus( ctl->hwnd );
@@ -176,19 +299,135 @@ static void apply_events( struct w2s_control *ctl )
     json_free_events( events, count );
     if (buf != small) HeapFree( GetProcessHeap(), 0, buf );
     /* the native view already shows what the user did; bring the rest back in line
-     * (the app may have refused it, like a vetoed tab change) */
+     * (the app may have refused it, like a vetoed tab change). The ack in it
+     * tells the native view this snapshot has seen all of its events. */
     if (IsWindow( ctl->hwnd )) w2s_push( ctl, FALSE );
 }
 
-static void detach( struct w2s_control *ctl )
+static const char *family( const struct w2s_kind *kind )
+{
+    return kind->family ? kind->family : kind->entry;
+}
+
+/* the native view goes; the control stays subclassed (a style change may
+ * bring it back) and wine draws it again */
+static void deactivate( struct w2s_control *ctl, BOOL destroying )
 {
     struct w2s_control_destroy_params params = { ctl->handle };
 
     if (ctl->handle) w2s_call( unix_w2s_control_destroy, &params );
+    ctl->handle = 0;
     if (ctl->host.surface) w2s_release_host( ctl->hwnd, &ctl->host );
-    RemovePropW( ctl->hwnd, prop_name );
+    memset( &ctl->host, 0, sizeof(ctl->host) );
     if (ctl->last) HeapFree( GetProcessHeap(), 0, ctl->last );
-    HeapFree( GetProcessHeap(), 0, ctl );
+    ctl->last = NULL;
+    if (ctl->data)
+    {
+        if (ctl->kind && ctl->kind->release) ctl->kind->release( ctl );
+        else HeapFree( GetProcessHeap(), 0, ctl->data );
+    }
+    ctl->data = NULL;
+    if (ctl->native) HeapFree( GetProcessHeap(), 0, ctl->native );
+    ctl->native = NULL;
+    ctl->native_version = 0;
+    if (ctl->active && !destroying) clip_wine_drawing( ctl, FALSE );
+    ctl->active = FALSE;
+}
+
+static BOOL set_kind( struct w2s_control *ctl, const struct w2s_kind *kind )
+{
+    const struct w2s_map_entry *entry = map_entry( kind->entry );
+
+    if (!entry)
+    {
+        TRACE( "%s is not in the map\n", kind->entry );
+        return FALSE;
+    }
+    ctl->kind = kind;
+    ctl->state_in = entry->state_in;
+    ctl->state_in_count = entry->state_in_count;
+    ctl->answers = entry->answers;
+    ctl->answers_count = entry->answers_count;
+    return TRUE;
+}
+
+/* the native view comes: clip wine, get a host view, create the SwiftUI view */
+static BOOL activate( struct w2s_control *ctl, const struct w2s_kind *kind )
+{
+    struct w2s_control_create_params params;
+    char *snap;
+
+    if (!set_kind( ctl, kind )) return FALSE;
+    ctl->active = TRUE;
+    clip_wine_drawing( ctl, TRUE );
+
+    if (!w2s_get_host( ctl->hwnd, &ctl->host ))
+    {
+        TRACE( "no host for %p\n", ctl->hwnd );
+        deactivate( ctl, FALSE );
+        return FALSE;
+    }
+    snap = build_snapshot( ctl );
+    params.host_view = ctl->host.view;
+    params.window = ctl->host.window;
+    params.post_wake = ctl->host.post_wake;
+    params.hwnd = (UINT_PTR)ctl->hwnd;
+    params.entry = kind->entry;
+    params.json = snap;
+    params.json_len = strlen( snap );
+    params.handle = 0;
+    w2s_call( unix_w2s_control_create, &params );
+    ctl->handle = params.handle;
+    ctl->last = snap;
+    if (!ctl->handle)
+    {
+        deactivate( ctl, FALSE );
+        return FALSE;
+    }
+    TRACE( "attached %p as %s: %s\n", ctl->hwnd, kind->entry, snap );
+    return TRUE;
+}
+
+/* a style change may make the control another entry, or one we don't translate
+ * (a list view switched to LVS_OWNERDATA, LVS_EX_CHECKBOXES added) */
+static void reselect_kind( struct w2s_control *ctl )
+{
+    const struct w2s_kind *kind;
+
+    /* switching sends style changes of its own; they must not switch again
+     * (that activated twice: a leaked native view, and a second one that
+     * never got the list view's icons) */
+    if (ctl->reselecting) return;
+    kind = w2s_select_kind( ctl->hwnd );
+    if (kind == ctl->kind && ctl->active) return;
+    if (kind && ctl->active && !strcmp( family( kind ), family( ctl->kind ) ))
+    {
+        if (set_kind( ctl, kind )) w2s_push( ctl, FALSE );
+        return;
+    }
+    TRACE( "%p: %s -> %s\n", ctl->hwnd, ctl->active ? ctl->kind->entry : "(wine)", kind ? kind->entry : "(wine)" );
+    ctl->reselecting++;
+    deactivate( ctl, FALSE );
+    if (kind) activate( ctl, kind );
+    ctl->reselecting--;
+}
+
+static BOOL is_reselect_message( UINT msg )
+{
+    return msg == WM_STYLECHANGED || msg == BM_SETSTYLE || msg == LVM_SETEXTENDEDLISTVIEWSTYLE || msg == LVM_SETVIEW;
+}
+
+static BOOL is_answer( struct w2s_control *ctl, UINT msg )
+{
+    unsigned int i;
+    for (i = 0; i < ctl->answers_count; i++) if (ctl->answers[i] == msg) return TRUE;
+    return FALSE;
+}
+
+struct w2s_control *w2s_control_from_hwnd( HWND hwnd )
+{
+    struct w2s_control *ctl = GetPropW( hwnd, prop_name );
+    return ctl && ctl->active ? ctl : NULL;
 }
 
 static LRESULT CALLBACK subclass_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
@@ -201,49 +440,88 @@ static LRESULT CALLBACK subclass_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
 
     if (msg == w2s_wake_message && w2s_wake_message)
     {
-        apply_events( ctl );
+        if (wparam == W2S_WAKE_REFRESH) w2s_push( ctl, FALSE );
+        else apply_events( ctl );
         return 0;
     }
 
+    if (msg == WM_NCDESTROY)
+    {
+        WNDPROC orig = ctl->orig;
+        deactivate( ctl, TRUE );
+        RemovePropW( hwnd, prop_name );
+        HeapFree( GetProcessHeap(), 0, ctl );
+        return CallWindowProcW( orig, hwnd, msg, wparam, lparam );
+    }
+    if (!ctl->active)
+    {
+        ret = CallWindowProcW( ctl->orig, hwnd, msg, wparam, lparam );
+        if (is_reselect_message( msg ) && unix_ready) reselect_kind( ctl );
+        return ret;
+    }
+
+    /* The empty window region already hides whatever wine paints, in and out
+     * of WM_PAINT, and lets the parent paint behind the control, so painting
+     * needs nothing from us. Two things still do: */
     switch (msg)
     {
     case WM_NCCALCSIZE:
-        /* no borders or scroll bars: the native control draws its own */
+        /* the client area, which the host view follows, is the whole window:
+         * the native control draws its own border and scrolls itself */
         return 0;
-    case WM_NCPAINT:
-        return 0;
-    case WM_ERASEBKGND:
-        return 1;
-    case WM_PAINT:
-    {
-        /* wine's drawing would show around the native control's rounded edges;
-         * paint what the parent has behind us instead */
-        PAINTSTRUCT ps;
-        HDC hdc = BeginPaint( hwnd, &ps );
-        if (hdc) DrawThemeParentBackground( hwnd, hdc, &ps.rcPaint );
-        EndPaint( hwnd, &ps );
-        return 0;
-    }
     case WM_PRINTCLIENT:
+        /* someone draws us into their DC (a child's DrawThemeParentBackground,
+         * a tab page inside a tab control): give them what is behind us, not
+         * wine's look of the control */
         DrawThemeParentBackground( hwnd, (HDC)wparam, NULL );
         return 0;
-    case WM_NCDESTROY:
-    {
-        WNDPROC orig = ctl->orig;
-        detach( ctl );
-        return CallWindowProcW( orig, hwnd, msg, wparam, lparam );
     }
+
+    /* queries the map says the native view answers (the caret and line layout
+     * of a multi-line edit); building a snapshot asks the Win32 control */
+    if (ctl->kind->answer && !ctl->snapshotting && is_answer( ctl, msg ) &&
+        ctl->kind->answer( ctl, msg, wparam, lparam, &ret ))
+    {
+        ctl->answered++;
+        return ret;
     }
 
     ret = CallWindowProcW( ctl->orig, hwnd, msg, wparam, lparam );
 
-    if (msg == WM_SETFOCUS || msg == WM_KILLFOCUS)
+    /* focus going to one of the control's own children (a combo box's edit
+     * part) stays within the native view */
+    if (msg == WM_SETFOCUS || (msg == WM_KILLFOCUS && !IsChild( hwnd, (HWND)wparam )))
     {
         struct w2s_control_focus_params params = { ctl->handle, msg == WM_SETFOCUS };
         w2s_call( unix_w2s_control_focus, &params );
     }
-    if (!ctl->applying && !ctl->snapshotting && is_state_message( ctl, msg )) w2s_push( ctl, FALSE );
+    if (ctl->kind->observe) ctl->kind->observe( ctl, msg, wparam, lparam );
+    if (is_reselect_message( msg ) && !ctl->applying) reselect_kind( ctl );
+    if (ctl->active && !ctl->applying && !ctl->snapshotting && is_state_message( ctl, msg )) w2s_push( ctl, FALSE );
     return ret;
+}
+
+/***********************************************************************
+ *      w2s_attach
+ *
+ * Subclasses a window and puts the native view of kind over it.
+ */
+BOOL w2s_attach( HWND hwnd, const struct w2s_kind *kind )
+{
+    struct w2s_control *ctl;
+
+    if (!unix_ready || GetPropW( hwnd, prop_name ) || !map_entry( kind->entry )) return FALSE;
+    TRACE( "attach %p as %s\n", hwnd, kind->entry );
+    ctl = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*ctl) );
+    ctl->hwnd = hwnd;
+    SetPropW( hwnd, prop_name, ctl );
+    ctl->orig = (WNDPROC)SetWindowLongPtrW( hwnd, GWLP_WNDPROC, (LONG_PTR)subclass_proc );
+    if (activate( ctl, kind )) return TRUE;
+
+    SetWindowLongPtrW( hwnd, GWLP_WNDPROC, (LONG_PTR)ctl->orig );
+    RemovePropW( hwnd, prop_name );
+    HeapFree( GetProcessHeap(), 0, ctl );
+    return FALSE;
 }
 
 /***********************************************************************
@@ -252,62 +530,16 @@ static LRESULT CALLBACK subclass_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
 void WINAPI W2SWindowCreated( HWND hwnd )
 {
     const struct w2s_kind *kind;
-    const struct w2s_map_entry *entry;
-    struct w2s_control *ctl;
-    struct w2s_control_create_params params;
-    char *snap;
+    WCHAR name[64];
 
-    if (!unix_ready || !(kind = w2s_select_kind( hwnd ))) return;
-    if (!(entry = map_entry( kind->entry )))
+    if (!unix_ready) return;
+    if (GetClassNameW( hwnd, name, ARRAYSIZE(name) ) && wcsstr( name, TOOLTIPS_CLASSW ))
     {
-        TRACE( "%s is not in the map\n", kind->entry );
+        w2s_observe_tooltip( hwnd );
         return;
     }
-
-    TRACE( "attach %p as %s\n", hwnd, kind->entry );
-    ctl = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*ctl) );
-    ctl->hwnd = hwnd;
-    ctl->kind = kind;
-    ctl->state_in = entry->state_in;
-    ctl->state_in_count = entry->state_in_count;
-    SetPropW( hwnd, prop_name, ctl );
-    ctl->orig = (WNDPROC)SetWindowLongPtrW( hwnd, GWLP_WNDPROC, (LONG_PTR)subclass_proc );
-    TRACE( "  subclassed\n" );
-    SetWindowPos( hwnd, 0, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE );
-    TRACE( "  frame changed\n" );
-
-    if (!w2s_get_host( hwnd, &ctl->host ))
-    {
-        TRACE( "no host for %p\n", hwnd );
-        goto fail;
-    }
-
-    TRACE( "  host view %#llx window %#llx\n", (unsigned long long)ctl->host.view, (unsigned long long)ctl->host.window );
-    snap = build_snapshot( ctl );
-    TRACE( "  snapshot %s\n", snap );
-    params.host_view = ctl->host.view;
-    params.window = ctl->host.window;
-    params.post_wake = ctl->host.post_wake;
-    params.hwnd = (UINT_PTR)hwnd;
-    params.entry = kind->entry;
-    params.json = snap;
-    params.json_len = strlen( snap );
-    params.handle = 0;
-    w2s_call( unix_w2s_control_create, &params );
-    ctl->handle = params.handle;
-    ctl->last = snap;
-    if (!ctl->handle) goto fail;
-    TRACE( "attached %p as %s: %s\n", hwnd, kind->entry, snap );
-    InvalidateRect( hwnd, NULL, TRUE );
-    return;
-
-fail:
-    SetWindowLongPtrW( hwnd, GWLP_WNDPROC, (LONG_PTR)ctl->orig );
-    if (ctl->host.surface) w2s_release_host( hwnd, &ctl->host );
-    RemovePropW( hwnd, prop_name );
-    if (ctl->last) HeapFree( GetProcessHeap(), 0, ctl->last );
-    HeapFree( GetProcessHeap(), 0, ctl );
-    SetWindowPos( hwnd, 0, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE );
+    if (!(kind = w2s_select_kind( hwnd ))) return;
+    w2s_attach( hwnd, kind );
 }
 
 /***********************************************************************
@@ -336,7 +568,14 @@ static char *debug_call( HWND hwnd, const char *json )
 
 char * WINAPI W2SDebugQuery( HWND hwnd )
 {
-    return debug_call( hwnd, "{\"op\":\"query\"}" );
+    char *ret = debug_call( hwnd, "{\"op\":\"query\"}" );
+    struct w2s_control *ctl = hwnd ? GetPropW( hwnd, prop_name ) : NULL;
+    size_t len = ret ? strlen( ret ) : 0;
+
+    /* what only this side knows */
+    if (ctl && len > 1 && ret[len - 1] == '}' && len + 32 < 65536)
+        snprintf( ret + len - 1, 34, ",\"peAnswers\":%u}", ctl->answered );
+    return ret;
 }
 
 char * WINAPI W2SDebugInject( HWND hwnd, const char *event_json )
@@ -367,7 +606,7 @@ BOOL WINAPI DllMain( HINSTANCE instance, DWORD reason, void *reserved )
     if (reason == DLL_PROCESS_ATTACH)
     {
         char value[8];
-        struct w2s_init_params params = { W2S_PROTOCOL_VERSION, 0 };
+        struct w2s_init_params params = { W2S_PROTOCOL_VERSION };
 
         DisableThreadLibraryCalls( instance );
         if (GetEnvironmentVariableA( "W2S_DEBUG", value, sizeof(value) )) w2s_debug = atoi( value );
@@ -378,7 +617,12 @@ BOOL WINAPI DllMain( HINSTANCE instance, DWORD reason, void *reserved )
         }
         w2s_wake_message = RegisterWindowMessageW( L"Win32ToSwiftUI.Wake" );
         unix_ready = !w2s_call( unix_w2s_init, &params ) && params.ok;
-        TRACE( "ready %d, wake message %#x\n", unix_ready, w2s_wake_message );
+        if (unix_ready)
+        {
+            w2s_os_major = params.os_major;
+            w2s_os_minor = params.os_minor;
+        }
+        TRACE( "ready %d on macOS %u.%u, wake message %#x\n", unix_ready, w2s_os_major, w2s_os_minor, w2s_wake_message );
     }
     return TRUE;
 }

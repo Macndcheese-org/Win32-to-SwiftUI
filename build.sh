@@ -10,7 +10,7 @@
 set -e
 cd "${0:A:h}"
 WINE_SRC=${WINE_SRC:?set WINE_SRC to the MNC wine source tree (branch w2s)}
-WINE_BUILD=${WINE_BUILD:?set WINE_BUILD to that tree's x86_64 build directory}
+WINE_BUILD=${WINE_BUILD:?set WINE_BUILD to the x86_64 build directory of that tree}
 DEST=${1:-$WINE_BUILD}
 OUT=build
 
@@ -21,7 +21,8 @@ echo "=== win32swiftui.dll (x86_64 PE)"
 mkdir -p $OUT/x86_64-windows
 x86_64-w64-mingw32-gcc -O2 -Wall -Wno-unused-parameter -shared -D_WIN32_WINNT=0x0a00 -Iruntime/include \
   -o $OUT/x86_64-windows/win32swiftui.dll \
-  runtime/pe/main.c runtime/pe/controls.c runtime/pe/json.c runtime/pe/dialogs.c runtime/pe/win32swiftui.def \
+  runtime/pe/main.c runtime/pe/controls.c runtime/pe/json.c runtime/pe/dialogs.c runtime/pe/taskdialog.c \
+  runtime/pe/win32swiftui.def \
   -Wl,--file-alignment=4096 -static-libgcc \
   "$WINE_BUILD/libs/winecrt0/x86_64-windows/libwinecrt0.a" "$WINE_BUILD/dlls/ntdll/x86_64-windows/libntdll.a" \
   -luser32 -lgdi32 -lcomctl32 -luxtheme -lkernel32
@@ -35,7 +36,7 @@ codesign -f -s - $OUT/win32swiftui.so 2>/dev/null
 
 echo "=== gallery.exe"
 x86_64-w64-mingw32-gcc -O2 -Wall -municode -mwindows -o $OUT/gallery.exe tests/gallery/gallery.c \
-  -lcomctl32 -lcomdlg32 -lgdi32 -luser32
+  -lcomctl32 -lcomdlg32 -lshell32 -lole32 -luuid -lgdi32 -luser32
 
 echo "=== install into $DEST"
 mkdir -p "$DEST/dlls/win32swiftui/x86_64-windows"

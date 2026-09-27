@@ -6,21 +6,34 @@ import SwiftUI
 typealias PostWake = @convention(c) (UnsafeMutableRawPointer?, UInt64) -> Void
 
 /// What the native view knows about its Win32 control; mirrors the PE side's
-/// JSON snapshot (runtime/pe/controls.c).
-struct Snapshot: Decodable, Equatable {
-    struct Column: Decodable, Equatable { var title: String; var width: Int? }
+/// JSON snapshot (runtime/pe/controls.c). Encodable for the tests' queries.
+struct Snapshot: Codable, Equatable {
+    struct Column: Codable, Equatable { var title: String; var width: Int?; var index: Int?; var align: String? }
+    struct Pane: Codable, Equatable { var text: String; var right: Int; var ownerDraw: Bool?; var tip: String? }
+    /// A tree view item; `id` is its HTREEITEM. Children are listed only under open nodes.
+    struct TreeNode: Codable, Equatable, Identifiable {
+        var id: Int
+        var text: String
+        var kids: Bool?
+        var open: Bool?
+        var children: [TreeNode]?
+    }
 
     var entry: String?
+    var ack: UInt64?            // the last native event the PE side has taken
     var text: String?
     var enabled: Bool?
     var fontPx: Double?
     var widthPx: Double?
     var heightPx: Double?
+    var help: String?           // the text of the tooltip tool this control is
     // buttons
     var checked: Int?
     var isDefault: Bool?
     var leftText: Bool?
     var isCancel: Bool?
+    var note: String?           // command link
+    var noSplit: Bool?          // split button: BCSS_NOSPLIT
     // static / edit
     var align: String?
     var wrap: Bool?
@@ -30,9 +43,16 @@ struct Snapshot: Decodable, Equatable {
     var imageWidth: Int?
     var imageHeight: Int?
     var imageBGRA: String?
+    var fill: String?           // static.frame: "none" (an outline) or the rectangle's colour
     var cue: String?
     var readonly: Bool?
     var limit: Int?
+    // multi-line edit (native offsets: every line break is one "\n")
+    var sel: [Int]?
+    var wantReturn: Bool?
+    var caretGen: Int?
+    var scrollGen: Int?
+    var scrollLine: Int?
     // lists
     var items: [String]?
     var selection: Int?
@@ -41,6 +61,14 @@ struct Snapshot: Decodable, Equatable {
     var rows: [[String]]?
     var single: Bool?
     var noHeader: Bool?
+    var sortHeader: Bool?
+    var report: Bool?           // list view in details mode
+    var checks: [Bool]?         // LVS_EX_CHECKBOXES
+    var icons: [Int]?           // icon views: each row's image index
+    var images: [String: String]?   // icons not sent before (index: BGRA base64); see ControlModel.images
+    var imageGen: Int?
+    var imageSize: [Int]?
+    var small: Bool?
     // values
     var value: Double?
     var min: Double?
@@ -48,6 +76,21 @@ struct Snapshot: Decodable, Equatable {
     var marquee: Bool?
     var state: Int?
     var ticks: Int?
+    var buddy: Bool?            // up-down
+    // date and time: [year, month, day, hour, minute, second], local, Gregorian
+    var date: [Int]?
+    var dateMin: [Int]?
+    var dateMax: [Int]?
+    var dateValid: Bool?
+    var showNone: Bool?
+    var timeOnly: Bool?
+    var upDown: Bool?
+    // tree view
+    var nodes: [TreeNode]?
+    var sidebar: Bool?
+    // status bar
+    var panes: [Pane]?
+    var simple: Bool?
 }
 
 /// Observed by the SwiftUI view of one control.
@@ -55,11 +98,57 @@ final class ControlModel: ObservableObject {
     @Published var snap: Snapshot
     @Published var focusRequest = 0
     let emit: ([String: Any]) -> Void
+    /// What the Win32 control answers its `answers` queries from (main thread).
+    var publish: ([String: Any]) -> Void = { _ in }
+    private var clickQueued = false
 
     init(snap: Snapshot, emit: @escaping ([String: Any]) -> Void) {
         self.snap = snap
         self.emit = emit
     }
+
+    /// Icons of an icon view, sent once each (main thread).
+    var images: [Int: NSImage] = [:]
+    private var imageGen: Int?
+
+    /// Keeps the icons a snapshot brings, even one dropped as stale: they are
+    /// never sent again.
+    func absorbImages(_ snap: Snapshot) {
+        if snap.imageGen != imageGen {
+            imageGen = snap.imageGen
+            images = [:]
+        }
+        guard let fresh = snap.images, let size = snap.imageSize, size.count == 2 else { return }
+        for (key, base64) in fresh {
+            if let index = Int(key), let image = bgraImage(base64, width: size[0], height: size[1]) {
+                images[index] = image
+            }
+        }
+    }
+
+    /// One click per user action, however many times SwiftUI writes the binding
+    /// (a mixed Toggle(sources:) sets each of its sources).
+    func clickOnce() {
+        guard !clickQueued else { return }
+        clickQueued = true
+        DispatchQueue.main.async {
+            self.clickQueued = false
+            self.emit(["t": "click"])
+        }
+    }
+}
+
+/// 32bpp premultiplied BGRA (GDI's layout, as the PE side sends it) -> NSImage.
+func bgraImage(_ base64: String, width w: Int, height h: Int) -> NSImage? {
+    guard w > 0, h > 0, let data = Data(base64Encoded: base64), data.count == w * h * 4,
+          let provider = CGDataProvider(data: data as CFData),
+          let cg = CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: w * 4,
+                           space: CGColorSpaceCreateDeviceRGB(),
+                           bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue
+                                                    | CGBitmapInfo.byteOrder32Little.rawValue),
+                           provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+    else { return nil }
+    return NSImage(cgImage: cg, size: NSSize(width: w, height: h))
 }
 
 /// NSHostingView that lets clicks through where it draws nothing, so the
@@ -80,6 +169,10 @@ final class ControlHost {
     var model: ControlModel!
     var hosting: NSView?
     var pending: [[String: Any]] = []       // guarded by W2S.lock
+    private var seq: UInt64 = 0             // guarded by W2S.lock
+    var published: String?                 // guarded by W2S.lock: for the entry's answers
+    var publishedVersion: UInt64 = 0        // guarded by W2S.lock
+    var owned: AnyObject?                   // main thread: what the view keeps alive (a menu bar)
 
     init(handle: UInt64, entry: String, hostView: UnsafeMutableRawPointer, postWake: PostWake?) {
         self.handle = handle
@@ -88,23 +181,69 @@ final class ControlHost {
         self.postWake = postWake
     }
 
+    /// The sequence number of the last event sent (snapshots below it are stale).
+    var emittedSeq: UInt64 {
+        W2S.lock.lock()
+        defer { W2S.lock.unlock() }
+        return seq
+    }
+
     /// Queue a native event for the Win32 side and wake the control's thread.
     func emit(_ event: [String: Any]) {
+        var event = event
         W2S.lock.lock()
+        seq += 1
+        event["n"] = seq
         pending.append(event)
         W2S.lock.unlock()
         postWake?(hostView, 0)
+    }
+
+    /// Main thread: what the Win32 control answers its `answers` queries from.
+    func publish(_ state: [String: Any]) {
+        let text = W2S.json(state)
+        W2S.lock.lock()
+        if text != published {
+            published = text
+            publishedVersion += 1
+        }
+        W2S.lock.unlock()
+    }
+
+    /// Main thread: points per Win32 pixel, from the host view's height.
+    var scale: CGFloat {
+        guard let view = hosting, let px = model.snap.heightPx, px > 0, view.bounds.height > 0 else { return 1 }
+        return view.bounds.height / CGFloat(px)
     }
 }
 
 final class Request {
     let id: UInt64
     var result: String?                     // guarded by W2S.lock
+    var events: [[String: Any]] = []        // guarded by W2S.lock: raised while open
     var inject: ((Any) -> Void)?            // main thread: tests drive the open panel/alert
+    var update: (([String: Any]) -> Void)?  // main thread: the Win32 side changes the open panel
+    var query: (() -> [String: Any])?       // main thread: tests read the open panel
     init(id: UInt64) { self.id = id }
+
+    /// Tell the Win32 thread waiting on this panel that something happened.
+    func emit(_ event: [String: Any]) {
+        W2S.lock.lock()
+        events.append(event)
+        W2S.lock.unlock()
+    }
 }
 
 enum W2S {
+    static let protocolVersion: UInt32 = 2
+
+    /// The running macOS; an app linked against an SDK older than 26 is told
+    /// 16 for 26 (the version compatibility shim), so 16 means 26.
+    static let osVersion: (major: Int, minor: Int) = {
+        let v = ProcessInfo.processInfo.operatingSystemVersion
+        return (v.majorVersion == 16 ? 26 : v.majorVersion, v.minorVersion)
+    }()
+
     static let lock = NSLock()
     static var controls: [UInt64: ControlHost] = [:]
     static var requests: [UInt64: Request] = [:]

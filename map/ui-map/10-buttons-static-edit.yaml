@@ -150,12 +150,21 @@ entries:
           } primaryAction: {
             action()
           }.menuStyle(.button)
+    appkit:
+      - since: 12
+        code: |-
+          let s = NSSegmentedControl(labels: [title, ""], trackingMode: .momentary, target: nil, action: nil)
+          s.setImage(NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil), forSegment: 1)
+          s.setWidth(22, forSegment: 1)
     glass: automatic
     state_in: [WM_SETTEXT, BCM_SETSPLITINFO]
     events_out: {activate: WM_COMMAND/BN_CLICKED, menu: WM_NOTIFY/BCN_DROPDOWN then the app's TrackPopupMenu}
     notes: >-
       The arrow half raises BCN_DROPDOWN; the app then calls TrackPopupMenu, and that menu
-      is translated by menu.popup and shown from the arrow.
+      is translated by menu.popup and shown from the arrow. Because the items only exist
+      once the app has answered, the runtime draws the button as a momentary two-segment
+      control (the appkit item), the main part and a chevron, rather than a Menu whose
+      items must be known up front. BCSS_NOSPLIT makes both segments open the menu.
 
   - id: button.commandlink
     kind: control
@@ -239,7 +248,10 @@ entries:
         code: "RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor))"
     glass: none
     improvised: true
-    notes: macOS has no bevelled frames; a separator-coloured rounded outline is the equivalent.
+    notes: >-
+      macOS has no bevelled frames; a separator-coloured rounded outline is the equivalent.
+      The filled rectangles (SS_BLACKRECT, SS_GRAYRECT, SS_WHITERECT, see flags) are the same
+      family of views. Neither takes clicks.
 
   - id: edit.single
     kind: control
@@ -304,23 +316,36 @@ entries:
     appkit:
       - since: 12
         code: |-
-          let scroll = NSTextView.scrollableTextView()
-          let tv = scroll.documentView as! NSTextView
-          tv.string = title
-          tv.setSelectedRange(NSRange(location: 0, length: 0))
+          let storage = NSTextStorage(string: title)
+          let layout = NSLayoutManager()
+          storage.addLayoutManager(layout)
+          let container = NSTextContainer(containerSize: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+          container.widthTracksTextView = true
+          layout.addTextContainer(container)
+          let tv = NSTextView(frame: .zero, textContainer: container)
           tv.isRichText = false
+          tv.setSelectedRange(NSRange(location: 0, length: 0))
+          let scroll = NSScrollView()
+          scroll.documentView = tv
+          scroll.hasVerticalScroller = true
     swiftui:
       - since: 15
         code: "TextEditor(text: $text, selection: $textSelection)"
     glass: none
-    state_in: [WM_SETTEXT, EM_SETSEL, EM_REPLACESEL, EM_SCROLLCARET, EM_LINESCROLL]
-    answers: [EM_GETSEL, EM_LINEFROMCHAR, EM_LINEINDEX, EM_GETLINECOUNT, EM_POSFROMCHAR]
-    events_out: {edit: WM_COMMAND/EN_CHANGE, scroll: EN_VSCROLL/EN_HSCROLL}
+    state_in: [WM_SETTEXT, EM_SETSEL, EM_REPLACESEL, EM_SCROLLCARET, EM_LINESCROLL, EM_SETREADONLY, EM_SETLIMITTEXT, EM_UNDO, WM_CUT, WM_PASTE, WM_CLEAR]
+    answers: [EM_GETSEL, EM_LINEFROMCHAR, EM_LINEINDEX, EM_GETLINECOUNT, EM_POSFROMCHAR, EM_LINELENGTH, EM_GETFIRSTVISIBLELINE, EM_GETLINE, EM_CHARFROMPOS]
+    events_out: {edit: WM_COMMAND/EN_UPDATE then EN_CHANGE, focus: EN_SETFOCUS/EN_KILLFOCUS, return: the dialog's default button without ES_WANTRETURN}
     notes: >-
       Apps query the caret, selection and line layout synchronously (EM_GETSEL,
-      EM_LINEFROMCHAR, EM_POSFROMCHAR). TextEditor exposes its selection only from macOS 15,
-      so 12-14 use NSTextView, the view TextEditor itself is built on. Line metrics always
-      come from NSTextView's layout.
+      EM_LINEFROMCHAR, EM_POSFROMCHAR). TextEditor exposes its selection only from macOS 15
+      and never its line layout, so every version uses NSTextView, the view TextEditor
+      itself is built on, with TextKit 1 set up explicitly so its layout manager is there.
+      The view publishes its selection and line table after each change; the Win32 control
+      answers the `answers` queries from it whenever both hold the same text (a hash says
+      so), else from its own state. EM_POSFROMCHAR is exact at the caret and at line
+      starts, and uses the average advance elsewhere. Each native edit reaches Win32 as
+      EM_SETSEL + EM_REPLACESEL of the changed range, so EN_UPDATE/EN_CHANGE happen as for
+      typing; line breaks are "\n" natively and CRLF in Win32.
 
   - id: edit.balloon
     kind: control

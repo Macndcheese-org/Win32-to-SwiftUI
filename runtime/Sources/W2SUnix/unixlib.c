@@ -12,7 +12,7 @@ typedef NTSTATUS (*unixlib_entry_t)(void *args);
 static NTSTATUS w2s_init(void *args)
 {
     struct w2s_init_params *params = args;
-    params->ok = w2s_swift_init(params->version) == 0;
+    params->ok = w2s_swift_init(params->version, &params->os_major, &params->os_minor) == 0;
     return 0;
 }
 
@@ -73,6 +73,20 @@ static NTSTATUS w2s_debug(void *args)
     return 0;
 }
 
+static NTSTATUS w2s_control_state(void *args)
+{
+    struct w2s_control_state_params *params = args;
+    params->len = w2s_swift_control_state(params->handle, &params->version, params->buffer, params->size);
+    return 0;
+}
+
+static NTSTATUS w2s_request_update(void *args)
+{
+    struct w2s_request_update_params *params = args;
+    w2s_swift_request_update(params->id, params->json, params->json_len);
+    return 0;
+}
+
 __attribute__((visibility("default"))) const unixlib_entry_t __wine_unix_call_funcs[] =
 {
     w2s_init,
@@ -84,6 +98,8 @@ __attribute__((visibility("default"))) const unixlib_entry_t __wine_unix_call_fu
     w2s_request_start,
     w2s_request_poll,
     w2s_debug,
+    w2s_control_state,
+    w2s_request_update,
 };
 
 _Static_assert(sizeof(__wine_unix_call_funcs) / sizeof(__wine_unix_call_funcs[0]) == unix_w2s_func_count,

@@ -311,6 +311,12 @@ int json_parse_events( const char *text, struct w2s_event **events )
                 ev.has_value = TRUE;
                 p = end;
             }
+            else if (!strcmp( k, "n" ) && *p >= '0' && *p <= '9')
+            {
+                char *end;
+                ev.seq = _strtoui64( p, &end, 10 );
+                p = end;
+            }
             else if (!strcmp( k, "a" ) && *p == '[')
             {
                 int acap = 8;
@@ -414,5 +420,38 @@ int json_get_str_array( const char *text, const char *k, WCHAR ***strings )
         p = parse_string( p, &list[count++] );
     }
     *strings = list;
+    return count;
+}
+
+/* "key":[1,2,3] at the top level of a flat object */
+int json_get_int_array( const char *text, const char *k, int **values )
+{
+    const char *p = find_key( text, k );
+    int count = 0, cap = 16;
+    int *list;
+
+    *values = NULL;
+    if (!p || *p != '[') return 0;
+    list = HeapAlloc( GetProcessHeap(), 0, cap * sizeof(*list) );
+    p++;
+    for (;;)
+    {
+        char *end;
+        double v;
+
+        p = skip_ws( p );
+        if (*p == ',') { p++; continue; }
+        if (*p == ']' || !*p) break;
+        v = strtod( p, &end );
+        if (end == p) break;
+        if (count == cap)
+        {
+            cap *= 2;
+            list = HeapReAlloc( GetProcessHeap(), 0, list, cap * sizeof(*list) );
+        }
+        list[count++] = (int)v;
+        p = end;
+    }
+    *values = list;
     return count;
 }

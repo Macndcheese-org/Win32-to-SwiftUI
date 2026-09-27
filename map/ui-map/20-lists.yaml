@@ -84,13 +84,23 @@ entries:
           Picker(title, selection: $choice) {
             ForEach(choices) { Text($0.title).tag($0.id) }
           }.pickerStyle(.menu).labelsHidden()
+    appkit:
+      - since: 12
+        code: |-
+          let p = NSPopUpButton(frame: .zero, pullsDown: false)
+          for t in items { p.menu?.addItem(NSMenuItem(title: t, action: nil, keyEquivalent: "")) }
+          p.selectItem(at: 0)
+          p.setContentHuggingPriority(.defaultLow, for: .horizontal)
     glass: automatic
     state_in: [CB_ADDSTRING, CB_INSERTSTRING, CB_DELETESTRING, CB_RESETCONTENT, CB_SETCURSEL, CB_SELECTSTRING, CB_SHOWDROPDOWN]
     events_out: {select: WM_COMMAND/CBN_SELCHANGE then CBN_SELENDOK, open: CBN_DROPDOWN, close: CBN_CLOSEUP}
     not_translated_when: [CBS_OWNERDRAWFIXED, CBS_OWNERDRAWVARIABLE]
     notes: >-
       A pop-up button, exactly what winecfg's "Windows version" box becomes. The
-      ComboLBox drop-down window is never shown: the menu replaces it.
+      ComboLBox drop-down window is never shown: the menu replaces it. The runtime hosts
+      the NSPopUpButton this Picker draws with (the appkit item): a menu Picker keeps its
+      ideal width in any frame, and the Win32 box is laid out to its full width. Items go
+      into the menu directly because addItem(withTitle:) drops duplicate titles.
 
   - id: combobox.editable
     kind: control
@@ -103,14 +113,17 @@ entries:
           let c = NSComboBox()
           c.addItems(withObjectValues: items)
           c.stringValue = title
-          c.completes = true
+          c.completes = false
     glass: automatic
-    state_in: [WM_SETTEXT, CB_ADDSTRING, CB_SETCURSEL, CB_SETEDITSEL, CB_LIMITTEXT]
-    events_out: {edit: WM_COMMAND/CBN_EDITCHANGE, select: CBN_SELCHANGE, open: CBN_DROPDOWN}
+    state_in: [WM_SETTEXT, CB_ADDSTRING, CB_INSERTSTRING, CB_DELETESTRING, CB_RESETCONTENT, CB_SETCURSEL, CB_SELECTSTRING, CB_SETEDITSEL, CB_LIMITTEXT, WM_COMMAND (EN_CHANGE when the app writes to the edit part itself)]
+    events_out: {edit: WM_COMMAND/CBN_EDITUPDATE then CBN_EDITCHANGE, select: CBN_SELCHANGE then CBN_SELENDOK, open: CBN_DROPDOWN, close: CBN_CLOSEUP}
     improvised: true
     notes: >-
       SwiftUI has no editable combo box on macOS. NSComboBox is the native control; a
-      TextField plus Menu would look home-made.
+      TextField plus Menu would look home-made. Typing is applied to the combo box's own
+      edit part (EM_REPLACESEL of the changed part), so the combo box raises
+      CBN_EDITUPDATE/CBN_EDITCHANGE and matches its list itself. No completion as you type:
+      a Win32 combo box doesn't complete either (SHAutoComplete apps do it themselves).
 
   - id: combobox.simple
     kind: control
@@ -182,6 +195,10 @@ entries:
     notes: >-
       Clicking a header does not sort in the view: it raises LVN_COLUMNCLICK, the app sorts
       (LVM_SORTITEMS), and the view mirrors the new order. sortOrder only draws the arrow.
+      Columns come from the Win32 header in display order, at their Win32 widths; a width of
+      0 hides one. A table builds its columns once, so a new set of columns (inserted,
+      removed, resized) makes a new table (TableColumnForEach, 14.4+); before 14.4 the
+      runtime draws a header row over a list with the same cell widths.
       Custom-draw (NM_CUSTOMDRAW returning anything but CDRF_DODEFAULT) is detected at run
       time and drops that list back to wine's drawing.
 
@@ -205,12 +222,16 @@ entries:
           }
     glass: none
     improvised: true
-    state_in: [LVM_SETIMAGELIST, LVM_ARRANGE, LVM_SETICONSPACING]
-    events_out: {select: LVN_ITEMCHANGED, activate: NM_DBLCLK}
+    state_in: [LVM_SETIMAGELIST, LVM_ARRANGE, LVM_SETICONSPACING, LVM_INSERTITEM, LVM_SETITEM, LVM_SETITEMTEXT, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SETITEMSTATE, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_SETITEMCOUNT, LVM_ENSUREVISIBLE]
+    events_out: {select: LVN_ITEMCHANGED, activate: NM_DBLCLK + LVN_ITEMACTIVATE}
     notes: >-
       Finder's icon view. SwiftUI's grid has no built-in selection, so selection highlight
       and rubber-band are drawn by the bridge (NSCollectionView would be the AppKit
-      alternative if this proves too weak).
+      alternative if this proves too weak). The runtime draws the selection (click,
+      Command-click, Shift-click) but no rubber band yet. Icons come from the view's image
+      list (LVSIL_NORMAL, or LVSIL_SMALL for LVS_SMALLICON), each sent once per image list
+      and kept by the native view. The mode is read with LVM_GETVIEW, so LVM_SETVIEW
+      switches the native view as a style change does.
 
   - id: listview.list
     kind: control
@@ -224,6 +245,8 @@ entries:
             Label { Text(r.name) } icon: { Image(nsImage: image) }
           }.listStyle(.bordered)
     glass: automatic
+    state_in: [LVM_INSERTITEM, LVM_SETITEM, LVM_SETITEMTEXT, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SETITEMSTATE, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_SETITEMCOUNT, LVM_ENSUREVISIBLE]
+    events_out: {select: LVN_ITEMCHANGED, activate: NM_DBLCLK + LVN_ITEMACTIVATE}
 
   - id: listview.checkboxes
     kind: control
@@ -240,8 +263,14 @@ entries:
             TableColumn("Name", value: \.name)
           }
     glass: automatic
-    state_in: [LVM_SETITEMSTATE (state image index)]
+    state_in: [LVM_SETITEMSTATE (state image index), LVM_INSERTCOLUMN, LVM_SETCOLUMN, LVM_DELETECOLUMN, LVM_SETCOLUMNWIDTH, LVM_INSERTITEM, LVM_SETITEM, LVM_SETITEMTEXT, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_SETITEMCOUNT, LVM_ENSUREVISIBLE]
     events_out: {toggle: LVN_ITEMCHANGED with LVIS_STATEIMAGEMASK}
+    notes: >-
+      LVS_EX_CHECKBOXES is an extended style, usually set after the list is created; the
+      runtime picks the entry again when it changes, so the report or list view becomes
+      this one. A native toggle sets the state image as a click on the box does
+      (LVM_SETITEMSTATE), and the list view raises LVN_ITEMCHANGING/LVN_ITEMCHANGED. In list
+      mode the box sits before each item.
 
   - id: listview.groups
     kind: control
@@ -289,13 +318,16 @@ entries:
             }
           }.listStyle(.sidebar)
     glass: automatic
-    state_in: [TVM_INSERTITEM, TVM_DELETEITEM, TVM_SETITEM, TVM_EXPAND, TVM_SELECTITEM, TVM_ENSUREVISIBLE, TVM_SETIMAGELIST]
+    state_in: [TVM_INSERTITEM, TVM_DELETEITEM, TVM_SETITEM, TVM_EXPAND, TVM_SELECTITEM, TVM_ENSUREVISIBLE, TVM_SETIMAGELIST, TVM_SORTCHILDREN, TVM_SORTCHILDRENCB]
     events_out: {select: WM_NOTIFY/TVN_SELCHANGING then TVN_SELCHANGED, expand: TVN_ITEMEXPANDING then TVN_ITEMEXPANDED, activate: NM_DBLCLK, menu: NM_RCLICK, rename: TVN_BEGINLABELEDIT/TVN_ENDLABELEDIT}
     notes: >-
       Rows are DisclosureGroup(isExpanded:) rather than List(children:), because apps fill a
       node's children only when TVN_ITEMEXPANDING arrives (file browsers do this), so the
       bridge must see the expansion before the children exist. .sidebar is the Finder-sidebar
-      look; a tree inside a dialog uses .bordered.
+      look; a tree inside a dialog uses .bordered. A native expansion is what a click on the
+      node's button does: TVN_ITEMEXPANDING (the app may veto or insert the children),
+      TVM_EXPAND, TVN_ITEMEXPANDED; a node's HTREEITEM is its id. TVS_CHECKBOXES trees stay
+      wine's until the rows show state images.
 
   - id: header
     kind: control
