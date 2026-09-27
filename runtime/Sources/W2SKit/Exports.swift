@@ -12,7 +12,57 @@ public func w2s_swift_init(_ version: UInt32, _ osMajor: UnsafeMutablePointer<UI
     guard version == W2S.protocolVersion else { return -1 }
     // wine's system colours follow the macOS appearance from now on
     DispatchQueue.main.async { Look.start() }
+    // debugging: W2S_CAPTURE_DIR=<dir> draws this process's windows there every few
+    // seconds (offscreen: works with the screen locked)
+    if let dir = ProcessInfo.processInfo.environment["W2S_CAPTURE_DIR"], !dir.isEmpty {
+        DispatchQueue.main.async { Capture.start(dir) }
+    }
     return 0
+}
+
+enum Capture {
+    private static var timer: Timer?
+
+    static func start(_ dir: String) {
+        guard timer == nil else { return }
+        let exe = (CommandLine.arguments.first as NSString?)?.lastPathComponent ?? "wine"
+        timer = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { _ in
+            for (i, window) in NSApp.windows.enumerated() where window.isVisible && window.frame.width > 80 {
+                guard let view = window.contentView?.superview ?? window.contentView,
+                      let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+                view.cacheDisplay(in: view.bounds, to: rep)
+                let title = window.title.isEmpty ? "untitled" : window.title
+                let name = "\(exe)-\(i)-\(title)".replacingOccurrences(of: "/", with: "_")
+                try? rep.representation(using: .png, properties: [:])?
+                    .write(to: URL(fileURLWithPath: dir).appendingPathComponent(name + ".png"))
+                // and the view tree, for what a picture can't tell
+                var lines: [String] = []
+                func dump(_ v: NSView, _ depth: Int) {
+                    guard depth < 7 else { return }
+                    let entry = W2S.entry(forHostView: v) ?? ""
+                    let look = v.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])?.rawValue ?? "?"
+                    var backdrop = W2S.backdrop(forHostView: v).map { String(format: " backdrop=%06x", $0) } ?? ""
+                    // what wine really painted under a control: its surface's pixel there
+                    if !entry.isEmpty, let wine = v.superview, let layer = wine.layer,
+                       let contents = layer.contents, CFGetTypeID(contents as CFTypeRef) == CGImage.typeID {
+                        let image = contents as! CGImage
+                        let scale = CGFloat(image.width) / max(1, wine.bounds.width)
+                        let x = Int((v.frame.minX + 3) * scale), y = Int((v.frame.midY) * scale)
+                        if x >= 0, y >= 0, x < image.width, y < image.height,
+                           let data = image.dataProvider?.data, let bytes = CFDataGetBytePtr(data) {
+                            let o = y * image.bytesPerRow + x * (image.bitsPerPixel / 8)
+                            backdrop += String(format: " painted=%02x%02x%02x", bytes[o + 2], bytes[o + 1], bytes[o])
+                        }
+                    }
+                    lines.append(String(repeating: "  ", count: depth) + "\(type(of: v)) \(entry) \(v.frame) hidden=\(v.isHidden) \(look)\(backdrop)")
+                    for sub in v.subviews { dump(sub, depth + 1) }
+                }
+                dump(view, 0)
+                try? lines.joined(separator: "\n").write(to: URL(fileURLWithPath: dir).appendingPathComponent(name + ".txt"),
+                                                          atomically: true, encoding: .utf8)
+            }
+        }
+    }
 }
 
 @_cdecl("w2s_swift_control_create")

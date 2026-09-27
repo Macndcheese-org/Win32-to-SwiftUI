@@ -364,6 +364,22 @@ enum W2S {
         if let host = host { host.postWake?(host.hostView, cookie) }
     }
 
+    /// The map entry of the control a host view holds (debug dumps).
+    static func entry(forHostView view: NSView) -> String? {
+        let ptr = Unmanaged.passUnretained(view).toOpaque()
+        lock.lock()
+        defer { lock.unlock() }
+        return controls.values.first { $0.hostView == ptr }?.entry
+    }
+
+    static func backdrop(forHostView view: NSView) -> Int? {
+        let ptr = Unmanaged.passUnretained(view).toOpaque()
+        lock.lock()
+        let host = controls.values.first { $0.hostView == ptr }
+        lock.unlock()
+        return host?.model?.snap.backdrop
+    }
+
     static func control(_ handle: UInt64) -> ControlHost? {
         lock.lock()
         defer { lock.unlock() }
