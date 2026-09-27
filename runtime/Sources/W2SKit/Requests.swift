@@ -572,6 +572,14 @@ enum Debug {
             if host.entry == "tab", let attach = host.owned as? WindowSidebarAttach {
                 out["windowSidebar"] = attach.controller != nil
                 out["sidebarCollapsed"] = attach.collapsed() ?? false
+                // where wine's content sits in the window: after the sidebar, below the toolbar
+                if let window = host.hosting?.window,
+                   let wineView = window.perform(NSSelectorFromString("wineContentView"))?.takeUnretainedValue() as? NSView {
+                    let r = wineView.convert(wineView.bounds, to: nil)
+                    out["wineViewX"] = Int(r.minX)
+                    out["windowWidth"] = Int(window.frame.width)
+                    out["wineViewWidth"] = Int(r.width)
+                }
             }
             if let hosting = host.hosting {
                 out["frame"] = [hosting.frame.origin.x, hosting.frame.origin.y, hosting.frame.width, hosting.frame.height]
@@ -625,7 +633,12 @@ enum Debug {
                 let probe = NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 0,
                                                windowNumber: window.windowNumber, context: nil, eventNumber: 0,
                                                clickCount: 1, pressure: 1)
+                func r(_ x: NSRect) -> [Int] { [Int(x.origin.x), Int(x.origin.y), Int(x.width), Int(x.height)] }
+                let wineView = window.responds(to: NSSelectorFromString("wineContentView"))
+                    ? window.perform(NSSelectorFromString("wineContentView"))?.takeUnretainedValue() as? NSView : nil
                 let diag: [String: Any] = [
+                    "windowFrame": r(window.frame), "content": String(describing: type(of: window.contentView!)),
+                    "wineView": wineView.map { r($0.convert($0.bounds, to: nil)) } ?? [], "target": r(rect),
                     "ok": true, "key": window.isKeyWindow, "main": window.isMainWindow, "appActive": NSApp.isActive,
                     "canBecomeKey": window.canBecomeKey, "windowClass": String(describing: type(of: window)),
                     "hit": chain, "firstMouse": probe.map { hit?.acceptsFirstMouse(for: $0) ?? false } ?? false,
