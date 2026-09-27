@@ -1286,7 +1286,7 @@ HStack(alignment: .top, spacing: 0) {
 }
 ```
 
-The macOS Installer layout: the steps (page titles) in a sidebar, the page on the right, Go Back / Continue at the bottom. Finish shows as "Continue" until the last page, then as the finish text (PSM_SETFINISHTEXT). Installers built with NSIS or Inno Setup use their own dialogs, not property sheets; they are covered by the controls they're made of.
+The macOS Installer layout: the steps (page titles) in a sidebar, the page on the right, Go Back / Continue at the bottom right and Cancel at the left, the order of Apple's assistants. The runtime does it the way it does the propsheet sidebar, through the sheet's tab control, which wine hides in a wizard otherwise: marked by the runtime, it stays shown over the page area, and wine's propsheet sizes the wizard and places every page from its TCM_ADJUSTRECT, answered with a left inset the width of the steps. wine hands the active page's Wizard97 header (title and subtitle) to the tab control, whose native view draws it above the page instead of the white header band. The steps show only when the page titles tell the pages apart; many wizards give every page the same title. Back and Next are wine's buttons, translated; they read Go Back and Continue. Finish keeps its text (PSM_SETFINISHTEXT). Installers built with NSIS or Inno Setup use their own dialogs, not property sheets; they are covered by the controls they're made of.
 
 ### Dialog box
 <a id="dialog"></a>`dialog` · SwiftUI · Liquid Glass: —

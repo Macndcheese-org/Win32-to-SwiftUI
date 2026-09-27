@@ -27,6 +27,7 @@ struct Snapshot: Codable, Equatable {
     var widthPx: Double?
     var heightPx: Double?
     var help: String?           // the text of the tooltip tool this control is
+    var display: String?        // shown instead of text (a native wizard's Go Back / Continue)
     // buttons
     var checked: Int?
     var isDefault: Bool?
@@ -88,8 +89,12 @@ struct Snapshot: Codable, Equatable {
     // tree view
     var nodes: [TreeNode]?
     var sidebar: Bool?
-    var mode: String?           // tab: "strip" or "sidebar" (a property sheet, macOS 13+)
+    var mode: String?           // tab: "strip", "sidebar" (a property sheet, macOS 13+) or "wizard"
     var sidebarPx: Double?
+    // wizard: the active page's header, drawn above the page from headerPx (x, page top)
+    var heading: String?
+    var subheading: String?
+    var headerPx: [Double]?
     // status bar
     var panes: [Pane]?
     var simple: Bool?

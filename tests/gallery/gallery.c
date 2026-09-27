@@ -44,6 +44,8 @@ static int got_hscroll, got_tabchange, got_lvchanged, got_dropdown, got_status_c
 static int got_menu_new, got_initmenupopup, status_bar_checked = 1;
 static int got_expanding, got_treesel, got_deltapos, got_vscroll, got_datechange, got_mcselchange, got_mcselect;
 static int got_dispinfo, got_check_changed, got_icon_changed, got_icon_activate;
+static int got_wiznext, got_wizback;
+static HWND test_wizard;
 static HTREEITEM tree_fruits, tree_apple, tree_pear, tree_veg;
 static BOOL in_selftest;
 
@@ -510,6 +512,79 @@ static HWND property_sheet( int pages, BOOL modeless )
     return modeless ? sheet : NULL;
 }
 
+/* a Wizard97 wizard: a welcome page without a header, then two with one */
+static const WCHAR *wizard_titles[] = { L"Introduction", L"License", L"Install" };
+static const WCHAR *wizard_headers[] = { NULL, L"License agreement", L"Ready to install" };
+static const WCHAR *wizard_subheaders[] = { NULL, L"Please read the terms.", L"Gallery will be installed." };
+
+static INT_PTR CALLBACK wizard_page_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    static const DWORD buttons[] = { PSWIZB_NEXT, PSWIZB_BACK | PSWIZB_NEXT, PSWIZB_BACK | PSWIZB_FINISH };
+
+    if (msg == WM_INITDIALOG)
+    {
+        SetWindowLongPtrW( hwnd, DWLP_USER, ((PROPSHEETPAGEW *)lparam)->lParam );
+        return TRUE;
+    }
+    if (msg == WM_NOTIFY)
+    {
+        NMHDR *hdr = (NMHDR *)lparam;
+        int index = (int)GetWindowLongPtrW( hwnd, DWLP_USER );
+
+        switch (hdr->code)
+        {
+        case PSN_SETACTIVE:
+            SendMessageW( GetParent( hwnd ), PSM_SETWIZBUTTONS, 0, buttons[index] );
+            break;
+        case PSN_WIZNEXT:
+            got_wiznext++;
+            break;
+        case PSN_WIZBACK:
+            got_wizback++;
+            break;
+        }
+        SetWindowLongPtrW( hwnd, DWLP_MSGRESULT, 0 );
+        return TRUE;
+    }
+    return FALSE;
+}
+
+/* PSH_MODELESS: returns the wizard; otherwise runs it and returns NULL */
+static HWND wizard_sheet( BOOL modeless )
+{
+    HPROPSHEETPAGE hpages[3];
+    DLGTEMPLATE *tmpl[3];
+    PROPSHEETHEADERW psh = { sizeof(psh) };
+    HWND sheet;
+    int i;
+
+    for (i = 0; i < 3; i++)
+    {
+        PROPSHEETPAGEW psp = { sizeof(psp) };
+        WCHAR text[64];
+        swprintf( text, 64, L"This is the %ls step.", wizard_titles[i] );
+        tmpl[i] = page_template( text );
+        psp.dwFlags = PSP_DLGINDIRECT | PSP_USETITLE;
+        if (wizard_headers[i]) psp.dwFlags |= PSP_USEHEADERTITLE | PSP_USEHEADERSUBTITLE;
+        else psp.dwFlags |= PSP_HIDEHEADER;
+        psp.pResource = tmpl[i];
+        psp.pszTitle = wizard_titles[i];
+        psp.pszHeaderTitle = wizard_headers[i];
+        psp.pszHeaderSubTitle = wizard_subheaders[i];
+        psp.pfnDlgProc = wizard_page_proc;
+        psp.lParam = i;
+        hpages[i] = CreatePropertySheetPageW( &psp );
+    }
+    psh.dwFlags = PSH_WIZARD97 | PSH_HEADER | (modeless ? PSH_MODELESS : 0);
+    psh.hwndParent = main_window;
+    psh.pszCaption = L"Gallery installer";
+    psh.nPages = 3;
+    psh.phpage = hpages;
+    sheet = (HWND)PropertySheetW( &psh );
+    for (i = 0; i < 3; i++) free( tmpl[i] );
+    return modeless ? sheet : NULL;
+}
+
 static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
     switch (msg)
@@ -535,6 +610,8 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                 SetWindowTextW( ctl[ID_LABEL], path );
         }
         if (code == BN_CLICKED && id == ID_PROPSHEET && !in_selftest) property_sheet( 7, FALSE );
+        /* the self-test opens it modeless, to drive it */
+        if (code == BN_CLICKED && id == ID_WIZARD) test_wizard = wizard_sheet( in_selftest );
         if (code == BN_CLICKED && id == ID_TASKDLG && !in_selftest)
         {
             int button = 0, radio = 0;
@@ -1162,6 +1239,51 @@ static int selftest(void)
         tab = (HWND)SendMessageW( sheet, PSM_GETTABCONTROL, 0, 0 );
         check( pIsTranslated( tab ) && query_has( tab, "\"mode\":\"strip\"" ), "a 3-page property sheet keeps the tab strip" );
         DestroyWindow( sheet );
+        pump( 200 );
+    }
+
+    /* wizards: the macOS Installer layout, steps and header native, pages placed by wine */
+    {
+        HWND tab, page, back, next;
+        RECT tab_rc, page_rc;
+
+        inject( ctl[ID_WIZARD], "{\"t\":\"click\"}" );
+        pump( 600 );
+        check( got_command[ID_WIZARD][BN_CLICKED] == 1 && test_wizard, "native click on Wizard… -> BN_CLICKED" );
+        tab = (HWND)SendMessageW( test_wizard, PSM_GETTABCONTROL, 0, 0 );
+        check( pIsTranslated( tab ) && IsWindowVisible( tab ) && query_has( tab, "\"mode\":\"wizard\"" ) &&
+               query_has( tab, "\"items\":[\"Introduction\",\"License\",\"Install\"]" ),
+               "a wizard's tab control shows the steps natively" );
+        page = (HWND)SendMessageW( test_wizard, PSM_GETCURRENTPAGEHWND, 0, 0 );
+        GetWindowRect( tab, &tab_rc );
+        GetWindowRect( page, &page_rc );
+        check( page_rc.left - tab_rc.left >= 150, "wine lays the wizard's pages out right of the steps (TCM_ADJUSTRECT)" );
+        back = GetDlgItem( test_wizard, 12323 );
+        next = GetDlgItem( test_wizard, 12324 );
+        check( query_has( back, "\"display\":\"Go Back\"" ) && query_has( next, "\"display\":\"Continue\"" ),
+               "wine's Back and Next read Go Back and Continue" );
+        check( query_has( tab, "\"heading\":\"\"" ), "the welcome page (PSP_HIDEHEADER) has no header" );
+        inject( next, "{\"t\":\"click\"}" );
+        pump( 300 );
+        check( got_wiznext == 1 &&
+               (HWND)SendMessageW( test_wizard, PSM_GETCURRENTPAGEHWND, 0, 0 ) == (HWND)SendMessageW( test_wizard, PSM_INDEXTOHWND, 1, 0 ) &&
+               query_has( tab, "\"selection\":1" ) && query_has( tab, "\"heading\":\"License agreement\"" ) &&
+               query_has( tab, "\"subheading\":\"Please read the terms.\"" ),
+               "native Continue -> PSN_WIZNEXT; the next page, its step and its header show" );
+        SendMessageW( test_wizard, PSM_SETHEADERTITLEW, 1, (LPARAM)L"Read the license" );
+        pump( 200 );
+        check( query_has( tab, "\"heading\":\"Read the license\"" ) &&
+               query_has( tab, "\"subheading\":\"Please read the terms.\"" ),
+               "PSM_SETHEADERTITLE reaches the native header (the subtitle stays)" );
+        inject( back, "{\"t\":\"click\"}" );
+        pump( 300 );
+        check( got_wizback == 1 && query_has( tab, "\"selection\":0" ), "native Go Back -> PSN_WIZBACK, the first step" );
+        SendMessageW( test_wizard, PSM_SETCURSEL, 2, 0 );
+        pump( 200 );
+        check( query_has( tab, "\"selection\":2" ) && query_has( tab, "\"heading\":\"Ready to install\"" ),
+               "PSM_SETCURSEL moves the native steps and header" );
+        DestroyWindow( test_wizard );
+        test_wizard = NULL;
         pump( 200 );
     }
 

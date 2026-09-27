@@ -11,6 +11,7 @@ enum ControlViews {
     // map: progress trackbar tab static.frame statusbar edit.multiline combobox.editable treeview
     // map: updown datetime monthcal tooltip (as .help on every control: HelpText)
     // map: listview.checkboxes listview.icon
+    // map: propsheet propsheet.wizard (modes of the sheet's tab control: TabSidebar, WizardSteps)
     static let entries: Set<String> = [
         "button.push", "button.default", "button.checkbox", "button.pushlike", "button.radio", "button.groupbox",
         "button.3state", "button.split", "button.commandlink",
@@ -86,14 +87,15 @@ struct ControlRoot: View {
                 .modifier(HelpText(text: snap.help))
                 .font(.system(size: metrics.fontSize))
                 .controlSize(metrics.controlSize)
-                .disabled(!(snap.enabled ?? true))
+                // a wizard's tab control is disabled; its steps only show where the wizard is
+                .disabled(!(snap.enabled ?? true) && snap.mode != "wizard")
                 .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
         }
     }
 
     @ViewBuilder
     func content(snap: Snapshot, metrics: Metrics) -> some View {
-        let label = stripMnemonic(snap.text ?? "", keep: snap.noPrefix ?? false)
+        let label = stripMnemonic(snap.display ?? snap.text ?? "", keep: snap.noPrefix ?? false)
         switch entry {
         case "button.push", "button.default":
             PushButton(model: model, label: label, prominent: snap.isDefault ?? (entry == "button.default"))
@@ -1535,6 +1537,8 @@ struct TabStrip: View {
     var body: some View {
         if model.snap.mode == "sidebar" {
             TabSidebar(model: model)
+        } else if model.snap.mode == "wizard" {
+            WizardSteps(model: model)
         } else {
             strip
         }
@@ -1601,6 +1605,75 @@ struct TabSidebar: View {
                 .listStyle(.sidebar)
                 .frame(width: width)
                 Spacer(minLength: 0)
+            }
+        }
+    }
+}
+
+/// map: propsheet.wizard: the macOS Installer layout. The wizard's tab control
+/// spans the sheet above the buttons; it told wine to lay the pages out right
+/// of the steps (TCM_ADJUSTRECT), and wine hands it the active page's header.
+/// So this draws the steps and the header, and stays clear over the page.
+/// The steps can't be clicked, as in the Installer: Continue moves on.
+struct WizardSteps: View {
+    @ObservedObject var model: ControlModel
+
+    var body: some View {
+        GeometryReader { geo in
+            let snap = model.snap
+            let raw = geo.size.width / CGFloat(max(1, snap.widthPx ?? Double(geo.size.width)))
+            let scale = raw.isFinite && raw > 0 ? raw : 1
+            let metrics = Metrics(snap: snap, scale: scale)
+            let width = CGFloat(snap.sidebarPx ?? 0) * scale
+            ZStack(alignment: .topLeading) {
+                if width > 0 {
+                    steps(snap: snap, fontSize: metrics.fontSize)
+                        .frame(width: width, height: geo.size.height, alignment: .topLeading)
+                        .background(.bar)
+                }
+                if let heading = snap.heading, let at = snap.headerPx, at.count == 2,
+                   !heading.isEmpty || !(snap.subheading ?? "").isEmpty {
+                    let x = CGFloat(at[0]) * scale
+                    header(heading: heading, subheading: snap.subheading ?? "", fontSize: metrics.fontSize)
+                        .frame(width: max(0, geo.size.width - x - 8), height: max(0, CGFloat(at[1]) * scale),
+                               alignment: .leading)
+                        .offset(x: x)
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+            .allowsHitTesting(false)
+        }
+    }
+
+    func steps(snap: Snapshot, fontSize: CGFloat) -> some View {
+        let items = snap.items ?? []
+        let current = snap.selection ?? 0
+        return VStack(alignment: .leading, spacing: fontSize * 0.8) {
+            ForEach(items.indices, id: \.self) { i in
+                HStack(spacing: 8) {
+                    // done and current steps are filled; the current one in the accent colour
+                    Image(systemName: i <= current ? "circle.fill" : "circle")
+                        .font(.system(size: fontSize * 0.6))
+                        .foregroundColor(i == current ? .accentColor : .secondary)
+                    Text(stripMnemonic(items[i]))
+                        .fontWeight(i == current ? .semibold : .regular)
+                        .foregroundColor(i == current ? .primary : .secondary)
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 20)
+        .padding(.horizontal, 16)
+    }
+
+    func header(heading: String, subheading: String, fontSize: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if !heading.isEmpty {
+                Text(heading).font(.system(size: max(13, fontSize * 1.4), weight: .bold)).lineLimit(1)
+            }
+            if !subheading.isEmpty {
+                Text(subheading).foregroundColor(.secondary).lineLimit(2)
             }
         }
     }

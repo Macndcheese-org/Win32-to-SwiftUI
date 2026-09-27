@@ -43,6 +43,28 @@ static void json_text_list( struct json *j, const char *key, HWND hwnd, UINT cou
 
 /* ---------- Button ---------- */
 
+static BOOL is_native_wizard_button( HWND hwnd );
+
+/* a native wizard's Back and Next in the macOS assistant style: wine's
+ * "< Back" and "Next >" lose their arrows, and read Go Back and Continue in
+ * English (other languages keep wine's word) */
+static void wizard_button_display( struct w2s_control *ctl, struct json *j )
+{
+    WCHAR text[64], plain[64], *p = text, *end;
+    int i, n = 0;
+
+    if (!is_native_wizard_button( ctl->hwnd )) return;
+    GetWindowTextW( ctl->hwnd, text, ARRAYSIZE(text) );
+    while (*p == '<' || *p == ' ') p++;
+    end = p + wcslen( p );
+    while (end > p && (end[-1] == '>' || end[-1] == ' ')) *--end = 0;
+    for (i = 0; p[i]; i++) if (p[i] != '&') plain[n++] = p[i];
+    plain[n] = 0;
+    if (!_wcsicmp( plain, L"Back" )) p = (WCHAR *)L"Go Back";
+    else if (!_wcsicmp( plain, L"Next" )) p = (WCHAR *)L"Continue";
+    json_str( j, "display", p );
+}
+
 static void button_snapshot( struct w2s_control *ctl, struct json *j )
 {
     DWORD style = GetWindowLongW( ctl->hwnd, GWL_STYLE );
@@ -51,6 +73,7 @@ static void button_snapshot( struct w2s_control *ctl, struct json *j )
     json_bool( j, "noPrefix", FALSE );
     json_bool( j, "leftText", (style & BS_LEFTTEXT) != 0 );
     json_bool( j, "isCancel", GetDlgCtrlID( ctl->hwnd ) == IDCANCEL );
+    wizard_button_display( ctl, j );
 }
 
 static void button_apply( struct w2s_control *ctl, const struct w2s_event *ev )
@@ -1417,14 +1440,10 @@ static BOOL tab_answer( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM
     return TRUE;
 }
 
-static void tab_snapshot( struct w2s_control *ctl, struct json *j )
+static void tab_items( struct w2s_control *ctl, struct json *j )
 {
     int i, count = (int)SendMessageW( ctl->hwnd, TCM_GETITEMCOUNT, 0, 0 );
-    struct tab_data *data = tab_layout( ctl, FALSE );
     WCHAR text[256];
-
-    json_str_a( j, "mode", data->sidebar ? "sidebar" : "strip" );
-    if (data->sidebar) json_int( j, "sidebarPx", data->width );
 
     json_arr_begin( j, "items" );
     for (i = 0; i < count; i++)
@@ -1440,6 +1459,15 @@ static void tab_snapshot( struct w2s_control *ctl, struct json *j )
     json_int( j, "selection", SendMessageW( ctl->hwnd, TCM_GETCURSEL, 0, 0 ) );
 }
 
+static void tab_snapshot( struct w2s_control *ctl, struct json *j )
+{
+    struct tab_data *data = tab_layout( ctl, FALSE );
+
+    json_str_a( j, "mode", data->sidebar ? "sidebar" : "strip" );
+    if (data->sidebar) json_int( j, "sidebarPx", data->width );
+    tab_items( ctl, j );
+}
+
 static void tab_apply( struct w2s_control *ctl, const struct w2s_event *ev )
 {
     NMHDR nm = { 0 };
@@ -1452,6 +1480,150 @@ static void tab_apply( struct w2s_control *ctl, const struct w2s_event *ev )
 }
 
 static const struct w2s_kind kind_tab = { "tab", tab_snapshot, tab_apply, tab_answer };
+
+/* ---------- Wizard (map: propsheet.wizard) ---------- */
+
+/* A wizard's tab control, which wine hides otherwise, carries the macOS
+ * Installer layout: the page titles as steps in a sidebar, and the active
+ * page's header, which wine hands over as the tab control's text
+ * ("title\nsubtitle"). Marked with __wine_native_wizard, the tab control stays
+ * shown over the page area and wine lays the wizard out around its
+ * TCM_ADJUSTRECT (comctl32 propsheet.c), as for the property sheet sidebar:
+ * the steps take the left of it, the header goes above the page. */
+#define IDC_WIZARD_BACK 12323       /* comctl32's IDC_BACK_BUTTON */
+#define IDC_WIZARD_NEXT 12324       /* comctl32's IDC_NEXT_BUTTON */
+
+static const WCHAR native_wizard_prop[] = L"__wine_native_wizard";
+
+struct wizard_data
+{
+    BOOL decided;
+    int width;                      /* the steps, pixels; 0 when the titles don't tell the pages apart */
+};
+
+static BOOL is_wizard_tab( HWND hwnd )
+{
+    HWND parent = GetParent( hwnd );
+    WCHAR name[16] = {0};
+
+    GetClassNameW( parent, name, ARRAYSIZE(name) );
+    return !wcscmp( name, L"#32770" ) && GetDlgCtrlID( hwnd ) == IDC_PROPSHEET_TAB &&
+           GetDlgItem( parent, IDC_WIZARD_BACK ) && GetDlgItem( parent, IDC_WIZARD_NEXT );
+}
+
+static BOOL is_native_wizard_button( HWND hwnd )
+{
+    int id = GetDlgCtrlID( hwnd );
+    return (id == IDC_WIZARD_BACK || id == IDC_WIZARD_NEXT) &&
+           GetPropW( GetDlgItem( GetParent( hwnd ), IDC_PROPSHEET_TAB ), native_wizard_prop );
+}
+
+static struct wizard_data *wizard_data( struct w2s_control *ctl )
+{
+    HWND parent = GetParent( ctl->hwnd );
+    struct w2s_control *button;
+    int id;
+
+    if (ctl->data) return ctl->data;
+    ctl->data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(struct wizard_data) );
+    /* from here on wine keeps the tab control shown and asks it for the layout */
+    SetPropW( ctl->hwnd, native_wizard_prop, (HANDLE)1 );
+    /* Back and Next were translated before us: they read Go Back / Continue now */
+    for (id = IDC_WIZARD_BACK; id <= IDC_WIZARD_NEXT; id++)
+        if ((button = w2s_control_from_hwnd( GetDlgItem( parent, id ) ))) w2s_push( button, FALSE );
+    return ctl->data;
+}
+
+static void wizard_release( struct w2s_control *ctl )
+{
+    RemovePropW( ctl->hwnd, native_wizard_prop );
+    HeapFree( GetProcessHeap(), 0, ctl->data );
+}
+
+/* decided at the first layout query, when wine has put all the pages in: the
+ * steps only help when the titles tell the pages apart (many wizards give
+ * every page the wizard's own title) */
+static void wizard_decide( struct w2s_control *ctl, struct wizard_data *data )
+{
+    int i, k, count = (int)SendMessageW( ctl->hwnd, TCM_GETITEMCOUNT, 0, 0 ), distinct = 0, widest = 0;
+    HFONT font = (HFONT)SendMessageW( ctl->hwnd, WM_GETFONT, 0, 0 );
+    WCHAR (*titles)[128];
+    HDC hdc;
+    HGDIOBJ old;
+    SIZE size;
+
+    data->decided = TRUE;
+    if (count < 2 || !(titles = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, count * sizeof(*titles) ))) return;
+    hdc = GetDC( ctl->hwnd );
+    old = SelectObject( hdc, font ? font : GetStockObject( DEFAULT_GUI_FONT ) );
+    for (i = 0; i < count; i++)
+    {
+        TCITEMW item = { TCIF_TEXT };
+        item.pszText = titles[i];
+        item.cchTextMax = ARRAYSIZE(titles[i]);
+        SendMessageW( ctl->hwnd, TCM_GETITEMW, i, (LPARAM)&item );
+        if (!titles[i][0]) continue;
+        for (k = 0; k < i; k++) if (!wcscmp( titles[k], titles[i] )) break;
+        if (k == i) distinct++;
+        if (GetTextExtentPoint32W( hdc, titles[i], wcslen( titles[i] ), &size )) widest = max( widest, size.cx );
+    }
+    SelectObject( hdc, old );
+    ReleaseDC( ctl->hwnd, hdc );
+    HeapFree( GetProcessHeap(), 0, titles );
+    /* a bullet and the margins beside the widest title */
+    if (distinct >= 2) data->width = min( max( widest * 5 / 4 + 56, 150 ), 260 );
+    TRACE( "%p: wizard with %d pages, %d titles: %d px of steps\n", ctl->hwnd, count, distinct, data->width );
+}
+
+static BOOL wizard_answer( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM lparam, LRESULT *ret )
+{
+    struct wizard_data *data = wizard_data( ctl );
+    RECT *rc = (RECT *)lparam;
+
+    if (msg != TCM_ADJUSTRECT || !rc) return FALSE;
+    if (!data->decided)
+    {
+        wizard_decide( ctl, data );
+        w2s_push( ctl, FALSE );
+    }
+    /* the steps take the left; wine's own padding and header band stay its own */
+    if (wparam) rc->left -= data->width;
+    else rc->left += data->width;
+    *ret = 0;
+    return TRUE;
+}
+
+static void wizard_snapshot( struct w2s_control *ctl, struct json *j )
+{
+    struct wizard_data *data = wizard_data( ctl );
+    HWND page = (HWND)SendMessageW( GetParent( ctl->hwnd ), PSM_GETCURRENTPAGEHWND, 0, 0 );
+    WCHAR text[1024], *subtitle;
+    RECT rc;
+
+    json_str_a( j, "mode", "wizard" );
+    json_int( j, "sidebarPx", data->width );
+    tab_items( ctl, j );
+    GetWindowTextW( ctl->hwnd, text, ARRAYSIZE(text) );
+    if ((subtitle = wcschr( text, '\n' ))) *subtitle++ = 0;
+    json_str( j, "heading", text );
+    json_str( j, "subheading", subtitle ? subtitle : L"" );
+    /* the header goes above the active page, from its left edge */
+    if (page && IsWindowVisible( page ))
+    {
+        GetWindowRect( page, &rc );
+        MapWindowPoints( NULL, ctl->hwnd, (POINT *)&rc, 2 );
+        json_arr_begin( j, "headerPx" );
+        json_int( j, NULL, rc.left );
+        json_int( j, NULL, rc.top );
+        json_arr_end( j );
+    }
+}
+
+/* the steps can't be clicked: an Installer moves on with Continue only */
+static const struct w2s_kind kind_wizard =
+{
+    "tab", wizard_snapshot, nothing_apply, wizard_answer, NULL, NULL, NULL, wizard_release, W2S_OWN_TEXT
+};
 
 /* ---------- Status bar ---------- */
 
@@ -1807,6 +1979,7 @@ const struct w2s_kind *w2s_select_kind( HWND hwnd )
     if (is_class( name, TRACKBAR_CLASSW )) return (style & TBS_VERT) ? NULL : &kind_trackbar;
     if (is_class( name, WC_TABCONTROLW ))
     {
+        if (is_wizard_tab( hwnd )) return &kind_wizard;
         /* TCS_MULTILINE (every property sheet) is fine: several rows become a
          * sidebar from macOS 13, and a strip scrolls before that */
         if (style & (TCS_OWNERDRAWFIXED | TCS_BUTTONS | TCS_VERTICAL)) return NULL;
