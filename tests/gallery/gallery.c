@@ -31,7 +31,7 @@ enum
 static HWND ctl[ID_LAST];
 static HWND main_window;
 static int got_command[ID_LAST][16];   /* [id][notification code & 15] */
-static int got_hscroll, got_tabchange, got_lvchanged, got_dropdown;
+static int got_hscroll, got_tabchange, got_lvchanged, got_dropdown, got_status_click = -1;
 static BOOL in_selftest;
 
 /* comctl32 v6 for the controls only it has */
@@ -188,6 +188,17 @@ static void create_controls2(void)
         SendMessageW( ctl[ID_CMDLINK], BCM_SETNOTE, 0, (LPARAM)L"With a note under the title" );
         v6_end( cookie );
     }
+    make( L"Static", NULL, SS_ETCHEDFRAME, 724, 112, 120, 60, ID_FRAME );
+    make( L"Static", NULL, SS_GRAYRECT, 852, 112, 40, 60, ID_RECT );
+
+    {
+        static const int parts[] = { 200, 400, -1 };
+        make( STATUSCLASSNAMEW, NULL, SBARS_SIZEGRIP, 0, 0, 0, 0, ID_STATUS );
+        SendMessageW( ctl[ID_STATUS], SB_SETPARTS, ARRAYSIZE(parts), (LPARAM)parts );
+        SendMessageW( ctl[ID_STATUS], SB_SETTEXTW, 0, (LPARAM)L"Ready" );
+        SendMessageW( ctl[ID_STATUS], SB_SETTEXTW, 1, (LPARAM)L"Ln 1, Col 1" );
+        SendMessageW( ctl[ID_STATUS], SB_SETTEXTW, 2, (LPARAM)L"\tUTF-8" );
+    }
 }
 
 static void open_file( BOOL save )
@@ -223,6 +234,20 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         if (code == BN_CLICKED && (id == ID_OPEN || id == ID_SAVE)) open_file( id == ID_SAVE );
         return 0;
     }
+    case WM_SIZE:
+        if (ctl[ID_STATUS]) SendMessageW( ctl[ID_STATUS], WM_SIZE, 0, 0 );
+        return 0;
+    case WM_DRAWITEM:
+    {
+        DRAWITEMSTRUCT *dis = (DRAWITEMSTRUCT *)lparam;
+        if (dis->hwndItem == ctl[ID_STATUS])
+        {
+            SetBkMode( dis->hDC, TRANSPARENT );
+            DrawTextW( dis->hDC, L"drawn by the app", -1, &dis->rcItem, DT_SINGLELINE | DT_VCENTER | DT_CENTER );
+            return TRUE;
+        }
+        return FALSE;
+    }
     case WM_HSCROLL:
         if ((HWND)lparam == ctl[ID_TRACK]) got_hscroll++;
         return 0;
@@ -231,6 +256,8 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         NMHDR *hdr = (NMHDR *)lparam;
         if (hdr->hwndFrom == ctl[ID_TAB] && hdr->code == TCN_SELCHANGE) got_tabchange++;
         if (hdr->hwndFrom == ctl[ID_REPORT] && hdr->code == LVN_ITEMCHANGED) got_lvchanged++;
+        if (hdr->hwndFrom == ctl[ID_STATUS] && hdr->code == NM_CLICK)
+            got_status_click = (int)((NMMOUSE *)lparam)->dwItemSpec;
         if (hdr->hwndFrom == ctl[ID_SPLIT] && hdr->code == BCN_DROPDOWN)
         {
             NMBCDROPDOWN *nm = (NMBCDROPDOWN *)lparam;
@@ -344,6 +371,36 @@ static void selftest2(void)
     inject( ctl[ID_CMDLINK], "{\"t\":\"click\"}" );
     pump( 200 );
     check( got_command[ID_CMDLINK][BN_CLICKED] > 0, "native command link click -> BN_CLICKED" );
+
+    /* frames and rectangles: drawn, never in the way */
+    check( query_has( ctl[ID_FRAME], "\"passThrough\":true" ), "the native frame lets clicks through" );
+    SetWindowLongW( ctl[ID_RECT], GWL_STYLE, (GetWindowLongW( ctl[ID_RECT], GWL_STYLE ) & ~SS_TYPEMASK) | SS_BLACKRECT );
+    pump( 150 );
+    check( query_has( ctl[ID_RECT], "\"fill\":\"label\"" ) && query_has( ctl[ID_RECT], "\"entry\":\"static.frame\"" ),
+           "a style change within the family updates the same native view" );
+
+    /* status bar */
+    SendMessageW( ctl[ID_STATUS], SB_SETTEXTW, 1, (LPARAM)L"Ln 2, Col 5" );
+    pump( 150 );
+    check( query_has( ctl[ID_STATUS], "Ln 2, Col 5" ), "SB_SETTEXT reaches the native status bar" );
+    inject( ctl[ID_STATUS], "{\"t\":\"click\",\"v\":1}" );
+    pump( 200 );
+    check( got_status_click == 1, "native click on a pane -> NM_CLICK for that pane" );
+    {
+        HRGN rgn = CreateRectRgn( 0, 0, 0, 0 );
+        RECT box = { 0 }, pane = { 0 };
+        SendMessageW( ctl[ID_STATUS], SB_SETTEXTW, 2 | SBT_OWNERDRAW, 0 );
+        pump( 150 );
+        SendMessageW( ctl[ID_STATUS], SB_GETRECT, 2, (LPARAM)&pane );
+        GetWindowRgn( ctl[ID_STATUS], rgn );
+        GetRgnBox( rgn, &box );
+        check( EqualRect( &box, &pane ) && query_has( ctl[ID_STATUS], "\"ownerDraw\":true" ),
+               "an owner-drawn pane is left to wine (window region = that pane)" );
+        SendMessageW( ctl[ID_STATUS], SB_SETTEXTW, 2, (LPARAM)L"\tUTF-8" );
+        pump( 150 );
+        check( GetWindowRgn( ctl[ID_STATUS], rgn ) == NULLREGION, "back to an empty region without it" );
+        DeleteObject( rgn );
+    }
     (void)text;
 }
 
@@ -352,7 +409,7 @@ static int selftest(void)
     static const int ids[] = { ID_PUSH, ID_DEFAULT, ID_PUSHLIKE, ID_GROUP, ID_CHECK, ID_RADIO1, ID_RADIO2, ID_LABEL,
                                ID_SEP, ID_ICON, ID_EDIT, ID_PASSWORD, ID_NUMBER, ID_READONLY, ID_COMBO, ID_LIST,
                                ID_MULTI, ID_REPORT, ID_LVLIST, ID_PROGRESS, ID_TRACK, ID_TAB,
-                               ID_3STATE, ID_SPLIT, ID_CMDLINK };
+                               ID_3STATE, ID_SPLIT, ID_CMDLINK, ID_FRAME, ID_RECT, ID_STATUS };
     HMODULE w2s = GetModuleHandleW( L"win32swiftui.dll" );
     WCHAR text[256], file[MAX_PATH] = L"";
     OPENFILENAMEW ofn = { sizeof(ofn) };

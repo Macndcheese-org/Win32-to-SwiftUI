@@ -100,6 +100,9 @@ struct w2s_kind
     /* kinds of one family share their native view, so a style change between
      * them (BS_PUSHBUTTON <-> BS_DEFPUSHBUTTON) needs no new view; NULL: entry */
     const char *family;
+    /* where wine keeps drawing (an owner-drawn status bar pane), in window
+     * coordinates; NULL or an empty region: nowhere */
+    HRGN (*region)( struct w2s_control *ctl );
 };
 
 struct w2s_control

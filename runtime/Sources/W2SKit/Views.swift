@@ -8,14 +8,14 @@ enum ControlViews {
     // map: button.3state button.split button.commandlink
     // map: static.text static.separator static.image edit.single edit.password edit.number edit.readonly
     // map: combobox.dropdownlist listbox.single listbox.multi listview.list listview.report
-    // map: progress trackbar tab
+    // map: progress trackbar tab static.frame statusbar
     static let entries: Set<String> = [
         "button.push", "button.default", "button.checkbox", "button.pushlike", "button.radio", "button.groupbox",
         "button.3state", "button.split", "button.commandlink",
         "static.text", "static.separator", "static.image",
         "edit.single", "edit.password", "edit.number", "edit.readonly",
         "combobox.dropdownlist", "listbox.single", "listbox.multi", "listview.list", "listview.report",
-        "progress", "trackbar", "tab",
+        "progress", "trackbar", "tab", "static.frame", "statusbar",
     ]
 
     static func supports(_ entry: String) -> Bool { entries.contains(entry) }
@@ -104,6 +104,10 @@ struct ControlRoot: View {
                 .allowsHitTesting(false)
         case "static.image":
             StaticImage(snap: snap)
+        case "static.frame":
+            StaticFrame(fill: snap.fill ?? "none")
+        case "statusbar":
+            StatusBar(model: model, scale: metrics.scale)
         case "edit.single", "edit.password", "edit.number":
             EditField(model: model, secure: entry == "edit.password")
         case "edit.readonly":
@@ -417,6 +421,24 @@ struct StaticImage: View {
                                provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
         else { return nil }
         return NSImage(cgImage: cg, size: NSSize(width: w, height: h))
+    }
+}
+
+/// SS_*FRAME: macOS has no bevelled frames; a separator-coloured rounded
+/// outline has that role. SS_*RECT: a filled rectangle in the matching colour.
+struct StaticFrame: View {
+    let fill: String
+
+    var body: some View {
+        Group {
+            switch fill {
+            case "label": Rectangle().fill(Color(nsColor: .labelColor))
+            case "separator": Rectangle().fill(Color(nsColor: .separatorColor))
+            case "window": Rectangle().fill(Color(nsColor: .windowBackgroundColor))
+            default: RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor))
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
 
@@ -757,6 +779,52 @@ struct TrackBar: View {
         }
         .labelsHidden()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - status bar (map: statusbar)
+
+/// A Finder-style bottom bar: small secondary text, panes split by dividers.
+/// Pane widths come from SB_SETPARTS (right edges, -1 to the end); a leading
+/// tab centres a pane's text, two right-align it, as in Win32. Owner-drawn
+/// panes stay the app's: wine draws them, so the view leaves them clear.
+struct StatusBar: View {
+    @ObservedObject var model: ControlModel
+    let scale: CGFloat
+
+    var body: some View {
+        let panes = model.snap.panes ?? []
+        HStack(spacing: 0) {
+            ForEach(panes.indices, id: \.self) { i in
+                pane(panes[i], index: i, left: i == 0 ? 0 : panes[i - 1].right)
+                if i < panes.count - 1 { Divider().padding(.vertical, 3) }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    func pane(_ pane: Snapshot.Pane, index: Int, left: Int) -> some View {
+        let width: CGFloat? = pane.right < 0 ? nil : CGFloat(max(0, pane.right - left)) * scale
+        if pane.ownerDraw == true {
+            Color.clear.frame(width: width).frame(maxWidth: width == nil ? .infinity : nil)
+                .allowsHitTesting(false)
+        } else {
+            let tabs = pane.text.prefix { $0 == "\t" }.count
+            let alignment: Alignment = tabs == 1 ? .center : tabs >= 2 ? .trailing : .leading
+            Text(String(pane.text.dropFirst(tabs)))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .padding(.horizontal, 6)
+                .frame(width: width, alignment: alignment)
+                .frame(maxWidth: width == nil ? .infinity : nil, maxHeight: .infinity, alignment: alignment)
+                .background(.bar)
+                .contentShape(Rectangle())
+                .help(pane.tip ?? "")
+                .gesture(TapGesture(count: 2).onEnded { model.emit(["t": "dblclick", "v": index]) }
+                    .exclusively(before: TapGesture().onEnded { model.emit(["t": "click", "v": index]) }))
+        }
     }
 }
 

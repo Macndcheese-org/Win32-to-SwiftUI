@@ -248,7 +248,10 @@ entries:
         code: "RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor))"
     glass: none
     improvised: true
-    notes: macOS has no bevelled frames; a separator-coloured rounded outline is the equivalent.
+    notes: >-
+      macOS has no bevelled frames; a separator-coloured rounded outline is the equivalent.
+      The filled rectangles (SS_BLACKRECT, SS_GRAYRECT, SS_WHITERECT, see flags) are the same
+      family of views. Neither takes clicks.
 
   - id: edit.single
     kind: control

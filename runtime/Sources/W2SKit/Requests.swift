@@ -205,6 +205,9 @@ enum Debug {
                 out["frame"] = [hosting.frame.origin.x, hosting.frame.origin.y, hosting.frame.width, hosting.frame.height]
                 out["hidden"] = hosting.superview?.isHidden ?? true
                 out["inWindow"] = hosting.window != nil
+                // clicks in the middle of the control: native, or through to wine?
+                // (hitTest takes the point in the superview's coordinates, as frame is)
+                out["passThrough"] = hosting.hitTest(NSPoint(x: hosting.frame.midX, y: hosting.frame.midY)) == nil
             }
             return W2S.json(out)
         case "inject":

@@ -9,6 +9,7 @@ typealias PostWake = @convention(c) (UnsafeMutableRawPointer?, UInt64) -> Void
 /// JSON snapshot (runtime/pe/controls.c). Encodable for the tests' queries.
 struct Snapshot: Codable, Equatable {
     struct Column: Codable, Equatable { var title: String; var width: Int?; var index: Int?; var align: String? }
+    struct Pane: Codable, Equatable { var text: String; var right: Int; var ownerDraw: Bool?; var tip: String? }
 
     var entry: String?
     var ack: UInt64?            // the last native event the PE side has taken
@@ -33,6 +34,7 @@ struct Snapshot: Codable, Equatable {
     var imageWidth: Int?
     var imageHeight: Int?
     var imageBGRA: String?
+    var fill: String?           // static.frame: "none" (an outline) or the rectangle's colour
     var cue: String?
     var readonly: Bool?
     var limit: Int?
@@ -52,6 +54,9 @@ struct Snapshot: Codable, Equatable {
     var marquee: Bool?
     var state: Int?
     var ticks: Int?
+    // status bar
+    var panes: [Pane]?
+    var simple: Bool?
 }
 
 /// Observed by the SwiftUI view of one control.

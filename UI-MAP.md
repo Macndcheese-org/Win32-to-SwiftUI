@@ -369,7 +369,7 @@ Divider()
 RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor))
 ```
 
-macOS has no bevelled frames; a separator-coloured rounded outline is the equivalent.
+macOS has no bevelled frames; a separator-coloured rounded outline is the equivalent. The filled rectangles (SS_BLACKRECT, SS_GRAYRECT, SS_WHITERECT, see flags) are the same family of views. Neither takes clicks.
 
 ### Single-line edit
 <a id="editsingle"></a>`edit.single` · SwiftUI · Liquid Glass: automatic on 26+
@@ -916,7 +916,7 @@ HStack(spacing: 8) {
 }.padding(.horizontal, 8).frame(maxWidth: .infinity, maxHeight: .infinity).background(.bar)
 ```
 
-A Finder-style bottom bar: small secondary text, panes separated by dividers. On 26 Apple's bottom bars sit on the window background under the content's scroll edge effect; that only applies once the content above is itself a translated List/Table.
+A Finder-style bottom bar: small secondary text, panes separated by dividers. On 26 Apple's bottom bars sit on the window background under the content's scroll edge effect; that only applies once the content above is itself a translated List/Table. Pane widths follow SB_SETPARTS; leading tabs centre or right-align a pane's text as in Win32; SB_SETTIPTEXT becomes .help. An owner-drawn pane (SBT_OWNERDRAW) is left out of the control's window region, so wine keeps drawing it and the view leaves it clear.
 
 ### Pager
 <a id="pager"></a>`pager` · SwiftUI · Liquid Glass: —

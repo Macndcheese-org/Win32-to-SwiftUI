@@ -238,6 +238,19 @@ static void static_image_snapshot( struct w2s_control *ctl, struct json *j )
     DeleteDC( hdc );
 }
 
+/* SS_*FRAME: an outline; SS_*RECT (the same family): a filled rectangle */
+static void static_frame_snapshot( struct w2s_control *ctl, struct json *j )
+{
+    switch (GetWindowLongW( ctl->hwnd, GWL_STYLE ) & SS_TYPEMASK)
+    {
+    case SS_BLACKRECT: json_str_a( j, "fill", "label" ); break;
+    case SS_GRAYRECT: json_str_a( j, "fill", "separator" ); break;
+    case SS_WHITERECT: json_str_a( j, "fill", "window" ); break;
+    default: json_str_a( j, "fill", "none" ); break;
+    }
+}
+
+static const struct w2s_kind kind_static_frame = { "static.frame", static_frame_snapshot, nothing_apply };
 static const struct w2s_kind kind_static_text = { "static.text", static_text_snapshot, nothing_apply };
 static const struct w2s_kind kind_static_separator = { "static.separator", static_separator_snapshot, nothing_apply };
 static const struct w2s_kind kind_static_image = { "static.image", static_image_snapshot, nothing_apply };
@@ -555,6 +568,87 @@ static void tab_apply( struct w2s_control *ctl, const struct w2s_event *ev )
 
 static const struct w2s_kind kind_tab = { "tab", tab_snapshot, tab_apply };
 
+/* ---------- Status bar ---------- */
+
+#define MAX_SB_PARTS 64
+
+static int status_parts( HWND hwnd, int *right )
+{
+    int n = (int)SendMessageW( hwnd, SB_GETPARTS, MAX_SB_PARTS, (LPARAM)right );
+    return max( 0, min( n, MAX_SB_PARTS ) );
+}
+
+static void status_snapshot( struct w2s_control *ctl, struct json *j )
+{
+    int right[MAX_SB_PARTS], n, i;
+    BOOL simple = (BOOL)SendMessageW( ctl->hwnd, SB_ISSIMPLE, 0, 0 );
+    WCHAR text[1024];
+
+    n = simple ? 1 : status_parts( ctl->hwnd, right );
+    if (simple) right[0] = -1;
+    json_bool( j, "simple", simple );
+    json_arr_begin( j, "panes" );
+    for (i = 0; i < n; i++)
+    {
+        DWORD info = SendMessageW( ctl->hwnd, SB_GETTEXTLENGTHW, i, 0 );
+        BOOL owner_draw = (HIWORD( info ) & SBT_OWNERDRAW) != 0;
+
+        json_obj_begin( j );
+        text[0] = 0;
+        if (!owner_draw && LOWORD( info ) < ARRAYSIZE(text)) SendMessageW( ctl->hwnd, SB_GETTEXTW, i, (LPARAM)text );
+        json_str( j, "text", text );
+        json_int( j, "right", right[i] );
+        if (owner_draw) json_bool( j, "ownerDraw", TRUE );
+        text[0] = 0;
+        if (!simple) SendMessageW( ctl->hwnd, SB_GETTIPTEXTW, MAKEWPARAM( i, ARRAYSIZE(text) ), (LPARAM)text );
+        if (text[0]) json_str( j, "tip", text );
+        json_obj_end( j );
+    }
+    json_arr_end( j );
+}
+
+/* an owner-drawn pane (SBT_OWNERDRAW) stays the app's: wine keeps drawing it */
+static HRGN status_region( struct w2s_control *ctl )
+{
+    int right[MAX_SB_PARTS], n, i;
+    HRGN rgn = NULL;
+
+    if (SendMessageW( ctl->hwnd, SB_ISSIMPLE, 0, 0 )) return NULL;
+    n = status_parts( ctl->hwnd, right );
+    for (i = 0; i < n; i++)
+    {
+        RECT rc;
+        if (!(HIWORD( SendMessageW( ctl->hwnd, SB_GETTEXTLENGTHW, i, 0 ) ) & SBT_OWNERDRAW)) continue;
+        if (!SendMessageW( ctl->hwnd, SB_GETRECT, i, (LPARAM)&rc )) continue;
+        if (!rgn) rgn = CreateRectRgnIndirect( &rc );
+        else
+        {
+            HRGN part = CreateRectRgnIndirect( &rc );
+            CombineRgn( rgn, rgn, part, RGN_OR );
+            DeleteObject( part );
+        }
+    }
+    return rgn;
+}
+
+static void status_apply( struct w2s_control *ctl, const struct w2s_event *ev )
+{
+    NMMOUSE nm = { { 0 } };
+    RECT rc;
+
+    if (!ev->has_value || (strcmp( ev->type, "click" ) && strcmp( ev->type, "dblclick" ))) return;
+    nm.dwItemSpec = (DWORD_PTR)(INT_PTR)(int)ev->value;
+    if (SendMessageW( ctl->hwnd, SB_GETRECT, (int)ev->value, (LPARAM)&rc ))
+    {
+        nm.pt.x = (rc.left + rc.right) / 2;
+        nm.pt.y = (rc.top + rc.bottom) / 2;
+    }
+    w2s_notify_parent( ctl->hwnd, strcmp( ev->type, "click" ) ? NM_DBLCLK : NM_CLICK, &nm.hdr );
+}
+
+static const struct w2s_kind kind_statusbar =
+    { "statusbar", status_snapshot, status_apply, NULL, NULL, status_region };
+
 /* ---------- selection ---------- */
 
 const struct w2s_kind *w2s_select_kind( HWND hwnd )
@@ -609,6 +703,13 @@ const struct w2s_kind *w2s_select_kind( HWND hwnd )
         case SS_BITMAP: return &kind_static_image;
         case SS_ETCHEDHORZ:
         case SS_ETCHEDVERT: return &kind_static_separator;
+        case SS_BLACKFRAME:
+        case SS_GRAYFRAME:
+        case SS_WHITEFRAME:
+        case SS_ETCHEDFRAME:
+        case SS_BLACKRECT:
+        case SS_GRAYRECT:
+        case SS_WHITERECT: return &kind_static_frame;
         default: return NULL;
         }
     }
@@ -638,6 +739,7 @@ const struct w2s_kind *w2s_select_kind( HWND hwnd )
         if ((style & LVS_TYPEMASK) == LVS_LIST) return &kind_listview_list;
         return NULL;
     }
+    if (is_class( name, STATUSCLASSNAMEW )) return &kind_statusbar;
     if (is_class( name, PROGRESS_CLASSW )) return (style & PBS_VERTICAL) ? NULL : &kind_progress;
     if (is_class( name, TRACKBAR_CLASSW )) return (style & TBS_VERT) ? NULL : &kind_trackbar;
     if (is_class( name, WC_TABCONTROLW ))

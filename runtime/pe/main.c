@@ -76,12 +76,18 @@ void w2s_release_host( HWND hwnd, const struct w2s_host *host )
  * parent paints its own background behind the native view. SetWindowRgn owns
  * the region and sends SWP_FRAMECHANGED, so the non-client area goes (or comes
  * back) through our WM_NCCALCSIZE at the same time. */
-static void clip_wine_drawing( HWND hwnd, BOOL clip )
+static HRGN wine_region( struct w2s_control *ctl )
 {
-    HWND parent = GetParent( hwnd );
+    HRGN rgn = ctl->kind && ctl->kind->region ? ctl->kind->region( ctl ) : NULL;
+    return rgn ? rgn : CreateRectRgn( 0, 0, 0, 0 );
+}
+
+static void clip_wine_drawing( struct w2s_control *ctl, BOOL clip )
+{
+    HWND hwnd = ctl->hwnd, parent = GetParent( hwnd );
     RECT rc;
 
-    SetWindowRgn( hwnd, clip ? CreateRectRgn( 0, 0, 0, 0 ) : NULL, FALSE );
+    SetWindowRgn( hwnd, clip ? wine_region( ctl ) : NULL, FALSE );
     if (!parent || !IsWindowVisible( hwnd )) return;
     GetWindowRect( hwnd, &rc );
     MapWindowPoints( NULL, parent, (POINT *)&rc, 2 );
@@ -138,6 +144,18 @@ void w2s_push( struct w2s_control *ctl, BOOL force )
     }
     else
     {
+        if (ctl->kind->region)
+        {
+            /* the part wine draws may have moved with the change */
+            HRGN now = CreateRectRgn( 0, 0, 0, 0 ), want = wine_region( ctl );
+            if (GetWindowRgn( ctl->hwnd, now ) == ERROR || !EqualRgn( now, want ))
+            {
+                SetWindowRgn( ctl->hwnd, want, TRUE );
+                want = NULL;
+            }
+            DeleteObject( now );
+            if (want) DeleteObject( want );
+        }
         params.handle = ctl->handle;
         params.json = snap;
         params.json_len = strlen( snap );
@@ -274,7 +292,7 @@ static void deactivate( struct w2s_control *ctl, BOOL destroying )
     if (ctl->native) HeapFree( GetProcessHeap(), 0, ctl->native );
     ctl->native = NULL;
     ctl->native_version = 0;
-    if (ctl->active && !destroying) clip_wine_drawing( ctl->hwnd, FALSE );
+    if (ctl->active && !destroying) clip_wine_drawing( ctl, FALSE );
     ctl->active = FALSE;
 }
 
@@ -303,7 +321,7 @@ static BOOL activate( struct w2s_control *ctl, const struct w2s_kind *kind )
 
     if (!set_kind( ctl, kind )) return FALSE;
     ctl->active = TRUE;
-    clip_wine_drawing( ctl->hwnd, TRUE );
+    clip_wine_drawing( ctl, TRUE );
 
     if (!w2s_get_host( ctl->hwnd, &ctl->host ))
     {
