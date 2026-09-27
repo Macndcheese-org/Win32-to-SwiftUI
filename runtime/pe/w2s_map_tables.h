@@ -40,9 +40,9 @@ static const UINT w2s_state_combobox_editable[] = { WM_SETTEXT, CB_ADDSTRING, CB
 static const UINT w2s_state_combobox_simple[] = { 0 };
 static const UINT w2s_state_comboboxex[] = { CBEM_INSERTITEMA, CBEM_INSERTITEMW, CBEM_SETITEMA, CBEM_SETITEMW, CBEM_DELETEITEM, CBEM_SETIMAGELIST, CB_SETCURSEL };
 static const UINT w2s_state_listview_report[] = { LVM_INSERTCOLUMNA, LVM_INSERTCOLUMNW, LVM_SETCOLUMNA, LVM_SETCOLUMNW, LVM_DELETECOLUMN, LVM_INSERTITEMA, LVM_INSERTITEMW, LVM_SETITEMA, LVM_SETITEMW, LVM_SETITEMTEXTA, LVM_SETITEMTEXTW, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SETITEMSTATE, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_ENSUREVISIBLE, LVM_SETCOLUMNWIDTH, LVM_SETITEMCOUNT };
-static const UINT w2s_state_listview_icon[] = { LVM_SETIMAGELIST, LVM_ARRANGE, LVM_SETICONSPACING };
-static const UINT w2s_state_listview_list[] = { 0 };
-static const UINT w2s_state_listview_checkboxes[] = { LVM_SETITEMSTATE };
+static const UINT w2s_state_listview_icon[] = { LVM_SETIMAGELIST, LVM_ARRANGE, LVM_SETICONSPACING, LVM_INSERTITEMA, LVM_INSERTITEMW, LVM_SETITEMA, LVM_SETITEMW, LVM_SETITEMTEXTA, LVM_SETITEMTEXTW, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SETITEMSTATE, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_SETITEMCOUNT, LVM_ENSUREVISIBLE };
+static const UINT w2s_state_listview_list[] = { LVM_INSERTITEMA, LVM_INSERTITEMW, LVM_SETITEMA, LVM_SETITEMW, LVM_SETITEMTEXTA, LVM_SETITEMTEXTW, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SETITEMSTATE, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_SETITEMCOUNT, LVM_ENSUREVISIBLE };
+static const UINT w2s_state_listview_checkboxes[] = { LVM_SETITEMSTATE, LVM_INSERTCOLUMNA, LVM_INSERTCOLUMNW, LVM_SETCOLUMNA, LVM_SETCOLUMNW, LVM_DELETECOLUMN, LVM_SETCOLUMNWIDTH, LVM_INSERTITEMA, LVM_INSERTITEMW, LVM_SETITEMA, LVM_SETITEMW, LVM_SETITEMTEXTA, LVM_SETITEMTEXTW, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_SETITEMCOUNT, LVM_ENSUREVISIBLE };
 static const UINT w2s_state_listview_groups[] = { LVM_ENABLEGROUPVIEW, LVM_INSERTGROUP, LVM_SETGROUPINFO };
 static const UINT w2s_state_listview_empty[] = { 0 };
 static const UINT w2s_state_treeview[] = { TVM_INSERTITEMA, TVM_INSERTITEMW, TVM_DELETEITEM, TVM_SETITEMA, TVM_SETITEMW, TVM_EXPAND, TVM_SELECTITEM, TVM_ENSUREVISIBLE, TVM_SETIMAGELIST, TVM_SORTCHILDREN, TVM_SORTCHILDRENCB };
@@ -126,9 +126,9 @@ static const struct w2s_map_entry w2s_map_entries[] =
     { "combobox.simple", w2s_state_combobox_simple, 0, NULL, 0 },
     { "comboboxex", w2s_state_comboboxex, 7, NULL, 0 },
     { "listview.report", w2s_state_listview_report, 19, NULL, 0 },
-    { "listview.icon", w2s_state_listview_icon, 3, NULL, 0 },
-    { "listview.list", w2s_state_listview_list, 0, NULL, 0 },
-    { "listview.checkboxes", w2s_state_listview_checkboxes, 1, NULL, 0 },
+    { "listview.icon", w2s_state_listview_icon, 16, NULL, 0 },
+    { "listview.list", w2s_state_listview_list, 13, NULL, 0 },
+    { "listview.checkboxes", w2s_state_listview_checkboxes, 19, NULL, 0 },
     { "listview.groups", w2s_state_listview_groups, 3, NULL, 0 },
     { "listview.empty", w2s_state_listview_empty, 0, NULL, 0 },
     { "treeview", w2s_state_treeview, 11, NULL, 0 },

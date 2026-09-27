@@ -173,15 +173,74 @@ static void json_base64( struct json *j, const char *key, const BYTE *data, size
     HeapFree( GetProcessHeap(), 0, out );
 }
 
+/* An icon or bitmap as 32bpp premultiplied BGRA, top-down (what CGImage gets).
+ * An icon without an alpha channel takes its opacity from its mask. */
+static BYTE *image_bgra( HICON icon, HBITMAP bitmap, int w, int h )
+{
+    BITMAPINFO bmi;
+    BYTE *bits, *out;
+    HDC hdc;
+    HBITMAP dib, old;
+    int i, n = w * h;
+    BOOL alpha = FALSE;
+
+    memset( &bmi, 0, sizeof(bmi) );
+    bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
+    bmi.bmiHeader.biWidth = w;
+    bmi.bmiHeader.biHeight = -h;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    hdc = CreateCompatibleDC( 0 );
+    if (!(dib = CreateDIBSection( hdc, &bmi, DIB_RGB_COLORS, (void **)&bits, NULL, 0 )))
+    {
+        DeleteDC( hdc );
+        return NULL;
+    }
+    old = SelectObject( hdc, dib );
+    out = HeapAlloc( GetProcessHeap(), 0, (size_t)n * 4 );
+    memset( bits, 0, (size_t)n * 4 );
+    if (icon)
+    {
+        DrawIconEx( hdc, 0, 0, icon, w, h, 0, 0, DI_NORMAL );
+        GdiFlush();
+        memcpy( out, bits, (size_t)n * 4 );
+        for (i = 0; i < n && !alpha; i++) alpha = out[i * 4 + 3] != 0;
+        if (!alpha)
+        {
+            /* the AND mask over white: black where the icon is opaque */
+            memset( bits, 0xff, (size_t)n * 4 );
+            DrawIconEx( hdc, 0, 0, icon, w, h, 0, 0, DI_MASK );
+            GdiFlush();
+            for (i = 0; i < n; i++)
+            {
+                if (!bits[i * 4] && !bits[i * 4 + 1] && !bits[i * 4 + 2]) out[i * 4 + 3] = 0xff;
+                else memset( out + i * 4, 0, 4 );
+            }
+        }
+    }
+    else
+    {
+        HDC src = CreateCompatibleDC( 0 );
+        HGDIOBJ prev = SelectObject( src, bitmap );
+        BitBlt( hdc, 0, 0, w, h, src, 0, 0, SRCCOPY );
+        SelectObject( src, prev );
+        DeleteDC( src );
+        GdiFlush();
+        memcpy( out, bits, (size_t)n * 4 );
+        for (i = 0; i < n; i++) out[i * 4 + 3] = 0xff; /* bitmaps are opaque */
+    }
+    SelectObject( hdc, old );
+    DeleteObject( dib );
+    DeleteDC( hdc );
+    return out;
+}
+
 static void static_image_snapshot( struct w2s_control *ctl, struct json *j )
 {
     DWORD style = GetWindowLongW( ctl->hwnd, GWL_STYLE );
     HANDLE image;
     int w = 0, h = 0;
-    BITMAPINFO bmi;
     BYTE *bits;
-    HDC hdc;
-    HBITMAP dib, old;
 
     if ((style & SS_TYPEMASK) == SS_ICON)
     {
@@ -206,36 +265,13 @@ static void static_image_snapshot( struct w2s_control *ctl, struct json *j )
         h = abs( bm.bmHeight );
     }
     if (w <= 0 || h <= 0 || w > 512 || h > 512) return;
-
-    memset( &bmi, 0, sizeof(bmi) );
-    bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
-    bmi.bmiHeader.biWidth = w;
-    bmi.bmiHeader.biHeight = -h;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    hdc = CreateCompatibleDC( 0 );
-    dib = CreateDIBSection( hdc, &bmi, DIB_RGB_COLORS, (void **)&bits, NULL, 0 );
-    if (!dib) { DeleteDC( hdc ); return; }
-    old = SelectObject( hdc, dib );
-    memset( bits, 0, w * h * 4 );
-    if ((style & SS_TYPEMASK) == SS_ICON) DrawIconEx( hdc, 0, 0, image, w, h, 0, 0, DI_NORMAL );
-    else
-    {
-        HDC src = CreateCompatibleDC( 0 );
-        HGDIOBJ prev = SelectObject( src, image );
-        int i;
-        BitBlt( hdc, 0, 0, w, h, src, 0, 0, SRCCOPY );
-        SelectObject( src, prev );
-        DeleteDC( src );
-        for (i = 0; i < w * h; i++) bits[i * 4 + 3] = 0xff; /* bitmaps are opaque */
-    }
-    GdiFlush();
+    if ((style & SS_TYPEMASK) == SS_ICON) bits = image_bgra( image, NULL, w, h );
+    else bits = image_bgra( NULL, image, w, h );
+    if (!bits) return;
     json_int( j, "imageWidth", w );
     json_int( j, "imageHeight", h );
     json_base64( j, "imageBGRA", bits, (size_t)w * h * 4 );
-    SelectObject( hdc, old );
-    DeleteObject( dib );
-    DeleteDC( hdc );
+    HeapFree( GetProcessHeap(), 0, bits );
 }
 
 /* SS_*FRAME: an outline; SS_*RECT (the same family): a filled rectangle */
@@ -799,14 +835,94 @@ static int listview_columns( HWND hwnd, int *subitems, struct json *j )
     return n;
 }
 
+/* Icons go once per image list: the native view keeps those it was sent
+ * until imageGen changes (a new image list or icon size). */
+#define MAX_LV_IMAGES 4096
+
+struct lv_data
+{
+    HIMAGELIST himl;
+    int cx, cy, gen;
+    BYTE sent[MAX_LV_IMAGES / 8];
+};
+
+static void listview_icons( struct w2s_control *ctl, struct json *j, BOOL small, int count )
+{
+    struct lv_data *data = ctl->data;
+    HIMAGELIST himl = (HIMAGELIST)SendMessageW( ctl->hwnd, LVM_GETIMAGELIST, small ? LVSIL_SMALL : LVSIL_NORMAL, 0 );
+    int cx = 0, cy = 0, i, fresh = 0;
+    char key[16];
+
+    if (!data) data = ctl->data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data) );
+    if (himl) ImageList_GetIconSize( himl, &cx, &cy );
+    if (himl != data->himl || cx != data->cx || cy != data->cy)
+    {
+        data->himl = himl;
+        data->cx = cx;
+        data->cy = cy;
+        data->gen++;
+        memset( data->sent, 0, sizeof(data->sent) );
+    }
+    json_bool( j, "small", small );
+    json_int( j, "imageGen", data->gen );
+    json_arr_begin( j, "imageSize" );
+    json_int( j, NULL, cx );
+    json_int( j, NULL, cy );
+    json_arr_end( j );
+    json_arr_begin( j, "icons" );
+    for (i = 0; i < count && i < 2000; i++)
+    {
+        LVITEMW item = { LVIF_IMAGE };
+        item.iItem = i;
+        item.iImage = -1;
+        SendMessageW( ctl->hwnd, LVM_GETITEMW, 0, (LPARAM)&item );
+        json_int( j, NULL, himl ? item.iImage : -1 );
+    }
+    json_arr_end( j );
+    if (!himl || cx <= 0 || cy <= 0 || cx > 256 || cy > 256) return;
+
+    json_key_obj_begin( j, "images" );
+    for (i = 0; i < count && i < 2000 && fresh < 64; i++)
+    {
+        LVITEMW item = { LVIF_IMAGE };
+        HICON icon;
+        BYTE *bits;
+
+        item.iItem = i;
+        item.iImage = -1;
+        SendMessageW( ctl->hwnd, LVM_GETITEMW, 0, (LPARAM)&item );
+        if (item.iImage < 0 || item.iImage >= MAX_LV_IMAGES || (data->sent[item.iImage / 8] & (1 << (item.iImage % 8))))
+            continue;
+        data->sent[item.iImage / 8] |= 1 << (item.iImage % 8);
+        if (!(icon = ImageList_GetIcon( himl, item.iImage, ILD_NORMAL ))) continue;
+        if ((bits = image_bgra( icon, NULL, cx, cy )))
+        {
+            snprintf( key, sizeof(key), "%d", item.iImage );
+            json_base64( j, key, bits, (size_t)cx * cy * 4 );
+            HeapFree( GetProcessHeap(), 0, bits );
+        }
+        DestroyIcon( icon );
+        if (++fresh == 64)
+        {
+            /* enough for one snapshot: the rest come with the next one */
+            PostMessageW( ctl->hwnd, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
+            break;
+        }
+    }
+    json_obj_end( j );
+}
+
 static void listview_snapshot( struct w2s_control *ctl, struct json *j )
 {
+    DWORD view = (DWORD)SendMessageW( ctl->hwnd, LVM_GETVIEW, 0, 0 );
+    DWORD ex = (DWORD)SendMessageW( ctl->hwnd, LVM_GETEXTENDEDLISTVIEWSTYLE, 0, 0 );
     DWORD style = GetWindowLongW( ctl->hwnd, GWL_STYLE );
     int subitems[MAX_LV_COLUMNS] = { 0 }, columns = 1;
     int count = (int)SendMessageW( ctl->hwnd, LVM_GETITEMCOUNT, 0, 0 ), i, c;
     WCHAR text[512];
 
-    if ((style & LVS_TYPEMASK) == LVS_REPORT)
+    json_bool( j, "report", view == LV_VIEW_DETAILS );
+    if (view == LV_VIEW_DETAILS)
         columns = max( 1, listview_columns( ctl->hwnd, subitems, j ) );
     json_arr_begin( j, "rows" );
     for (i = 0; i < count && i < 2000; i++)
@@ -832,6 +948,15 @@ static void listview_snapshot( struct w2s_control *ctl, struct json *j )
     json_bool( j, "single", (style & LVS_SINGLESEL) != 0 );
     json_bool( j, "noHeader", (style & LVS_NOCOLUMNHEADER) != 0 );
     json_bool( j, "sortHeader", !(style & LVS_NOSORTHEADER) );
+    if (ex & LVS_EX_CHECKBOXES)
+    {
+        json_arr_begin( j, "checks" );
+        for (i = 0; i < count && i < 2000; i++)
+            json_bool( j, NULL, (SendMessageW( ctl->hwnd, LVM_GETITEMSTATE, i, LVIS_STATEIMAGEMASK ) >> 12) == 2 );
+        json_arr_end( j );
+    }
+    if (view == LV_VIEW_ICON || view == LV_VIEW_SMALLICON)
+        listview_icons( ctl, j, view == LV_VIEW_SMALLICON, count );
 }
 
 static void listview_select( HWND hwnd, const int *items, int count )
@@ -873,10 +998,20 @@ static void listview_apply( struct w2s_control *ctl, const struct w2s_event *ev 
         nm.iSubItem = (int)ev->value;
         w2s_notify_parent( ctl->hwnd, LVN_COLUMNCLICK, &nm.hdr );
     }
+    else if (!strcmp( ev->type, "check" ) && ev->array_count == 2)
+    {
+        /* the state image, as a click on the box sets it: LVN_ITEMCHANGING/CHANGED follow */
+        LVITEMW item = { 0 };
+        item.stateMask = LVIS_STATEIMAGEMASK;
+        item.state = INDEXTOSTATEIMAGEMASK( ev->array[1] ? 2 : 1 );
+        SendMessageW( ctl->hwnd, LVM_SETITEMSTATE, ev->array[0], (LPARAM)&item );
+    }
 }
 
 static const struct w2s_kind kind_listview_list = { "listview.list", listview_snapshot, listview_apply };
 static const struct w2s_kind kind_listview_report = { "listview.report", listview_snapshot, listview_apply };
+static const struct w2s_kind kind_listview_checkboxes = { "listview.checkboxes", listview_snapshot, listview_apply };
+static const struct w2s_kind kind_listview_icon = { "listview.icon", listview_snapshot, listview_apply };
 
 /* ---------- TreeView ---------- */
 
@@ -1543,10 +1678,19 @@ const struct w2s_kind *w2s_select_kind( HWND hwnd )
     }
     if (is_class( name, WC_LISTVIEWW ))
     {
+        /* LVM_GETVIEW follows both the style and LVM_SETVIEW */
+        DWORD view = (DWORD)SendMessageW( hwnd, LVM_GETVIEW, 0, 0 );
+        DWORD ex = (DWORD)SendMessageW( hwnd, LVM_GETEXTENDEDLISTVIEWSTYLE, 0, 0 );
+
         if (style & (LVS_OWNERDRAWFIXED | LVS_OWNERDATA)) return NULL;
-        if ((style & LVS_TYPEMASK) == LVS_REPORT) return &kind_listview_report;
-        if ((style & LVS_TYPEMASK) == LVS_LIST) return &kind_listview_list;
-        return NULL;
+        switch (view)
+        {
+        case LV_VIEW_DETAILS: return (ex & LVS_EX_CHECKBOXES) ? &kind_listview_checkboxes : &kind_listview_report;
+        case LV_VIEW_LIST: return (ex & LVS_EX_CHECKBOXES) ? &kind_listview_checkboxes : &kind_listview_list;
+        case LV_VIEW_ICON:
+        case LV_VIEW_SMALLICON: return &kind_listview_icon;
+        default: return NULL;   /* tiles */
+        }
     }
     if (is_class( name, STATUSCLASSNAMEW )) return &kind_statusbar;
     if (is_class( name, UPDOWN_CLASSW )) return &kind_updown;

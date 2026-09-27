@@ -62,6 +62,13 @@ struct Snapshot: Codable, Equatable {
     var single: Bool?
     var noHeader: Bool?
     var sortHeader: Bool?
+    var report: Bool?           // list view in details mode
+    var checks: [Bool]?         // LVS_EX_CHECKBOXES
+    var icons: [Int]?           // icon views: each row's image index
+    var images: [String: String]?   // icons not sent before (index: BGRA base64); see ControlModel.images
+    var imageGen: Int?
+    var imageSize: [Int]?
+    var small: Bool?
     // values
     var value: Double?
     var min: Double?
@@ -100,6 +107,25 @@ final class ControlModel: ObservableObject {
         self.emit = emit
     }
 
+    /// Icons of an icon view, sent once each (main thread).
+    var images: [Int: NSImage] = [:]
+    private var imageGen: Int?
+
+    /// Keeps the icons a snapshot brings, even one dropped as stale: they are
+    /// never sent again.
+    func absorbImages(_ snap: Snapshot) {
+        if snap.imageGen != imageGen {
+            imageGen = snap.imageGen
+            images = [:]
+        }
+        guard let fresh = snap.images, let size = snap.imageSize, size.count == 2 else { return }
+        for (key, base64) in fresh {
+            if let index = Int(key), let image = bgraImage(base64, width: size[0], height: size[1]) {
+                images[index] = image
+            }
+        }
+    }
+
     /// One click per user action, however many times SwiftUI writes the binding
     /// (a mixed Toggle(sources:) sets each of its sources).
     func clickOnce() {
@@ -110,6 +136,19 @@ final class ControlModel: ObservableObject {
             self.emit(["t": "click"])
         }
     }
+}
+
+/// 32bpp premultiplied BGRA (GDI's layout, as the PE side sends it) -> NSImage.
+func bgraImage(_ base64: String, width w: Int, height h: Int) -> NSImage? {
+    guard w > 0, h > 0, let data = Data(base64Encoded: base64), data.count == w * h * 4,
+          let provider = CGDataProvider(data: data as CFData),
+          let cg = CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: w * 4,
+                           space: CGColorSpaceCreateDeviceRGB(),
+                           bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue
+                                                    | CGBitmapInfo.byteOrder32Little.rawValue),
+                           provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+    else { return nil }
+    return NSImage(cgImage: cg, size: NSSize(width: w, height: h))
 }
 
 /// NSHostingView that lets clicks through where it draws nothing, so the

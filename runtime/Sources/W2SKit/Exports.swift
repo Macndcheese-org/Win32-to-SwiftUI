@@ -28,6 +28,7 @@ public func w2s_swift_control_create(_ hostView: UInt64, _ window: UInt64, _ pos
     let host = ControlHost(handle: handle, entry: entryID, hostView: viewPtr, postWake: wake)
     host.model = ControlModel(snap: snap) { [weak host] event in host?.emit(event) }
     host.model.publish = { [weak host] state in host?.publish(state) }
+    host.model.absorbImages(snap)
 
     W2S.lock.lock()
     W2S.controls[handle] = host
@@ -51,6 +52,7 @@ public func w2s_swift_control_create(_ hostView: UInt64, _ window: UInt64, _ pos
 public func w2s_swift_control_update(_ handle: UInt64, _ json: UnsafePointer<CChar>?, _ jsonLen: UInt32) {
     guard let host = W2S.control(handle), let snap = W2S.decode(json, jsonLen) else { return }
     DispatchQueue.main.async {
+        host.model.absorbImages(snap)
         // taken before the PE side saw the user's latest events: showing it
         // would undo what the user just did; a fresh one follows once they're applied
         if (snap.ack ?? 0) < host.emittedSeq { return }

@@ -682,8 +682,8 @@ Clicking a header does not sort in the view: it raises LVN_COLUMNCLICK, the app 
 <a id="listviewicon"></a>`listview.icon` · SwiftUI · Liquid Glass: —
 
 - Windows: `SysListView32` LVS_ICON, LVS_SMALLICON
-- Windows → view: LVM_SETIMAGELIST, LVM_ARRANGE, LVM_SETICONSPACING
-- View → Windows: select: LVN_ITEMCHANGED; activate: NM_DBLCLK
+- Windows → view: LVM_SETIMAGELIST, LVM_ARRANGE, LVM_SETICONSPACING, LVM_INSERTITEM, LVM_SETITEM, LVM_SETITEMTEXT, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SETITEMSTATE, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_SETITEMCOUNT, LVM_ENSUREVISIBLE
+- View → Windows: select: LVN_ITEMCHANGED; activate: NM_DBLCLK + LVN_ITEMACTIVATE
 
 **SwiftUI, macOS 12+**
 
@@ -700,12 +700,14 @@ ScrollView {
 }
 ```
 
-Finder's icon view. SwiftUI's grid has no built-in selection, so selection highlight and rubber-band are drawn by the bridge (NSCollectionView would be the AppKit alternative if this proves too weak).
+Finder's icon view. SwiftUI's grid has no built-in selection, so selection highlight and rubber-band are drawn by the bridge (NSCollectionView would be the AppKit alternative if this proves too weak). The runtime draws the selection (click, Command-click, Shift-click) but no rubber band yet. Icons come from the view's image list (LVSIL_NORMAL, or LVSIL_SMALL for LVS_SMALLICON), each sent once per image list and kept by the native view. The mode is read with LVM_GETVIEW, so LVM_SETVIEW switches the native view as a style change does.
 
 ### List view, list mode
 <a id="listviewlist"></a>`listview.list` · SwiftUI · Liquid Glass: automatic on 26+
 
 - Windows: `SysListView32` LVS_LIST
+- Windows → view: LVM_INSERTITEM, LVM_SETITEM, LVM_SETITEMTEXT, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SETITEMSTATE, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_SETITEMCOUNT, LVM_ENSUREVISIBLE
+- View → Windows: select: LVN_ITEMCHANGED; activate: NM_DBLCLK + LVN_ITEMACTIVATE
 
 **SwiftUI, macOS 12+**
 
@@ -719,7 +721,7 @@ List(rows, selection: $multiSelection) { r in
 <a id="listviewcheckboxes"></a>`listview.checkboxes` · SwiftUI · Liquid Glass: automatic on 26+
 
 - Windows: `SysListView32` LVS_EX_CHECKBOXES
-- Windows → view: LVM_SETITEMSTATE (state image index)
+- Windows → view: LVM_SETITEMSTATE (state image index), LVM_INSERTCOLUMN, LVM_SETCOLUMN, LVM_DELETECOLUMN, LVM_SETCOLUMNWIDTH, LVM_INSERTITEM, LVM_SETITEM, LVM_SETITEMTEXT, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_SETITEMCOUNT, LVM_ENSUREVISIBLE
 - View → Windows: toggle: LVN_ITEMCHANGED with LVIS_STATEIMAGEMASK
 
 **SwiftUI, macOS 12+**
@@ -732,6 +734,8 @@ Table(rows, selection: $multiSelection) {
   TableColumn("Name", value: \.name)
 }
 ```
+
+LVS_EX_CHECKBOXES is an extended style, usually set after the list is created; the runtime picks the entry again when it changes, so the report or list view becomes this one. A native toggle sets the state image as a click on the box does (LVM_SETITEMSTATE), and the list view raises LVN_ITEMCHANGING/LVN_ITEMCHANGED. In list mode the box sits before each item.
 
 ### List view groups
 <a id="listviewgroups"></a>`listview.groups` · SwiftUI · Liquid Glass: automatic on 26+

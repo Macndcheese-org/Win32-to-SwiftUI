@@ -196,6 +196,7 @@ enum Debug {
                 .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
             out["imageBGRA"] = nil
             out["images"] = nil
+            out["imageCount"] = host.model.images.count
             out["entry"] = host.entry
             out["attached"] = host.hosting?.superview != nil || host.owned != nil
             out["os"] = W2S.osVersion.major

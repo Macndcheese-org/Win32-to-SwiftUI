@@ -33,7 +33,7 @@ static HWND main_window;
 static int got_command[ID_LAST][16];   /* [id][notification code & 15] */
 static int got_hscroll, got_tabchange, got_lvchanged, got_dropdown, got_status_click = -1;
 static int got_expanding, got_treesel, got_deltapos, got_vscroll, got_datechange, got_mcselchange, got_mcselect;
-static int got_dispinfo;
+static int got_dispinfo, got_check_changed, got_icon_changed, got_icon_activate;
 static HTREEITEM tree_fruits, tree_apple, tree_pear, tree_veg;
 static BOOL in_selftest;
 
@@ -242,6 +242,40 @@ static void create_controls2(void)
         ti.lpszText = LPSTR_TEXTCALLBACKW;      /* answered in WM_NOTIFY/TTN_GETDISPINFO */
         SendMessageW( ctl[ID_TOOLTIP], TTM_ADDTOOLW, 0, (LPARAM)&ti );
     }
+    {
+        static const WCHAR *tasks[] = { L"Write", L"Test", L"Ship" };
+        static const WCHAR *names[] = { L"App", L"Info", L"Warning" };
+        static const LPCWSTR icons[] = { (LPCWSTR)IDI_APPLICATION, (LPCWSTR)IDI_INFORMATION, (LPCWSTR)IDI_WARNING };
+        LVCOLUMNW col = { LVCF_TEXT | LVCF_WIDTH };
+        LVITEMW item = { LVIF_TEXT };
+        HIMAGELIST himl = ImageList_Create( 32, 32, ILC_COLOR32 | ILC_MASK, 3, 0 );
+        int i;
+
+        /* check boxes come as an extended style after creation: the runtime picks the entry again */
+        make( WC_LISTVIEWW, NULL, LVS_REPORT | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP, 16, 410, 300, 120, ID_LVCHECK );
+        SendMessageW( ctl[ID_LVCHECK], LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT,
+                      LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT );
+        col.pszText = (WCHAR *)L"Task";
+        col.cx = 200;
+        SendMessageW( ctl[ID_LVCHECK], LVM_INSERTCOLUMNW, 0, (LPARAM)&col );
+        make( WC_LISTVIEWW, NULL, LVS_ICON | LVS_AUTOARRANGE | WS_BORDER | WS_TABSTOP, 332, 410, 376, 120, ID_LVICON );
+        for (i = 0; i < 3; i++) ImageList_AddIcon( himl, LoadIconW( NULL, icons[i] ) );
+        SendMessageW( ctl[ID_LVICON], LVM_SETIMAGELIST, LVSIL_NORMAL, (LPARAM)himl );
+        for (i = 0; i < 3; i++)
+        {
+            item.mask = LVIF_TEXT;
+            item.iItem = i;
+            item.pszText = (WCHAR *)tasks[i];
+            SendMessageW( ctl[ID_LVCHECK], LVM_INSERTITEMW, 0, (LPARAM)&item );
+            item.mask = LVIF_TEXT | LVIF_IMAGE;
+            item.iImage = i;
+            item.pszText = (WCHAR *)names[i];
+            SendMessageW( ctl[ID_LVICON], LVM_INSERTITEMW, 0, (LPARAM)&item );
+        }
+        item.stateMask = LVIS_STATEIMAGEMASK;
+        item.state = INDEXTOSTATEIMAGEMASK( 2 );
+        SendMessageW( ctl[ID_LVCHECK], LVM_SETITEMSTATE, 1, (LPARAM)&item );
+    }
     make( L"Static", NULL, SS_ETCHEDFRAME, 724, 112, 120, 60, ID_FRAME );
     make( L"Static", NULL, SS_GRAYRECT, 852, 112, 40, 60, ID_RECT );
 
@@ -330,6 +364,12 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         }
         if (hdr->hwndFrom == ctl[ID_TREE] && hdr->code == TVN_SELCHANGEDW) got_treesel++;
         if (hdr->hwndFrom == ctl[ID_UPDOWN] && hdr->code == UDN_DELTAPOS) got_deltapos++;
+        if (hdr->hwndFrom == ctl[ID_LVCHECK] && hdr->code == LVN_ITEMCHANGED &&
+            (((NMLISTVIEW *)lparam)->uChanged & LVIF_STATE) &&
+            ((((NMLISTVIEW *)lparam)->uNewState ^ ((NMLISTVIEW *)lparam)->uOldState) & LVIS_STATEIMAGEMASK))
+            got_check_changed++;
+        if (hdr->hwndFrom == ctl[ID_LVICON] && hdr->code == LVN_ITEMCHANGED) got_icon_changed++;
+        if (hdr->hwndFrom == ctl[ID_LVICON] && hdr->code == LVN_ITEMACTIVATE) got_icon_activate++;
         if (hdr->hwndFrom == ctl[ID_TOOLTIP] && hdr->code == TTN_GETDISPINFOW && hdr->idFrom == (UINT_PTR)ctl[ID_CHECK])
         {
             got_dispinfo++;
@@ -619,6 +659,45 @@ static void selftest2(void)
         SendMessageW( ctl[ID_TOOLTIP], TTM_ACTIVATE, TRUE, 0 );
     }
 
+    /* list views: list mode, check boxes, icons */
+    check( query_has( ctl[ID_LVLIST], "\"rowCount\":5" ), "items inserted into a list-mode list view reach the native list" );
+    check( query_has( ctl[ID_LVCHECK], "\"entry\":\"listview.checkboxes\"" ) &&
+           query_has( ctl[ID_LVCHECK], "\"checks\":[false,true,false]" ),
+           "LVS_EX_CHECKBOXES after creation makes the report a check-box list" );
+    {
+        LVITEMW item = { 0 };
+        item.stateMask = LVIS_STATEIMAGEMASK;
+        item.state = INDEXTOSTATEIMAGEMASK( 2 );
+        SendMessageW( ctl[ID_LVCHECK], LVM_SETITEMSTATE, 0, (LPARAM)&item );
+        pump( 150 );
+        check( query_has( ctl[ID_LVCHECK], "\"checks\":[true,true,false]" ), "a Win32 check reaches the native box" );
+    }
+    inject( ctl[ID_LVCHECK], "{\"t\":\"check\",\"a\":[2,1]}" );
+    pump( 200 );
+    check( (SendMessageW( ctl[ID_LVCHECK], LVM_GETITEMSTATE, 2, LVIS_STATEIMAGEMASK ) >> 12) == 2 && got_check_changed > 0,
+           "a native check -> the state image + LVN_ITEMCHANGED" );
+    check( query_has( ctl[ID_LVICON], "\"entry\":\"listview.icon\"" ) && query_has( ctl[ID_LVICON], "\"icons\":[0,1,2]" ) &&
+           query_has( ctl[ID_LVICON], "\"imageCount\":3" ), "the icon view and its image list reach the native grid" );
+    {
+        LVITEMW item = { 0 };
+        item.pszText = (WCHAR *)L"Information";
+        SendMessageW( ctl[ID_LVICON], LVM_SETITEMTEXTW, 1, (LPARAM)&item );
+        pump( 150 );
+        check( query_has( ctl[ID_LVICON], "\"Information\"" ), "LVM_SETITEMTEXT reaches the native grid" );
+    }
+    inject( ctl[ID_LVICON], "{\"t\":\"selectMany\",\"a\":[2]}" );
+    inject( ctl[ID_LVICON], "{\"t\":\"activate\",\"v\":1}" );
+    pump( 200 );
+    check( SendMessageW( ctl[ID_LVICON], LVM_GETNEXTITEM, -1, LVNI_SELECTED ) == 1 && got_icon_changed > 0 &&
+           got_icon_activate > 0, "native selection and double click -> LVN_ITEMCHANGED, LVN_ITEMACTIVATE" );
+    SendMessageW( ctl[ID_LVICON], LVM_SETVIEW, LV_VIEW_DETAILS, 0 );
+    pump( 150 );
+    check( query_has( ctl[ID_LVICON], "\"entry\":\"listview.report\"" ), "LVM_SETVIEW switches the native view" );
+    SendMessageW( ctl[ID_LVICON], LVM_SETVIEW, LV_VIEW_ICON, 0 );
+    pump( 150 );
+    check( query_has( ctl[ID_LVICON], "\"entry\":\"listview.icon\"" ) && query_has( ctl[ID_LVICON], "\"imageCount\":3" ),
+           "... and back, with its icons sent again" );
+
     /* month calendar */
     {
         SYSTEMTIME st = { 2024, 2, 0, 29, 0, 0, 0, 0 };
@@ -639,7 +718,8 @@ static int selftest(void)
                                ID_SEP, ID_ICON, ID_EDIT, ID_PASSWORD, ID_NUMBER, ID_READONLY, ID_COMBO, ID_LIST,
                                ID_MULTI, ID_REPORT, ID_LVLIST, ID_PROGRESS, ID_TRACK, ID_TAB,
                                ID_3STATE, ID_SPLIT, ID_CMDLINK, ID_FRAME, ID_RECT, ID_STATUS, ID_MLEDIT,
-                               ID_ECOMBO, ID_TREE, ID_UDEDIT, ID_UPDOWN, ID_DATETIME, ID_MONTHCAL };
+                               ID_ECOMBO, ID_TREE, ID_UDEDIT, ID_UPDOWN, ID_DATETIME, ID_MONTHCAL,
+                               ID_LVCHECK, ID_LVICON };
     HMODULE w2s = GetModuleHandleW( L"win32swiftui.dll" );
     WCHAR text[256], file[MAX_PATH] = L"";
     OPENFILENAMEW ofn = { sizeof(ofn) };

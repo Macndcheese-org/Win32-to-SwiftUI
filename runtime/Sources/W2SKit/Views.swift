@@ -10,6 +10,7 @@ enum ControlViews {
     // map: combobox.dropdownlist listbox.single listbox.multi listview.list listview.report
     // map: progress trackbar tab static.frame statusbar edit.multiline combobox.editable treeview
     // map: updown datetime monthcal tooltip (as .help on every control: HelpText)
+    // map: listview.checkboxes listview.icon
     static let entries: Set<String> = [
         "button.push", "button.default", "button.checkbox", "button.pushlike", "button.radio", "button.groupbox",
         "button.3state", "button.split", "button.commandlink",
@@ -17,7 +18,7 @@ enum ControlViews {
         "edit.single", "edit.password", "edit.number", "edit.readonly",
         "combobox.dropdownlist", "listbox.single", "listbox.multi", "listview.list", "listview.report",
         "progress", "trackbar", "tab", "static.frame", "statusbar", "edit.multiline", "combobox.editable",
-        "treeview", "updown", "datetime", "monthcal",
+        "treeview", "updown", "datetime", "monthcal", "listview.checkboxes", "listview.icon",
     ]
 
     static func supports(_ entry: String) -> Bool { entries.contains(entry) }
@@ -146,6 +147,14 @@ struct ControlRoot: View {
             TreeList(model: model)
         case "listview.report":
             ReportView(model: model, scale: metrics.scale)
+        case "listview.checkboxes":
+            if snap.report ?? true {
+                ReportView(model: model, scale: metrics.scale)
+            } else {
+                ListBoxView(model: model, multi: !(snap.single ?? false), fromRows: true)
+            }
+        case "listview.icon":
+            IconGrid(model: model)
         case "progress":
             ProgressBar(snap: snap)
         case "trackbar":
@@ -440,20 +449,8 @@ struct StaticImage: View {
     }
 
     func makeImage() -> NSImage? {
-        guard let w = snap.imageWidth, let h = snap.imageHeight, w > 0, h > 0,
-              let b64 = snap.imageBGRA, var data = Data(base64Encoded: b64), data.count == w * h * 4 else { return nil }
-        // BGRA premultiplied (GDI's layout) -> CGImage
-        let provider = data.withUnsafeMutableBytes { raw -> CGDataProvider? in
-            CGDataProvider(data: Data(raw) as CFData)
-        }
-        guard let provider = provider,
-              let cg = CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: w * 4,
-                               space: CGColorSpaceCreateDeviceRGB(),
-                               bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue
-                                                        | CGBitmapInfo.byteOrder32Little.rawValue),
-                               provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
-        else { return nil }
-        return NSImage(cgImage: cg, size: NSSize(width: w, height: h))
+        guard let w = snap.imageWidth, let h = snap.imageHeight, let b64 = snap.imageBGRA else { return nil }
+        return bgraImage(b64, width: w, height: h)
     }
 }
 
@@ -980,7 +977,7 @@ struct ListBoxView: View {
                         model.snap.selections = sel.sorted()
                         model.emit(["t": "selectMany", "a": sel.sorted()])
                     })) {
-                    ForEach(items.indices, id: \.self) { Text(items[$0]).tag($0) }
+                    ForEach(items.indices, id: \.self) { row($0, items[$0]).tag($0) }
                 }
             } else {
                 List(selection: Binding<Int?>(
@@ -989,12 +986,47 @@ struct ListBoxView: View {
                         if fromRows { model.snap.selections = sel.map { [$0] } ?? [] } else { model.snap.selection = sel ?? -1 }
                         model.emit(["t": "select", "v": sel ?? -1])
                     })) {
-                    ForEach(items.indices, id: \.self) { Text(items[$0]).tag(Optional($0)) }
+                    ForEach(items.indices, id: \.self) { row($0, items[$0]).tag(Optional($0)) }
                 }
             }
         }
         .listStyle(.bordered)
         .modifier(DoubleClickRows(model: model))
+    }
+
+    /// A list view with LVS_EX_CHECKBOXES has a check box before each item.
+    @ViewBuilder
+    func row(_ i: Int, _ text: String) -> some View {
+        if let checks = model.snap.checks {
+            HStack(spacing: 4) {
+                CheckCell(model: model, row: i, checks: checks)
+                Text(text)
+            }
+        } else {
+            Text(text)
+        }
+    }
+}
+
+/// The check box of a list view row: the state image a click on it sets
+/// (LVN_ITEMCHANGING/LVN_ITEMCHANGED follow on the Win32 side).
+struct CheckCell: View {
+    @ObservedObject var model: ControlModel
+    let row: Int
+    let checks: [Bool]
+
+    var body: some View {
+        Toggle("", isOn: Binding(
+            get: { row < checks.count && checks[row] },
+            set: { on in
+                if var now = model.snap.checks, row < now.count {
+                    now[row] = on
+                    model.snap.checks = now
+                }
+                model.emit(["t": "check", "a": [row, on ? 1 : 0]])
+            }))
+            .toggleStyle(.checkbox)
+            .labelsHidden()
     }
 }
 
@@ -1073,24 +1105,43 @@ struct ReportView: View {
             // no column yet, and a Win32 report list without columns shows nothing
             Color(nsColor: .controlBackgroundColor).border(Color(nsColor: .separatorColor))
         } else if #available(macOS 14.4, *) {
-            Table(rows, selection: selection, sortOrder: Binding(
+            let order = Binding(
                 get: { sortOrder },
-                set: { order in
-                    sortOrder = order
-                    if let first = order.first, model.snap.sortHeader ?? true {
+                set: { (new: [ColumnClick]) in
+                    sortOrder = new
+                    // column -1 is the check boxes' own
+                    if let first = new.first, first.column >= 0, model.snap.sortHeader ?? true {
                         model.emit(["t": "column", "v": first.column])
                     }
-                })) {
-                TableColumnForEach(columns) { column in
-                    TableColumn(column.title, sortUsing: ColumnClick(column: column.id)) { (row: ReportRow) in
-                        Text(column.cell(row)).lineLimit(1).frame(maxWidth: .infinity, alignment: column.alignment)
+                })
+            Group {
+                if let checks = model.snap.checks {
+                    Table(rows, selection: selection, sortOrder: order) {
+                        TableColumn("", sortUsing: ColumnClick(column: -1)) { (row: ReportRow) in
+                            CheckCell(model: model, row: row.id, checks: checks)
+                        }
+                        .width(22)
+                        TableColumnForEach(columns) { column in
+                            TableColumn(column.title, sortUsing: ColumnClick(column: column.id)) { (row: ReportRow) in
+                                Text(column.cell(row)).lineLimit(1).frame(maxWidth: .infinity, alignment: column.alignment)
+                            }
+                            .width(min: 12, ideal: column.width)
+                        }
                     }
-                    .width(min: 12, ideal: column.width)
+                } else {
+                    Table(rows, selection: selection, sortOrder: order) {
+                        TableColumnForEach(columns) { column in
+                            TableColumn(column.title, sortUsing: ColumnClick(column: column.id)) { (row: ReportRow) in
+                                Text(column.cell(row)).lineLimit(1).frame(maxWidth: .infinity, alignment: column.alignment)
+                            }
+                            .width(min: 12, ideal: column.width)
+                        }
+                    }
                 }
             }
             .tableColumnHeaders((model.snap.noHeader ?? false) ? .hidden : .automatic)
             .modifier(DoubleClickRows(model: model))
-            .id(key)
+            .id(key + (model.snap.checks == nil ? "" : "|checks"))
         } else {
             ReportFallback(model: model, rows: rows, columns: columns, selection: selection)
         }
@@ -1109,6 +1160,7 @@ struct ReportFallback: View {
         VStack(spacing: 0) {
             if !(model.snap.noHeader ?? false) {
                 HStack(spacing: 0) {
+                    if model.snap.checks != nil { Color.clear.frame(width: 22) }
                     ForEach(columns) { column in
                         Button {
                             if model.snap.sortHeader ?? true { model.emit(["t": "column", "v": column.id]) }
@@ -1129,6 +1181,9 @@ struct ReportFallback: View {
             List(selection: selection) {
                 ForEach(rows) { row in
                     HStack(spacing: 0) {
+                        if let checks = model.snap.checks {
+                            CheckCell(model: model, row: row.id, checks: checks).frame(width: 22)
+                        }
                         ForEach(columns) { column in
                             Text(column.cell(row)).lineLimit(1).padding(.horizontal, 4)
                                 .frame(width: column.width, alignment: column.alignment)
@@ -1144,6 +1199,79 @@ struct ReportFallback: View {
             .modifier(DoubleClickRows(model: model))
         }
         .border(Color(nsColor: .separatorColor))
+    }
+}
+
+/// LVS_ICON / LVS_SMALLICON: Finder's icon view, a grid of icons with their
+/// names (small icons: the name beside). SwiftUI grids have no selection, so
+/// the cells draw it: a click selects, Command-click toggles, Shift-click
+/// extends; a double click activates.
+struct IconGrid: View {
+    @ObservedObject var model: ControlModel
+
+    var body: some View {
+        let rows = model.snap.rows ?? []
+        let small = model.snap.small ?? false
+        let selected = Set(model.snap.selections ?? [])
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: small ? 150 : 88), spacing: 8)],
+                      alignment: .leading, spacing: 8) {
+                ForEach(rows.indices, id: \.self) { i in
+                    cell(i, name: rows[i].first ?? "", small: small, selected: selected.contains(i))
+                }
+            }
+            .padding(8)
+        }
+        .background(Color(nsColor: .controlBackgroundColor))
+        .border(Color(nsColor: .separatorColor))
+    }
+
+    func cell(_ i: Int, name: String, small: Bool, selected: Bool) -> some View {
+        let icons = model.snap.icons ?? []
+        let side: CGFloat = small ? 16 : 32
+        let icon = Group {
+            if i < icons.count, let image = model.images[icons[i]] {
+                Image(nsImage: image).resizable().interpolation(.high).frame(width: side, height: side)
+            } else {
+                Color.clear.frame(width: side, height: side)
+            }
+        }
+        return Group {
+            if small {
+                HStack(spacing: 4) {
+                    icon
+                    Text(name).lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+            } else {
+                VStack(spacing: 4) {
+                    icon
+                    Text(name).lineLimit(2).multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(4)
+        .background(RoundedRectangle(cornerRadius: 6).fill(selected ? Color.accentColor.opacity(0.25) : Color.clear))
+        .contentShape(Rectangle())
+        .gesture(TapGesture(count: 2).onEnded { model.emit(["t": "activate", "v": i]) }
+            .exclusively(before: TapGesture().onEnded { tap(i) }))
+    }
+
+    func tap(_ i: Int) {
+        let flags = NSEvent.modifierFlags
+        var selection = Set(model.snap.selections ?? [])
+        if (model.snap.single ?? false) || !(flags.contains(.command) || flags.contains(.shift)) {
+            selection = [i]
+        } else if flags.contains(.command) {
+            if selection.contains(i) { selection.remove(i) } else { selection.insert(i) }
+        } else if let anchor = selection.min() {
+            selection = Set(min(anchor, i)...max(anchor, i))
+        } else {
+            selection = [i]
+        }
+        model.snap.selections = selection.sorted()
+        model.emit(["t": "selectMany", "a": selection.sorted()])
     }
 }
 

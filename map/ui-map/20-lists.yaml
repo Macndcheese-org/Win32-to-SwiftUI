@@ -222,12 +222,16 @@ entries:
           }
     glass: none
     improvised: true
-    state_in: [LVM_SETIMAGELIST, LVM_ARRANGE, LVM_SETICONSPACING]
-    events_out: {select: LVN_ITEMCHANGED, activate: NM_DBLCLK}
+    state_in: [LVM_SETIMAGELIST, LVM_ARRANGE, LVM_SETICONSPACING, LVM_INSERTITEM, LVM_SETITEM, LVM_SETITEMTEXT, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SETITEMSTATE, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_SETITEMCOUNT, LVM_ENSUREVISIBLE]
+    events_out: {select: LVN_ITEMCHANGED, activate: NM_DBLCLK + LVN_ITEMACTIVATE}
     notes: >-
       Finder's icon view. SwiftUI's grid has no built-in selection, so selection highlight
       and rubber-band are drawn by the bridge (NSCollectionView would be the AppKit
-      alternative if this proves too weak).
+      alternative if this proves too weak). The runtime draws the selection (click,
+      Command-click, Shift-click) but no rubber band yet. Icons come from the view's image
+      list (LVSIL_NORMAL, or LVSIL_SMALL for LVS_SMALLICON), each sent once per image list
+      and kept by the native view. The mode is read with LVM_GETVIEW, so LVM_SETVIEW
+      switches the native view as a style change does.
 
   - id: listview.list
     kind: control
@@ -241,6 +245,8 @@ entries:
             Label { Text(r.name) } icon: { Image(nsImage: image) }
           }.listStyle(.bordered)
     glass: automatic
+    state_in: [LVM_INSERTITEM, LVM_SETITEM, LVM_SETITEMTEXT, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SETITEMSTATE, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_SETITEMCOUNT, LVM_ENSUREVISIBLE]
+    events_out: {select: LVN_ITEMCHANGED, activate: NM_DBLCLK + LVN_ITEMACTIVATE}
 
   - id: listview.checkboxes
     kind: control
@@ -257,8 +263,14 @@ entries:
             TableColumn("Name", value: \.name)
           }
     glass: automatic
-    state_in: [LVM_SETITEMSTATE (state image index)]
+    state_in: [LVM_SETITEMSTATE (state image index), LVM_INSERTCOLUMN, LVM_SETCOLUMN, LVM_DELETECOLUMN, LVM_SETCOLUMNWIDTH, LVM_INSERTITEM, LVM_SETITEM, LVM_SETITEMTEXT, LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_SORTITEMS, LVM_SORTITEMSEX, LVM_SETITEMCOUNT, LVM_ENSUREVISIBLE]
     events_out: {toggle: LVN_ITEMCHANGED with LVIS_STATEIMAGEMASK}
+    notes: >-
+      LVS_EX_CHECKBOXES is an extended style, usually set after the list is created; the
+      runtime picks the entry again when it changes, so the report or list view becomes
+      this one. A native toggle sets the state image as a click on the box does
+      (LVM_SETITEMSTATE), and the list view raises LVN_ITEMCHANGING/LVN_ITEMCHANGED. In list
+      mode the box sits before each item.
 
   - id: listview.groups
     kind: control
