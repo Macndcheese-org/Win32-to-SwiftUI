@@ -254,6 +254,15 @@ static int selftest(void)
         snprintf( what, sizeof(what), "control %d is translated and in its window", ids[i] );
         check( pIsTranslated( ctl[ids[i]] ) && query_has( ctl[ids[i]], "\"inWindow\":true" ), what );
     }
+    /* wine's own drawing of a translated control must never show */
+    for (i = 0, r = 0; i < ARRAYSIZE(ids); i++)
+    {
+        HRGN rgn = CreateRectRgn( 0, 0, 1, 1 );
+        if (GetWindowRgn( ctl[ids[i]], rgn ) == NULLREGION) r++;
+        else printf( "      control %d has no empty window region\n", ids[i] );
+        DeleteObject( rgn );
+    }
+    check( r == ARRAYSIZE(ids), "translated controls have an empty window region" );
 
     /* Win32 -> native */
     SendMessageW( ctl[ID_CHECK], BM_SETCHECK, BST_CHECKED, 0 );

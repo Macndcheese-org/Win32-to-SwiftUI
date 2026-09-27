@@ -5,6 +5,9 @@
  * is on. For a window the map translates, we:
  *   - subclass it (under any subclass the app adds later),
  *   - drop its non-client area, so the native view covers everything,
+ *   - give it an empty window region, so nothing wine draws for it shows
+ *     (button and combo box code paints outside WM_PAINT too) and the parent
+ *     paints what is behind it,
  *   - ask winemac for a host view over it (W2S_ESCAPE_GET_HOST),
  *   - create the SwiftUI view in win32swiftui.so from a JSON snapshot.
  * The Win32 control keeps running and stays authoritative. After each
@@ -65,6 +68,23 @@ void w2s_release_host( HWND hwnd, const struct w2s_host *host )
     if (!hdc) return;
     ExtEscape( hdc, W2S_ESCAPE_RELEASE_HOST, sizeof(*host), (const char *)host, 0, NULL );
     ReleaseDC( hwnd, hdc );
+}
+
+/* An empty window region clips everything wine draws for the control, inside
+ * WM_PAINT or not, and takes the control out of its parent's clipping, so the
+ * parent paints its own background behind the native view. SetWindowRgn owns
+ * the region and sends SWP_FRAMECHANGED, so the non-client area goes (or comes
+ * back) through our WM_NCCALCSIZE at the same time. */
+static void clip_wine_drawing( HWND hwnd, BOOL clip )
+{
+    HWND parent = GetParent( hwnd );
+    RECT rc;
+
+    SetWindowRgn( hwnd, clip ? CreateRectRgn( 0, 0, 0, 0 ) : NULL, FALSE );
+    if (!parent || !IsWindowVisible( hwnd )) return;
+    GetWindowRect( hwnd, &rc );
+    MapWindowPoints( NULL, parent, (POINT *)&rc, 2 );
+    RedrawWindow( parent, &rc, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN );
 }
 
 void w2s_common_snapshot( struct w2s_control *ctl, struct json *j )
@@ -180,12 +200,14 @@ static void apply_events( struct w2s_control *ctl )
     if (IsWindow( ctl->hwnd )) w2s_push( ctl, FALSE );
 }
 
-static void detach( struct w2s_control *ctl )
+static void detach( struct w2s_control *ctl, BOOL destroying )
 {
     struct w2s_control_destroy_params params = { ctl->handle };
 
     if (ctl->handle) w2s_call( unix_w2s_control_destroy, &params );
     if (ctl->host.surface) w2s_release_host( ctl->hwnd, &ctl->host );
+    ctl->active = FALSE;
+    if (!destroying) clip_wine_drawing( ctl->hwnd, FALSE );
     RemovePropW( ctl->hwnd, prop_name );
     if (ctl->last) HeapFree( GetProcessHeap(), 0, ctl->last );
     HeapFree( GetProcessHeap(), 0, ctl );
@@ -205,34 +227,29 @@ static LRESULT CALLBACK subclass_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
         return 0;
     }
 
+    if (msg == WM_NCDESTROY)
+    {
+        WNDPROC orig = ctl->orig;
+        detach( ctl, TRUE );
+        return CallWindowProcW( orig, hwnd, msg, wparam, lparam );
+    }
+    if (!ctl->active) return CallWindowProcW( ctl->orig, hwnd, msg, wparam, lparam );
+
+    /* The empty window region already hides whatever wine paints, in and out
+     * of WM_PAINT, and lets the parent paint behind the control, so painting
+     * needs nothing from us. Two things still do: */
     switch (msg)
     {
     case WM_NCCALCSIZE:
-        /* no borders or scroll bars: the native control draws its own */
+        /* the client area, which the host view follows, is the whole window:
+         * the native control draws its own border and scrolls itself */
         return 0;
-    case WM_NCPAINT:
-        return 0;
-    case WM_ERASEBKGND:
-        return 1;
-    case WM_PAINT:
-    {
-        /* wine's drawing would show around the native control's rounded edges;
-         * paint what the parent has behind us instead */
-        PAINTSTRUCT ps;
-        HDC hdc = BeginPaint( hwnd, &ps );
-        if (hdc) DrawThemeParentBackground( hwnd, hdc, &ps.rcPaint );
-        EndPaint( hwnd, &ps );
-        return 0;
-    }
     case WM_PRINTCLIENT:
+        /* someone draws us into their DC (a child's DrawThemeParentBackground,
+         * a tab page inside a tab control): give them what is behind us, not
+         * wine's look of the control */
         DrawThemeParentBackground( hwnd, (HDC)wparam, NULL );
         return 0;
-    case WM_NCDESTROY:
-    {
-        WNDPROC orig = ctl->orig;
-        detach( ctl );
-        return CallWindowProcW( orig, hwnd, msg, wparam, lparam );
-    }
     }
 
     ret = CallWindowProcW( ctl->orig, hwnd, msg, wparam, lparam );
@@ -273,8 +290,9 @@ void WINAPI W2SWindowCreated( HWND hwnd )
     SetPropW( hwnd, prop_name, ctl );
     ctl->orig = (WNDPROC)SetWindowLongPtrW( hwnd, GWLP_WNDPROC, (LONG_PTR)subclass_proc );
     TRACE( "  subclassed\n" );
-    SetWindowPos( hwnd, 0, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE );
-    TRACE( "  frame changed\n" );
+    ctl->active = TRUE;
+    clip_wine_drawing( hwnd, TRUE );
+    TRACE( "  clipped, frame changed\n" );
 
     if (!w2s_get_host( hwnd, &ctl->host ))
     {
@@ -298,16 +316,11 @@ void WINAPI W2SWindowCreated( HWND hwnd )
     ctl->last = snap;
     if (!ctl->handle) goto fail;
     TRACE( "attached %p as %s: %s\n", hwnd, kind->entry, snap );
-    InvalidateRect( hwnd, NULL, TRUE );
     return;
 
 fail:
     SetWindowLongPtrW( hwnd, GWLP_WNDPROC, (LONG_PTR)ctl->orig );
-    if (ctl->host.surface) w2s_release_host( hwnd, &ctl->host );
-    RemovePropW( hwnd, prop_name );
-    if (ctl->last) HeapFree( GetProcessHeap(), 0, ctl->last );
-    HeapFree( GetProcessHeap(), 0, ctl );
-    SetWindowPos( hwnd, 0, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE );
+    detach( ctl, FALSE );
 }
 
 /***********************************************************************

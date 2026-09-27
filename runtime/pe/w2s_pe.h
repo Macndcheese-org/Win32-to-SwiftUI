@@ -103,6 +103,7 @@ struct w2s_control
     UINT64 handle;
     WNDPROC orig;
     char *last;             /* last snapshot sent */
+    BOOL active;            /* clipped and without a non-client area: the native view stands in */
     int applying;
     int snapshotting;       /* building a snapshot sends queries to the control */
 };
