@@ -84,13 +84,23 @@ entries:
           Picker(title, selection: $choice) {
             ForEach(choices) { Text($0.title).tag($0.id) }
           }.pickerStyle(.menu).labelsHidden()
+    appkit:
+      - since: 12
+        code: |-
+          let p = NSPopUpButton(frame: .zero, pullsDown: false)
+          for t in items { p.menu?.addItem(NSMenuItem(title: t, action: nil, keyEquivalent: "")) }
+          p.selectItem(at: 0)
+          p.setContentHuggingPriority(.defaultLow, for: .horizontal)
     glass: automatic
     state_in: [CB_ADDSTRING, CB_INSERTSTRING, CB_DELETESTRING, CB_RESETCONTENT, CB_SETCURSEL, CB_SELECTSTRING, CB_SHOWDROPDOWN]
     events_out: {select: WM_COMMAND/CBN_SELCHANGE then CBN_SELENDOK, open: CBN_DROPDOWN, close: CBN_CLOSEUP}
     not_translated_when: [CBS_OWNERDRAWFIXED, CBS_OWNERDRAWVARIABLE]
     notes: >-
       A pop-up button, exactly what winecfg's "Windows version" box becomes. The
-      ComboLBox drop-down window is never shown: the menu replaces it.
+      ComboLBox drop-down window is never shown: the menu replaces it. The runtime hosts
+      the NSPopUpButton this Picker draws with (the appkit item): a menu Picker keeps its
+      ideal width in any frame, and the Win32 box is laid out to its full width. Items go
+      into the menu directly because addItem(withTitle:) drops duplicate titles.
 
   - id: combobox.editable
     kind: control

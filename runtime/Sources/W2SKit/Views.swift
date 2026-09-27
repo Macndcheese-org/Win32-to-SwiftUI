@@ -99,7 +99,8 @@ struct ControlRoot: View {
             Text(snap.text ?? "").textSelection(.enabled)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         case "combobox.dropdownlist":
-            DropDownList(model: model)
+            DropDownList(model: model, fontSize: metrics.fontSize, controlSize: metrics.controlSize)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         case "listbox.single", "listbox.multi":
             ListBoxView(model: model, multi: entry == "listbox.multi")
         case "listview.list":
@@ -203,7 +204,7 @@ struct RadioButton: NSViewRepresentable {
         context.coordinator.model = model
         button.title = label
         button.font = NSFont.systemFont(ofSize: fontSize)
-        button.controlSize = controlSize == .mini ? .mini : controlSize == .small ? .small : .regular
+        button.controlSize = nsControlSize(controlSize)
         button.state = (model.snap.checked ?? 0) == 1 ? .on : .off
         button.isEnabled = model.snap.enabled ?? true
     }
@@ -298,25 +299,67 @@ struct EditField: View {
 
 // MARK: - lists (map: combobox.dropdownlist, listbox.*, listview.*)
 
-struct DropDownList: View {
+/// The pop-up button a menu Picker draws with. A Picker keeps its ideal width
+/// (the longest item), whatever frame it is given; the representable, with a
+/// low horizontal hugging priority, takes the Win32 combo box's whole width.
+struct DropDownList: NSViewRepresentable {
     @ObservedObject var model: ControlModel
+    let fontSize: CGFloat
+    let controlSize: ControlSize
 
-    var body: some View {
-        let items = model.snap.items ?? []
-        Picker("", selection: Binding(
-            get: { model.snap.selection ?? -1 },
-            set: { i in
-                model.snap.selection = i
-                model.emit(["t": "select", "v": i])
-            })) {
-            ForEach(items.indices, id: \.self) { i in
-                Text(stripMnemonic(items[i], keep: true)).tag(i)
-            }
+    final class Coordinator: NSObject {
+        var model: ControlModel
+        init(model: ControlModel) { self.model = model }
+        @objc func chosen(_ sender: NSPopUpButton) {
+            let i = sender.indexOfSelectedItem
+            guard i != model.snap.selection else { return }
+            model.snap.selection = i
+            model.emit(["t": "select", "v": i])
         }
-        .pickerStyle(.menu)
-        .labelsHidden()
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
+
+    func makeCoordinator() -> Coordinator { Coordinator(model: model) }
+
+    func makeNSView(context: Context) -> NSPopUpButton {
+        let popup = NSPopUpButton(frame: .zero, pullsDown: false)
+        popup.target = context.coordinator
+        popup.action = #selector(Coordinator.chosen(_:))
+        popup.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        popup.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return popup
+    }
+
+    func updateNSView(_ popup: NSPopUpButton, context: Context) {
+        context.coordinator.model = model
+        popup.controlSize = nsControlSize(controlSize)
+        popup.font = NSFont.systemFont(ofSize: fontSize)
+        let items = model.snap.items ?? []
+        if popup.itemTitles != items {
+            // NSPopUpButton.addItem(withTitle:) drops duplicate titles; a Win32
+            // list may have them, so the items go into the menu directly
+            popup.removeAllItems()
+            for title in items { popup.menu?.addItem(NSMenuItem(title: title, action: nil, keyEquivalent: "")) }
+        }
+        let selection = model.snap.selection ?? -1
+        if selection >= 0 && selection < popup.numberOfItems {
+            if popup.indexOfSelectedItem != selection { popup.selectItem(at: selection) }
+        } else if popup.indexOfSelectedItem != -1 {
+            popup.select(nil)           // CB_ERR: nothing chosen, as the Win32 box shows it
+        }
+        popup.isEnabled = model.snap.enabled ?? true
+    }
+
+    /// 13+: say it outright instead of relying on the hugging priority.
+    @available(macOS 13, *)
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSPopUpButton, context: Context) -> CGSize? {
+        let natural = nsView.intrinsicContentSize
+        guard let width = proposal.width, width.isFinite else { return natural }
+        return CGSize(width: width, height: natural.height)
+    }
+}
+
+func nsControlSize(_ size: ControlSize) -> NSControl.ControlSize {
+    size == .mini ? .mini : size == .small ? .small : .regular
 }
 
 struct ListBoxView: View {
