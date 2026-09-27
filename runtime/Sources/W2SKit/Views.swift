@@ -44,8 +44,10 @@ func stripMnemonic(_ text: String, keep: Bool = false) -> String {
 struct Metrics {
     var fontSize: CGFloat
     var controlSize: ControlSize
+    var scale: CGFloat          // points per Win32 pixel
 
     init(snap: Snapshot, scale: CGFloat) {
+        self.scale = scale
         let px = CGFloat(snap.fontPx ?? 11)
         fontSize = max(8, px * scale)
         controlSize = fontSize <= 10 ? .mini : fontSize <= 12 ? .small : .regular
@@ -106,7 +108,7 @@ struct ControlRoot: View {
         case "listview.list":
             ListBoxView(model: model, multi: !(snap.single ?? false), fromRows: true)
         case "listview.report":
-            ReportView(model: model)
+            ReportView(model: model, scale: metrics.scale)
         case "progress":
             ProgressBar(snap: snap)
         case "trackbar":
@@ -420,43 +422,131 @@ struct ReportRow: Identifiable {
     let cells: [String]
 }
 
+/// A report column the view shows: `id` is the Win32 column index (what
+/// LVN_COLUMNCLICK reports), `slot` its cell in each row (rows come in display
+/// order), `width` the Win32 width in points.
+struct ReportColumn: Identifiable {
+    let id: Int
+    let slot: Int
+    let title: String
+    let width: CGFloat
+    let alignment: Alignment
+
+    static func from(_ snap: Snapshot, scale: CGFloat) -> [ReportColumn] {
+        (snap.columns ?? []).enumerated().compactMap { slot, c in
+            let px = c.width ?? 100
+            guard px > 0 else { return nil }        // a zero-width column is hidden in Win32
+            let alignment: Alignment = c.align == "trailing" ? .trailing : c.align == "center" ? .center : .leading
+            return ReportColumn(id: c.index ?? slot, slot: slot, title: c.title,
+                                width: CGFloat(px) * scale, alignment: alignment)
+        }
+    }
+
+    func cell(_ row: ReportRow) -> String { slot < row.cells.count ? row.cells[slot] : "" }
+}
+
+/// A header click only tells the app (LVN_COLUMNCLICK), which sorts its items
+/// itself; the view never reorders rows, it shows the order the app keeps.
+struct ColumnClick: SortComparator {
+    let column: Int
+    var order: SortOrder = .forward
+    func compare(_ lhs: ReportRow, _ rhs: ReportRow) -> ComparisonResult { .orderedSame }
+}
+
 struct ReportView: View {
     @ObservedObject var model: ControlModel
+    let scale: CGFloat
+    @State private var sortOrder: [ColumnClick] = []
 
     var body: some View {
         let rows = (model.snap.rows ?? []).enumerated().map { ReportRow(id: $0.offset, cells: $0.element) }
-        let columns = model.snap.columns ?? [Snapshot.Column(title: "", width: nil)]
-        if #available(macOS 14.4, *) {
-            Table(rows, selection: Binding(
-                get: { Set(model.snap.selections ?? []) },
-                set: { sel in
-                    model.snap.selections = sel.sorted()
-                    model.emit(["t": "selectMany", "a": sel.sorted()])
-                })) {
-                TableColumnForEach(Array(columns.indices), id: \.self) { c in
-                    TableColumn(columns[c].title) { (row: ReportRow) in
-                        Text(c < row.cells.count ? row.cells[c] : "")
+        let columns = ReportColumn.from(model.snap, scale: scale)
+        let selection = Binding(
+            get: { Set(model.snap.selections ?? []) },
+            set: { (sel: Set<Int>) in
+                model.snap.selections = sel.sorted()
+                model.emit(["t": "selectMany", "a": sel.sorted()])
+            })
+        // A table sets its columns up once: a column added later lands after
+        // the first one, which already fills the view. So a new set of columns
+        // (the app inserts, removes or resizes one) makes a new table, and every
+        // column starts at its Win32 width.
+        let key = columns.map { "\($0.id):\(Int($0.width)):\($0.title)" }.joined(separator: "|")
+        if columns.isEmpty {
+            // no column yet, and a Win32 report list without columns shows nothing
+            Color(nsColor: .controlBackgroundColor).border(Color(nsColor: .separatorColor))
+        } else if #available(macOS 14.4, *) {
+            Table(rows, selection: selection, sortOrder: Binding(
+                get: { sortOrder },
+                set: { order in
+                    sortOrder = order
+                    if let first = order.first, model.snap.sortHeader ?? true {
+                        model.emit(["t": "column", "v": first.column])
                     }
-                    .width(ideal: CGFloat(columns[c].width ?? 100))
+                })) {
+                TableColumnForEach(columns) { column in
+                    TableColumn(column.title, sortUsing: ColumnClick(column: column.id)) { (row: ReportRow) in
+                        Text(column.cell(row)).lineLimit(1).frame(maxWidth: .infinity, alignment: column.alignment)
+                    }
+                    .width(min: 12, ideal: column.width)
                 }
             }
+            .tableColumnHeaders((model.snap.noHeader ?? false) ? .hidden : .automatic)
             .modifier(DoubleClickRows(model: model))
+            .id(key)
         } else {
-            // before 14.4: Table's columns are static; a list of rows keeps every cell
-            List(selection: Binding(
-                get: { Set(model.snap.selections ?? []) },
-                set: { sel in model.emit(["t": "selectMany", "a": sel.sorted()]) })) {
-                ForEach(rows) { row in
-                    HStack {
-                        ForEach(columns.indices, id: \.self) { c in
-                            Text(c < row.cells.count ? row.cells[c] : "")
-                                .frame(width: CGFloat(columns[c].width ?? 100), alignment: .leading)
+            ReportFallback(model: model, rows: rows, columns: columns, selection: selection)
+        }
+    }
+}
+
+/// Before 14.4 a Table's columns are fixed at compile time, so the report is a
+/// header row over a list whose rows lay the cells out at the same widths.
+struct ReportFallback: View {
+    @ObservedObject var model: ControlModel
+    let rows: [ReportRow]
+    let columns: [ReportColumn]
+    let selection: Binding<Set<Int>>
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if !(model.snap.noHeader ?? false) {
+                HStack(spacing: 0) {
+                    ForEach(columns) { column in
+                        Button {
+                            if model.snap.sortHeader ?? true { model.emit(["t": "column", "v": column.id]) }
+                        } label: {
+                            Text(column.title).lineLimit(1).padding(.horizontal, 4)
+                                .frame(width: column.width, alignment: column.alignment)
                         }
-                    }.tag(row.id)
+                        .buttonStyle(.plain)
+                        Divider()
+                    }
+                    Spacer(minLength: 0)
+                }
+                .font(.system(size: NSFont.smallSystemFontSize))
+                .frame(height: 22)
+                .background(Color(nsColor: .controlBackgroundColor))
+                Divider()
+            }
+            List(selection: selection) {
+                ForEach(rows) { row in
+                    HStack(spacing: 0) {
+                        ForEach(columns) { column in
+                            Text(column.cell(row)).lineLimit(1).padding(.horizontal, 4)
+                                .frame(width: column.width, alignment: column.alignment)
+                            Color.clear.frame(width: 1)     // the header's divider
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .listRowInsets(EdgeInsets())
+                    .tag(row.id)
                 }
             }
-            .listStyle(.bordered)
+            .listStyle(.plain)
+            .modifier(DoubleClickRows(model: model))
         }
+        .border(Color(nsColor: .separatorColor))
     }
 }
 

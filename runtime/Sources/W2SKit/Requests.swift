@@ -193,6 +193,7 @@ enum Debug {
             if let v = snap.value { out["value"] = v }
             if let v = snap.enabled { out["enabled"] = v }
             if let v = snap.rows { out["rowCount"] = v.count }
+            if let v = snap.columns { out["columns"] = v.filter { ($0.width ?? 1) > 0 }.map { $0.title } }
             if let hosting = host.hosting {
                 out["frame"] = [hosting.frame.origin.x, hosting.frame.origin.y, hosting.frame.width, hosting.frame.height]
                 out["hidden"] = hosting.superview?.isHidden ?? true

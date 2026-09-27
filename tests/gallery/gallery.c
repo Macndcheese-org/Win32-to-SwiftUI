@@ -283,6 +283,19 @@ static int selftest(void)
     SendMessageW( ctl[ID_TRACK], TBM_SETPOS, TRUE, 70 );
     pump( 150 );
     check( query_has( ctl[ID_TRACK], "\"value\":70" ), "TBM_SETPOS reaches the native slider" );
+    check( query_has( ctl[ID_REPORT], "\"columns\":[\"Name\",\"Size\"]" ), "every report column reaches the native table" );
+    {
+        LVCOLUMNW col = { LVCF_TEXT | LVCF_WIDTH };
+        col.pszText = (WCHAR *)L"Type";
+        col.cx = 80;
+        SendMessageW( ctl[ID_REPORT], LVM_INSERTCOLUMNW, 2, (LPARAM)&col );
+        pump( 150 );
+        check( query_has( ctl[ID_REPORT], "\"columns\":[\"Name\",\"Size\",\"Type\"]" ), "LVM_INSERTCOLUMN adds a native column" );
+        SendMessageW( ctl[ID_REPORT], LVM_SETCOLUMNWIDTH, 2, 0 );
+        pump( 150 );
+        check( query_has( ctl[ID_REPORT], "\"columns\":[\"Name\",\"Size\"]" ), "a zero-width column is hidden natively" );
+        SendMessageW( ctl[ID_REPORT], LVM_DELETECOLUMN, 2, 0 );
+    }
     SendMessageW( ctl[ID_TAB], TCM_SETCURSEL, 2, 0 );
     pump( 150 );
     check( query_has( ctl[ID_TAB], "\"selection\":2" ), "TCM_SETCURSEL reaches the native tabs" );

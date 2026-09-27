@@ -8,7 +8,7 @@ typealias PostWake = @convention(c) (UnsafeMutableRawPointer?, UInt64) -> Void
 /// What the native view knows about its Win32 control; mirrors the PE side's
 /// JSON snapshot (runtime/pe/controls.c).
 struct Snapshot: Decodable, Equatable {
-    struct Column: Decodable, Equatable { var title: String; var width: Int? }
+    struct Column: Decodable, Equatable { var title: String; var width: Int?; var index: Int?; var align: String? }
 
     var entry: String?
     var text: String?
@@ -41,6 +41,7 @@ struct Snapshot: Decodable, Equatable {
     var rows: [[String]]?
     var single: Bool?
     var noHeader: Bool?
+    var sortHeader: Bool?
     // values
     var value: Double?
     var min: Double?

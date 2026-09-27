@@ -661,7 +661,7 @@ Table(rows, selection: $multiSelection, sortOrder: $sortOrder) {
 .scrollEdgeEffectStyle(.soft, for: .top)
 ```
 
-Clicking a header does not sort in the view: it raises LVN_COLUMNCLICK, the app sorts (LVM_SORTITEMS), and the view mirrors the new order. sortOrder only draws the arrow. Custom-draw (NM_CUSTOMDRAW returning anything but CDRF_DODEFAULT) is detected at run time and drops that list back to wine's drawing.
+Clicking a header does not sort in the view: it raises LVN_COLUMNCLICK, the app sorts (LVM_SORTITEMS), and the view mirrors the new order. sortOrder only draws the arrow. Columns come from the Win32 header in display order, at their Win32 widths; a width of 0 hides one. A table builds its columns once, so a new set of columns (inserted, removed, resized) makes a new table (TableColumnForEach, 14.4+); before 14.4 the runtime draws a header row over a list with the same cell widths. Custom-draw (NM_CUSTOMDRAW returning anything but CDRF_DODEFAULT) is detected at run time and drops that list back to wine's drawing.
 
 ### List view, icon modes
 <a id="listviewicon"></a>`listview.icon` · SwiftUI · Liquid Glass: —

@@ -310,37 +310,51 @@ static const struct w2s_kind kind_listbox_multi = { "listbox.multi", listbox_sna
 
 /* ---------- ListView (list and report modes) ---------- */
 
-static int listview_columns( HWND hwnd )
+#define MAX_LV_COLUMNS 64
+
+/* the report columns in display order, with the subitem each one shows; none
+ * until the app inserts the first one */
+static int listview_columns( HWND hwnd, int *subitems, struct json *j )
 {
     HWND header = (HWND)SendMessageW( hwnd, LVM_GETHEADER, 0, 0 );
-    int n = header ? (int)SendMessageW( header, HDM_GETITEMCOUNT, 0, 0 ) : 0;
-    return n > 0 ? n : 1;
+    int n = header ? (int)SendMessageW( header, HDM_GETITEMCOUNT, 0, 0 ) : 0, order[MAX_LV_COLUMNS], c;
+    WCHAR text[512];
+
+    n = max( 0, min( n, MAX_LV_COLUMNS ) );
+    if (!n || !SendMessageW( hwnd, LVM_GETCOLUMNORDERARRAY, n, (LPARAM)order ))
+        for (c = 0; c < n; c++) order[c] = c;
+    if (j) json_arr_begin( j, "columns" );
+    for (c = 0; c < n; c++)
+    {
+        LVCOLUMNW col = { LVCF_TEXT | LVCF_WIDTH | LVCF_FMT | LVCF_SUBITEM };
+        text[0] = 0;
+        col.pszText = text;
+        col.cchTextMax = ARRAYSIZE(text);
+        col.iSubItem = order[c];
+        if (!SendMessageW( hwnd, LVM_GETCOLUMNW, order[c], (LPARAM)&col )) col.iSubItem = order[c];
+        subitems[c] = col.iSubItem;
+        if (!j) continue;
+        json_obj_begin( j );
+        json_str( j, "title", text );
+        json_int( j, "width", col.cx );
+        json_int( j, "index", order[c] );
+        json_str_a( j, "align", (col.fmt & LVCFMT_JUSTIFYMASK) == LVCFMT_RIGHT ? "trailing" :
+                                (col.fmt & LVCFMT_JUSTIFYMASK) == LVCFMT_CENTER ? "center" : "leading" );
+        json_obj_end( j );
+    }
+    if (j) json_arr_end( j );
+    return n;
 }
 
 static void listview_snapshot( struct w2s_control *ctl, struct json *j )
 {
     DWORD style = GetWindowLongW( ctl->hwnd, GWL_STYLE );
-    int columns = (style & LVS_TYPEMASK) == LVS_REPORT ? listview_columns( ctl->hwnd ) : 1;
+    int subitems[MAX_LV_COLUMNS] = { 0 }, columns = 1;
     int count = (int)SendMessageW( ctl->hwnd, LVM_GETITEMCOUNT, 0, 0 ), i, c;
     WCHAR text[512];
 
     if ((style & LVS_TYPEMASK) == LVS_REPORT)
-    {
-        json_arr_begin( j, "columns" );
-        for (c = 0; c < columns; c++)
-        {
-            LVCOLUMNW col = { LVCF_TEXT | LVCF_WIDTH };
-            text[0] = 0;
-            col.pszText = text;
-            col.cchTextMax = ARRAYSIZE(text);
-            SendMessageW( ctl->hwnd, LVM_GETCOLUMNW, c, (LPARAM)&col );
-            json_obj_begin( j );
-            json_str( j, "title", text );
-            json_int( j, "width", col.cx );
-            json_obj_end( j );
-        }
-        json_arr_end( j );
-    }
+        columns = max( 1, listview_columns( ctl->hwnd, subitems, j ) );
     json_arr_begin( j, "rows" );
     for (i = 0; i < count && i < 2000; i++)
     {
@@ -349,7 +363,7 @@ static void listview_snapshot( struct w2s_control *ctl, struct json *j )
         {
             LVITEMW item = { 0 };
             text[0] = 0;
-            item.iSubItem = c;
+            item.iSubItem = subitems[c];
             item.pszText = text;
             item.cchTextMax = ARRAYSIZE(text);
             SendMessageW( ctl->hwnd, LVM_GETITEMTEXTW, i, (LPARAM)&item );
@@ -364,6 +378,7 @@ static void listview_snapshot( struct w2s_control *ctl, struct json *j )
     json_arr_end( j );
     json_bool( j, "single", (style & LVS_SINGLESEL) != 0 );
     json_bool( j, "noHeader", (style & LVS_NOCOLUMNHEADER) != 0 );
+    json_bool( j, "sortHeader", !(style & LVS_NOSORTHEADER) );
 }
 
 static void listview_select( HWND hwnd, const int *items, int count )
