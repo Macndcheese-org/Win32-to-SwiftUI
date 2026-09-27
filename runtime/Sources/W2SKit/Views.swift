@@ -417,13 +417,6 @@ struct CommandLink: View {
     }
 }
 
-/// map: button.groupbox. macOS shows a box's title above it (HIG Boxes), but
-/// the native view is exactly the Win32 group box's rectangle and can't draw
-/// outside it, while the Win32 content inside starts right at the box's top
-/// edge. So the rounded box covers the whole rectangle and the title sits as
-/// a small caption inside its top-left, in the title zone the app leaves
-/// clear, leaving the content room below. The Win32 controls are siblings
-/// drawn over this view, on the dialog background.
 /// map: button.groupbox. A real NSBox (what SwiftUI's GroupBox is on macOS),
 /// its title above the box as macOS shows it (HIG: Boxes) when the app leaves
 /// room there: the host view then reaches above the Win32 rectangle by the
@@ -1466,15 +1459,23 @@ struct StatusBar: View {
     @ObservedObject var model: ControlModel
     let scale: CGFloat
 
+    /// A window's bottom bar as macOS draws one (Finder's, Xcode's): the window's
+    /// background under a hairline, small secondary text, no dividers between
+    /// items. AppKit's own bottom bar (contentBorderThickness) is drawn by the
+    /// window frame behind wine's content, where it can't show.
     var body: some View {
         let panes = model.snap.panes ?? []
-        HStack(spacing: 0) {
-            ForEach(panes.indices, id: \.self) { i in
-                pane(panes[i], index: i, left: i == 0 ? 0 : panes[i - 1].right)
-                if i < panes.count - 1 { Divider().padding(.vertical, 3) }
+        VStack(spacing: 0) {
+            Divider()
+            HStack(spacing: 0) {
+                ForEach(panes.indices, id: \.self) { i in
+                    pane(panes[i], index: i, left: i == 0 ? 0 : panes[i - 1].right)
+                }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            .frame(maxHeight: .infinity)
         }
+        .background(Color(nsColor: .windowBackgroundColor))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -1488,12 +1489,12 @@ struct StatusBar: View {
             let tabs = pane.text.prefix { $0 == "\t" }.count
             let alignment: Alignment = tabs == 1 ? .center : tabs >= 2 ? .trailing : .leading
             Text(String(pane.text.dropFirst(tabs)))
+                .font(.system(size: NSFont.smallSystemFontSize))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .padding(.horizontal, 6)
+                .padding(.horizontal, 8)
                 .frame(width: width, alignment: alignment)
                 .frame(maxWidth: width == nil ? .infinity : nil, maxHeight: .infinity, alignment: alignment)
-                .background(.bar)
                 .contentShape(Rectangle())
                 .help(pane.tip ?? "")
                 .gesture(TapGesture(count: 2).onEnded { model.emit(["t": "dblclick", "v": index]) }

@@ -209,18 +209,23 @@ entries:
     swiftui:
       - since: 12
         code: |-
-          HStack(spacing: 8) {
-            ForEach(choices) { c in
-              Text(c.title).font(.callout).foregroundStyle(.secondary).lineLimit(1)
-              Divider().frame(height: 12)
-            }
-            Spacer(minLength: 0)
-          }.padding(.horizontal, 8).frame(maxWidth: .infinity, maxHeight: .infinity).background(.bar)
+          VStack(spacing: 0) {
+            Divider()
+            HStack(spacing: 16) {
+              ForEach(choices) { c in
+                Text(c.title).font(.system(size: NSFont.smallSystemFontSize)).foregroundStyle(.secondary).lineLimit(1)
+              }
+              Spacer(minLength: 0)
+            }.padding(.horizontal, 8).frame(maxHeight: .infinity)
+          }.background(Color(nsColor: .windowBackgroundColor))
     glass: none
     state_in: [SB_SETPARTS, SB_SETTEXT, SB_SIMPLE, SB_SETICON, SB_SETTIPTEXT]
     events_out: {click: NM_CLICK/NM_DBLCLK on a pane}
     notes: >-
-      A Finder-style bottom bar: small secondary text, panes separated by dividers. On 26
+      A window's bottom bar as macOS draws it (Finder, Xcode): the window background under
+      a hairline, small secondary text, no dividers between panes. AppKit's own bottom bar
+      (contentBorderThickness) is drawn by the window frame behind wine's content, where it
+      can't show. On 26
       Apple's bottom bars sit on the window background under the content's scroll edge
       effect; that only applies once the content above is itself a translated List/Table.
       Pane widths follow SB_SETPARTS; leading tabs centre or right-align a pane's text as in
