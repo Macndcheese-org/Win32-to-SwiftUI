@@ -1632,6 +1632,25 @@ static int selftest(void)
         GetWindowRect( tab, &tab_rc );
         GetWindowRect( page, &page_rc );
         check( page_rc.left - tab_rc.left >= 140, "wine lays the pages out to the right of the sidebar" );
+        /* the sidebar spans the sheet's full client height, flush with the left edge */
+        {
+            RECT sheet_cr, tab_cr;
+            GetClientRect( sheet, &sheet_cr );
+            GetWindowRect( tab, &tab_cr );
+            MapWindowPoints( NULL, sheet, (POINT *)&tab_cr, 2 );
+            check( tab_cr.left == 0 && tab_cr.top == 0 && tab_cr.bottom == sheet_cr.bottom,
+                   "the tab control spans the sheet's full client height (full-height sidebar)" );
+        }
+        /* the OK button stays at the bottom right, right of the sidebar */
+        {
+            HWND ok = GetDlgItem( sheet, IDOK );
+            RECT ok_rc, sheet_rc;
+            GetWindowRect( ok, &ok_rc );
+            GetWindowRect( sheet, &sheet_rc );
+            check( ok_rc.left >= page_rc.left && ok_rc.top > page_rc.top &&
+                   sheet_rc.bottom - ok_rc.bottom < 60,
+                   "the OK button is at the bottom right, right of the sidebar" );
+        }
         inject( tab, "{\"t\":\"select\",\"v\":3}" );
         pump( 300 );
         page = (HWND)SendMessageW( sheet, PSM_GETCURRENTPAGEHWND, 0, 0 );
