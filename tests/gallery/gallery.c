@@ -519,7 +519,9 @@ static HWND property_sheet( int pages, BOOL modeless )
     psh.nPages = pages;
     psh.phpage = hpages;
     sheet = (HWND)PropertySheetW( &psh );
-    for (i = 0; i < pages; i++) free( tmpl[i] );
+    /* a page is created when first shown: a modeless sheet's templates must
+     * outlive it (they're small; the test leaks them) */
+    if (!modeless) for (i = 0; i < pages; i++) free( tmpl[i] );
     return modeless ? sheet : NULL;
 }
 
@@ -560,6 +562,25 @@ static INT_PTR CALLBACK wizard_page_proc( HWND hwnd, UINT msg, WPARAM wparam, LP
     return FALSE;
 }
 
+/* what a native wizard's Back or Next should display: wine's text without its
+ * arrow, or the macOS word when wine's is the English one */
+static const char *wizard_word( HWND button, const char *english, const char *mac )
+{
+    static char needle[2][160];
+    static int n;
+    WCHAR text[64], *p = text, *end;
+    char *out = needle[n++ % 2], word[128];
+
+    GetWindowTextW( button, text, ARRAYSIZE(text) );
+    while (*p == '<' || *p == ' ') p++;
+    end = p + wcslen( p );
+    while (end > p && (end[-1] == '>' || end[-1] == ' ')) *--end = 0;
+    WideCharToMultiByte( CP_UTF8, 0, p, -1, word, sizeof(word), NULL, NULL );
+    snprintf( out, sizeof(needle[0]), "\"display\":\"%s\"",
+              !strcmp( word[0] == '&' ? word + 1 : word, english ) ? mac : word );
+    return out;
+}
+
 /* PSH_MODELESS: returns the wizard; otherwise runs it and returns NULL */
 static HWND wizard_sheet( BOOL modeless )
 {
@@ -592,7 +613,8 @@ static HWND wizard_sheet( BOOL modeless )
     psh.nPages = 3;
     psh.phpage = hpages;
     sheet = (HWND)PropertySheetW( &psh );
-    for (i = 0; i < 3; i++) free( tmpl[i] );
+    /* as in property_sheet(): a modeless wizard creates its pages later */
+    if (!modeless) for (i = 0; i < 3; i++) free( tmpl[i] );
     return modeless ? sheet : NULL;
 }
 
@@ -1582,8 +1604,9 @@ static int selftest(void)
         check( page_rc.left - tab_rc.left >= 150, "wine lays the wizard's pages out right of the steps (TCM_ADJUSTRECT)" );
         back = GetDlgItem( test_wizard, 12323 );
         next = GetDlgItem( test_wizard, 12324 );
-        check( query_has( back, "\"display\":\"Go Back\"" ) && query_has( next, "\"display\":\"Continue\"" ),
-               "wine's Back and Next read Go Back and Continue" );
+        check( query_has( back, wizard_word( back, "Back", "Go Back" ) ) &&
+               query_has( next, wizard_word( next, "Next", "Continue" ) ),
+               "wine's Back and Next read Go Back and Continue (in English; other languages keep wine's word)" );
         check( query_has( tab, "\"heading\":\"\"" ), "the welcome page (PSP_HIDEHEADER) has no header" );
         inject( next, "{\"t\":\"click\"}" );
         pump( 300 );

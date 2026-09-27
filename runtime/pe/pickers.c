@@ -505,7 +505,7 @@ static BOOL run_print_panel( struct print_job *job, DWORD in_flags, BOOL *printe
     if ((mac_name = json_get_str( result, "printer" )))
     {
         if (wine_printer( mac_name, chosen, ARRAYSIZE(chosen) )) lstrcpyW( name, chosen );
-        TRACE( "print panel chose %ls -> %ls\n", mac_name, name );
+        TRACE( "print panel chose %.200ls -> %.200ls\n", mac_name, name );
         HeapFree( GetProcessHeap(), 0, mac_name );
     }
 
