@@ -10,3 +10,4 @@ EXPORTS
     W2STaskDialog
     W2SItemDialog
     W2SBrowseForFolder
+    W2STrackPopupMenu

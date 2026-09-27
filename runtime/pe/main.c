@@ -538,6 +538,11 @@ void WINAPI W2SWindowCreated( HWND hwnd )
         w2s_observe_tooltip( hwnd );
         return;
     }
+    if (!(GetWindowLongW( hwnd, GWL_STYLE ) & WS_CHILD))
+    {
+        w2s_frame_created( hwnd );      /* menus.c: its menu goes to the Mac menu bar */
+        return;
+    }
     if (!(kind = w2s_select_kind( hwnd ))) return;
     w2s_attach( hwnd, kind );
 }
@@ -554,9 +559,10 @@ static char *debug_call( HWND hwnd, const char *json )
     struct w2s_debug_params params;
     char *buf;
 
-    /* no window: the open alert or panel */
-    if (hwnd && (!ctl || !ctl->handle)) return NULL;
-    params.handle = hwnd ? ctl->handle : 0;
+    /* no window: the open alert or panel; a top-level window: its menu bar */
+    params.handle = 0;
+    if (hwnd && ctl && ctl->handle) params.handle = ctl->handle;
+    else if (hwnd && !(params.handle = w2s_frame_handle( hwnd ))) return NULL;
     params.json = json;
     params.json_len = strlen( json );
     params.size = 65536;

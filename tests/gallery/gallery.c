@@ -41,6 +41,7 @@ static HWND ctl[ID_LAST];
 static HWND main_window;
 static int got_command[ID_LAST][16];   /* [id][notification code & 15] */
 static int got_hscroll, got_tabchange, got_lvchanged, got_dropdown, got_status_click = -1;
+static int got_menu_new, got_initmenupopup, status_bar_checked = 1;
 static int got_expanding, got_treesel, got_deltapos, got_vscroll, got_datechange, got_mcselchange, got_mcselect;
 static int got_dispinfo, got_check_changed, got_icon_changed, got_icon_activate;
 static HTREEITEM tree_fruits, tree_apple, tree_pear, tree_veg;
@@ -517,6 +518,7 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     {
         int id = LOWORD( wparam ), code = HIWORD( wparam );
         if (id >= ID_PUSH && id < ID_LAST && lparam) got_command[id][code & 15]++;
+        if (!lparam && id == 9001) got_menu_new++;
         if (code == BN_CLICKED && id == ID_MSGBOX)
         {
             int r = MessageBoxW( hwnd, L"Do you want to save the changes you made?",
@@ -563,6 +565,15 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         return 0;
     case WM_VSCROLL:
         if ((HWND)lparam == ctl[ID_UPDOWN]) got_vscroll++;
+        return 0;
+    case WM_INITMENUPOPUP:
+        /* apps update their menus here; the native menu must show it */
+        got_initmenupopup++;
+        if (GetMenuState( (HMENU)wparam, 9010, MF_BYCOMMAND ) != (UINT)-1)
+        {
+            status_bar_checked = !status_bar_checked;
+            CheckMenuItem( (HMENU)wparam, 9010, MF_BYCOMMAND | (status_bar_checked ? MF_CHECKED : MF_UNCHECKED) );
+        }
         return 0;
     case WM_NOTIFY:
     {
@@ -723,6 +734,12 @@ static void CALLBACK choose_folder( HWND hwnd, UINT msg, UINT_PTR id, DWORD time
 {
     KillTimer( hwnd, id );
     inject( NULL, "{\"t\":\"choose\",\"s\":\"/tmp\"}" );
+}
+
+static void CALLBACK choose_popup( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    KillTimer( hwnd, id );
+    inject( NULL, "{\"t\":\"popupChoose\",\"v\":9004}" );
 }
 
 static void CALLBACK choose_file( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
@@ -1148,6 +1165,39 @@ static int selftest(void)
         pump( 200 );
     }
 
+    /* menus: the window's menu is in the Mac menu bar; the window keeps no strip for it */
+    {
+        RECT wr, cr, adj = { 0, 0, 100, 100 };
+        HMENU popup;
+        int extra, before;
+
+        GetWindowRect( main_window, &wr );
+        GetClientRect( main_window, &cr );
+        AdjustWindowRectEx( &adj, GetWindowLongW( main_window, GWL_STYLE ), FALSE, GetWindowLongW( main_window, GWL_EXSTYLE ) );
+        extra = (wr.bottom - wr.top - cr.bottom) - (adj.bottom - adj.top - 100);
+        if (extra) printf( "      %d px of menu strip left in the window\n", extra );
+        check( extra == 0, "the window keeps no menu strip (its menu is in the Mac menu bar)" );
+        check( query_has( main_window, "\"titles\":[\"File\",\"Edit\",\"View\"]" ), "the menu bar shows File, Edit, View natively" );
+        check( query_has( main_window, "9001:n" ), "Ctrl+N becomes the key equivalent Cmd-N" );
+        inject( main_window, "{\"t\":\"menu\",\"v\":9001}" );
+        pump( 250 );
+        check( got_menu_new == 1, "a native menu choice -> WM_COMMAND" );
+        before = got_initmenupopup;
+        inject( main_window, "{\"t\":\"open\",\"v\":2}" );
+        pump( 500 );
+        check( got_initmenupopup > before &&
+               query_has( main_window, status_bar_checked ? "\"checked\":[9010]" : "\"checked\":[]" ),
+               "opening a native menu sends WM_INITMENUPOPUP, and the check mark the app sets there shows" );
+
+        popup = CreatePopupMenu();
+        AppendMenuW( popup, MF_STRING, 9004, L"&Copy" );
+        AppendMenuW( popup, MF_STRING, 9005, L"&Paste" );
+        SetTimer( main_window, 3, 700, choose_popup );
+        r = TrackPopupMenu( popup, TPM_RETURNCMD, wr.left + 60, wr.top + 90, 0, main_window, NULL );
+        check( r == 9004, "TrackPopupMenu -> a native popup menu returns the chosen command" );
+        DestroyMenu( popup );
+    }
+
     /* message box -> NSAlert: press the second button ("No") */
     SetTimer( main_window, 1, 800, press_alert_button );
     r = MessageBoxW( main_window, L"Save changes?", L"Gallery test", MB_YESNO | MB_ICONQUESTION );
@@ -1227,6 +1277,21 @@ int WINAPI wWinMain( HINSTANCE inst, HINSTANCE prev, WCHAR *cmdline, int show )
     RegisterClassW( &wc );
     main_window = CreateWindowExW( 0, L"W2SGallery", L"Win32-to-SwiftUI gallery", WS_OVERLAPPEDWINDOW,
                                    CW_USEDEFAULT, CW_USEDEFAULT, 1150, 720, NULL, NULL, inst, NULL );
+    {
+        /* a menu bar: it goes to the Mac menu bar (menus.c), the window keeps no strip for it */
+        HMENU bar = CreateMenu(), file = CreatePopupMenu(), edit = CreatePopupMenu(), view = CreatePopupMenu();
+        AppendMenuW( file, MF_STRING, 9001, L"&New\tCtrl+N" );
+        AppendMenuW( file, MF_STRING, 9002, L"&Open...\tCtrl+O" );
+        AppendMenuW( file, MF_SEPARATOR, 0, NULL );
+        AppendMenuW( file, MF_STRING, 9003, L"E&xit" );
+        AppendMenuW( edit, MF_STRING, 9004, L"&Copy\tCtrl+C" );
+        AppendMenuW( edit, MF_STRING, 9005, L"&Paste\tCtrl+V" );
+        AppendMenuW( view, MF_STRING | MF_CHECKED, 9010, L"&Status bar" );
+        AppendMenuW( bar, MF_POPUP, (UINT_PTR)file, L"&File" );
+        AppendMenuW( bar, MF_POPUP, (UINT_PTR)edit, L"&Edit" );
+        AppendMenuW( bar, MF_POPUP, (UINT_PTR)view, L"&View" );
+        SetMenu( main_window, bar );
+    }
     create_controls();
     ShowWindow( main_window, SW_SHOW );
     UpdateWindow( main_window );

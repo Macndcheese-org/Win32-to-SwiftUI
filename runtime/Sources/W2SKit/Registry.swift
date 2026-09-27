@@ -265,6 +265,11 @@ enum W2S {
         return controls[handle]
     }
 
+    static func object(_ json: UnsafePointer<CChar>?, _ len: UInt32) -> [String: Any]? {
+        guard let json = json else { return nil }
+        return (try? JSONSerialization.jsonObject(with: Data(bytes: json, count: Int(len)))) as? [String: Any]
+    }
+
     static func decode(_ json: UnsafePointer<CChar>?, _ len: UInt32) -> Snapshot? {
         guard let json = json else { return nil }
         let data = Data(bytes: json, count: Int(len))

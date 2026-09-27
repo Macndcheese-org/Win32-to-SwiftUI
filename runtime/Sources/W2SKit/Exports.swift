@@ -16,10 +16,11 @@ public func w2s_swift_init(_ version: UInt32, _ osMajor: UnsafeMutablePointer<UI
 public func w2s_swift_control_create(_ hostView: UInt64, _ window: UInt64, _ postWake: UInt64, _ hwnd: UInt64,
                                      _ entry: UnsafePointer<CChar>?, _ json: UnsafePointer<CChar>?,
                                      _ jsonLen: UInt32) -> UInt64 {
-    guard hostView != 0, let entry = entry, let snap = W2S.decode(json, jsonLen),
+    guard hostView != 0, let entry = entry,
           let viewPtr = UnsafeMutableRawPointer(bitPattern: UInt(hostView)) else { return 0 }
     let entryID = String(cString: entry)
-    guard ControlViews.supports(entryID) else { return 0 }
+    if entryID == "menubar" { return createMenuBar(viewPtr, postWake, json, jsonLen) }
+    guard let snap = W2S.decode(json, jsonLen), ControlViews.supports(entryID) else { return 0 }
 
     // keep the host view alive until destroy, whatever winemac does meanwhile
     _ = Unmanaged<NSView>.fromOpaque(viewPtr).retain()
@@ -48,8 +49,27 @@ public func w2s_swift_control_create(_ hostView: UInt64, _ window: UInt64, _ pos
     return handle
 }
 
+/// A window's menu (map: menu.bar): no view of its own, it lives in the Mac menu bar.
+private func createMenuBar(_ viewPtr: UnsafeMutableRawPointer, _ postWake: UInt64,
+                           _ json: UnsafePointer<CChar>?, _ jsonLen: UInt32) -> UInt64 {
+    guard let spec = W2S.object(json, jsonLen) else { return 0 }
+    _ = Unmanaged<NSView>.fromOpaque(viewPtr).retain()
+    let wake = postWake == 0 ? nil : unsafeBitCast(UInt(postWake), to: PostWake.self)
+    let handle = W2S.newID()
+    let host = ControlHost(handle: handle, entry: "menubar", hostView: viewPtr, postWake: wake)
+    host.owned = MenuBar(host: host, spec: spec)
+    W2S.lock.lock()
+    W2S.controls[handle] = host
+    W2S.lock.unlock()
+    return handle
+}
+
 @_cdecl("w2s_swift_control_update")
 public func w2s_swift_control_update(_ handle: UInt64, _ json: UnsafePointer<CChar>?, _ jsonLen: UInt32) {
+    if let host = W2S.control(handle), let bar = host.owned as? MenuBar {
+        if let spec = W2S.object(json, jsonLen) { bar.update(spec) }
+        return
+    }
     guard let host = W2S.control(handle), let snap = W2S.decode(json, jsonLen) else { return }
     DispatchQueue.main.async {
         host.model.absorbImages(snap)
@@ -69,6 +89,7 @@ public func w2s_swift_control_destroy(_ handle: UInt64) {
     DispatchQueue.main.async {
         host.hosting?.removeFromSuperview()
         host.hosting = nil
+        (host.owned as? MenuBar)?.remove()     // its items leave the menu bar with it
         host.owned = nil
         Unmanaged<NSView>.fromOpaque(host.hostView).release()
     }
@@ -77,6 +98,11 @@ public func w2s_swift_control_destroy(_ handle: UInt64) {
 @_cdecl("w2s_swift_control_focus")
 public func w2s_swift_control_focus(_ handle: UInt64, _ focused: UInt32) {
     guard let host = W2S.control(handle) else { return }
+    if let bar = host.owned as? MenuBar {
+        // the window became active (or not): its menu goes in (or out of) the menu bar
+        DispatchQueue.main.async { bar.show(focused != 0) }
+        return
+    }
     DispatchQueue.main.async {
         if focused != 0 {
             host.model.focusRequest += 1
@@ -125,6 +151,15 @@ public func w2s_swift_request_start(_ kind: UnsafePointer<CChar>?, _ window: UIn
     W2S.requests[id] = request
     W2S.lock.unlock()
     let windowPtr = UnsafeMutableRawPointer(bitPattern: UInt(window))
+    if kindString == "popup" {
+        // NSMenu.popUp tracks in a nested run loop: from a GCD main-queue block it
+        // would hold the queue, and every other main-queue update, until it closes
+        CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) {
+            PopupMenu.run(params, request: request)
+        }
+        CFRunLoopWakeUp(CFRunLoopGetMain())
+        return id
+    }
     DispatchQueue.main.async {
         let owner = windowPtr.map { Unmanaged<NSWindow>.fromOpaque($0).takeUnretainedValue() }
         Requests.start(kind: kindString, params: params, owner: owner, request: request)

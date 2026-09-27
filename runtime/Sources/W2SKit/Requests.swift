@@ -538,6 +538,7 @@ enum Debug {
     static func handle(handle: UInt64, op: [String: Any]) -> String {
         switch op["op"] as? String {
         case "query":
+            if let host = W2S.control(handle), let bar = host.owned as? MenuBar { return W2S.json(bar.debugState()) }
             if handle == 0 {
                 // the open alert or panel
                 guard let request = Requests.latestOpen() else { return "{\"error\":\"no open request\"}" }
@@ -569,7 +570,11 @@ enum Debug {
             return W2S.json(out)
         case "inject":
             guard let event = op["event"] as? [String: Any] else { return "{\"error\":\"no event\"}" }
-            if handle == 0 || ["alertButton", "choose", "cancel", "press", "look"].contains(event["t"] as? String ?? "") {
+            if let host = W2S.control(handle), let bar = host.owned as? MenuBar {
+                bar.debugInject(event)
+                return "{\"ok\":true}"
+            }
+            if handle == 0 || ["alertButton", "choose", "cancel", "press", "look", "popupChoose"].contains(event["t"] as? String ?? "") {
                 guard let request = Requests.latestOpen() else { return "{\"error\":\"no open request\"}" }
                 request.inject?(event)
                 return "{\"ok\":true}"

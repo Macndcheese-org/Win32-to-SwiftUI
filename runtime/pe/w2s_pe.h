@@ -153,6 +153,10 @@ const UINT *w2s_map_state_in( const char *entry, unsigned int *count );
 void w2s_notify_parent_command( HWND hwnd, UINT code );
 LRESULT w2s_notify_parent( HWND hwnd, UINT code, NMHDR *hdr );
 
+/* menus.c */
+void w2s_frame_created( HWND hwnd );
+UINT64 w2s_frame_handle( HWND hwnd );
+
 /* dialogs.c */
 struct w2s_request_handler
 {
