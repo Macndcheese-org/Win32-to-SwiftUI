@@ -37,12 +37,15 @@ enum
     ID_TASKDLG, ID_FOLDER, ID_COLOR, ID_FONT, ID_PRINT, ID_ITEMDLG, ID_PROPSHEET, ID_WIZARD,
     /* light and dark */
     ID_WHITEPANEL, ID_WHITECHECK,
+    /* toolbars */
+    ID_TOOLBAR,
     ID_LAST
 };
 
 static HWND ctl[ID_LAST];
 static HWND main_window;
 static int got_command[ID_LAST][16];   /* [id][notification code & 15] */
+static int got_tb_command[4], got_tb_dropdown;  /* the gallery toolbar's buttons 9101..9104 */
 static int got_hscroll, got_tabchange, got_lvchanged, got_dropdown, got_status_click = -1;
 static int got_menu_new, got_initmenupopup, status_bar_checked = 1;
 static int got_expanding, got_treesel, got_deltapos, got_vscroll, got_datechange, got_mcselchange, got_mcselect;
@@ -360,6 +363,22 @@ static void create_controls2(void)
         tree_apple = (HTREEITEM)SendMessageW( ctl[ID_TREE], TVM_INSERTITEMW, 0, (LPARAM)&ins );
         ins.item.pszText = (WCHAR *)L"Pear";
         tree_pear = (HTREEITEM)SendMessageW( ctl[ID_TREE], TVM_INSERTITEMW, 0, (LPARAM)&ins );
+    }
+    /* a toolbar with comctl32's standard images, a check button and a drop-down */
+    make( TOOLBARCLASSNAMEW, NULL, TBSTYLE_FLAT | TBSTYLE_TOOLTIPS | CCS_NOPARENTALIGN | CCS_NORESIZE | CCS_NODIVIDER,
+          724, 500, 360, 28, ID_TOOLBAR );
+    {
+        TBBUTTON b[5];
+        memset( b, 0, sizeof(b) );
+        SendMessageW( ctl[ID_TOOLBAR], TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0 );
+        SendMessageW( ctl[ID_TOOLBAR], TB_SETEXTENDEDSTYLE, 0, TBSTYLE_EX_DRAWDDARROWS );
+        SendMessageW( ctl[ID_TOOLBAR], TB_LOADIMAGES, IDB_STD_SMALL_COLOR, (LPARAM)HINST_COMMCTRL );
+        b[0].iBitmap = STD_FILENEW; b[0].idCommand = 9101; b[0].fsState = TBSTATE_ENABLED; b[0].fsStyle = BTNS_BUTTON;
+        b[1].iBitmap = STD_FILESAVE; b[1].idCommand = 9102; b[1].fsState = TBSTATE_ENABLED; b[1].fsStyle = BTNS_BUTTON;
+        b[2].fsStyle = BTNS_SEP;
+        b[3].iBitmap = STD_FIND; b[3].idCommand = 9103; b[3].fsState = TBSTATE_ENABLED; b[3].fsStyle = BTNS_CHECK;
+        b[4].iBitmap = STD_PRINT; b[4].idCommand = 9104; b[4].fsState = TBSTATE_ENABLED; b[4].fsStyle = BTNS_DROPDOWN;
+        SendMessageW( ctl[ID_TOOLBAR], TB_ADDBUTTONSW, 5, (LPARAM)b );
     }
     make( L"Edit", L"5", ES_NUMBER | WS_BORDER | WS_TABSTOP, 916, 112, 80, 22, ID_UDEDIT );
     make( UPDOWN_CLASSW, NULL, UDS_AUTOBUDDY | UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS, 0, 0, 0, 0, ID_UPDOWN );
@@ -740,6 +759,7 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     {
         int id = LOWORD( wparam ), code = HIWORD( wparam );
         if (id >= ID_PUSH && id < ID_LAST && lparam) got_command[id][code & 15]++;
+        if (id >= 9101 && id <= 9104 && (HWND)lparam == ctl[ID_TOOLBAR]) got_tb_command[id - 9101]++;
         if (!lparam && id == 9001) got_menu_new++;
         if (code == BN_CLICKED && id == ID_MSGBOX)
         {
@@ -813,6 +833,11 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     {
         NMHDR *hdr = (NMHDR *)lparam;
         if (hdr->hwndFrom == ctl[ID_TAB] && hdr->code == TCN_SELCHANGE) got_tabchange++;
+        if (hdr->hwndFrom == ctl[ID_TOOLBAR] && hdr->code == TBN_DROPDOWN)
+        {
+            got_tb_dropdown++;
+            return TBDDRET_DEFAULT;
+        }
         if (hdr->hwndFrom == ctl[ID_REPORT] && hdr->code == LVN_ITEMCHANGED) got_lvchanged++;
         if (hdr->hwndFrom == ctl[ID_TREE] && hdr->code == TVN_ITEMEXPANDINGW)
         {
@@ -901,6 +926,30 @@ static BOOL query_has( HWND hwnd, const char *needle )
 {
     char *q = pQuery( hwnd );
     BOOL ok = q && strstr( q, needle );
+    if (!ok) printf( "      query: %s\n", q ? q : "(null)" );
+    pFree( q );
+    return ok;
+}
+
+/* whether the native model's object holding "id":<id> (a toolbar button) has
+ * field, whatever the order JSON gives its keys */
+static BOOL query_object_has( HWND hwnd, int id, const char *field )
+{
+    char *q = pQuery( hwnd ), key[32], *p, *start, *end;
+    BOOL ok = FALSE;
+
+    snprintf( key, sizeof(key), "\"id\":%d", id );
+    if (q && (p = strstr( q, key )))
+    {
+        for (start = p; start > q && *start != '{'; start--) ;
+        if ((end = strchr( p, '}' )))
+        {
+            char saved = end[1];
+            end[1] = 0;
+            ok = strstr( start, field ) != NULL;
+            end[1] = saved;
+        }
+    }
     if (!ok) printf( "      query: %s\n", q ? q : "(null)" );
     pFree( q );
     return ok;
@@ -1352,6 +1401,7 @@ static void selftest2(void)
         check( query_has( tree, "\"img\":0" ) && query_has( tree, "\"0\":\"uttype:public.folder\"" ) &&
                query_has( tree, "\"1\":\"uttype:public." ),   /* shell32's file and document look the same at 16 px */
                "the nodes' icons: shell32's folder and document as the Finder's" );
+
         snprintf( event, sizeof(event), "{\"t\":\"expand\",\"v\":%lld}", (long long)(INT_PTR)tree_veg );
         inject( tree, event );
         pump( 250 );
@@ -1367,6 +1417,29 @@ static void selftest2(void)
                "native collapse -> TVN_ITEMEXPANDING, collapsed" );
         check( (HTREEITEM)SendMessageW( tree, TVM_GETNEXTITEM, TVGN_CARET, 0 ) == tree_apple && got_treesel > 0,
                "native selection -> TVM_GETNEXTITEM(TVGN_CARET) + TVN_SELCHANGED" );
+    }
+
+    /* toolbars: native buttons, comctl32's standard images as SF Symbols */
+    {
+        HWND tb = ctl[ID_TOOLBAR];
+        check( pIsTranslated( tb ) && query_has( tb, "\"sym\":\"sf:doc.badge.plus\"" ) &&
+               query_has( tb, "\"sym\":\"sf:printer\"" ) && query_has( tb, "\"sep\":true" ),
+               "a toolbar's buttons are native, comctl32's standard images as SF Symbols" );
+        inject( tb, "{\"t\":\"click\",\"v\":0}" );
+        pump( 200 );
+        check( got_tb_command[0] == 1, "a native toolbar click -> WM_COMMAND with the button's id" );
+        inject( tb, "{\"t\":\"click\",\"v\":3}" );
+        pump( 200 );
+        check( SendMessageW( tb, TB_ISBUTTONCHECKED, 9103, 0 ) && got_tb_command[2] == 1 &&
+               query_object_has( tb, 9103, "\"checked\":true" ),
+               "a check button toggles in Win32 and shows checked natively" );
+        SendMessageW( tb, TB_ENABLEBUTTON, 9102, FALSE );
+        pump( 150 );
+        check( query_object_has( tb, 9102, "\"enabled\":false" ), "TB_ENABLEBUTTON reaches the native button" );
+        SendMessageW( tb, TB_ENABLEBUTTON, 9102, TRUE );
+        inject( tb, "{\"t\":\"dropdown\",\"v\":4}" );
+        pump( 200 );
+        check( got_tb_dropdown == 1 && got_tb_command[3] == 0, "a native drop-down arrow -> TBN_DROPDOWN, not the command" );
     }
 
     /* up-down with its buddy edit */

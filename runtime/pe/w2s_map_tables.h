@@ -52,8 +52,8 @@ static const UINT w2s_answers_tab[] = { TCM_ADJUSTRECT, TCM_GETITEMRECT };
 static const UINT w2s_state_propsheet[] = { PSM_SETCURSEL, PSM_ADDPAGE, PSM_REMOVEPAGE, PSM_CHANGED, PSM_UNCHANGED, PSM_SETTITLEA, PSM_SETTITLEW, PSM_SETWIZBUTTONS };
 static const UINT w2s_state_propsheet_wizard[] = { PSM_SETWIZBUTTONS, PSM_SETHEADERTITLEA, PSM_SETHEADERTITLEW, PSM_SETHEADERSUBTITLEA, PSM_SETHEADERSUBTITLEW, PSM_SETFINISHTEXTA, PSM_SETFINISHTEXTW, PSM_PRESSBUTTON };
 static const UINT w2s_state_dialog[] = { WM_INITDIALOG, DM_SETDEFID, WM_NEXTDLGCTL };
-static const UINT w2s_state_toolbar[] = { TB_ADDBUTTONSA, TB_ADDBUTTONSW, TB_INSERTBUTTONA, TB_INSERTBUTTONW, TB_DELETEBUTTON, TB_SETSTATE, TB_CHECKBUTTON, TB_ENABLEBUTTON, TB_SETIMAGELIST, TB_SETBUTTONINFOA, TB_SETBUTTONINFOW, TB_AUTOSIZE };
-static const UINT w2s_state_rebar[] = { RB_INSERTBANDA, RB_INSERTBANDW, RB_SETBANDINFOA, RB_SETBANDINFOW, RB_DELETEBAND, RB_MAXIMIZEBAND, RB_SHOWBAND };
+static const UINT w2s_state_toolbar[] = { TB_ADDBUTTONSA, TB_ADDBUTTONSW, TB_INSERTBUTTONA, TB_INSERTBUTTONW, TB_DELETEBUTTON, TB_SETSTATE, TB_CHECKBUTTON, TB_ENABLEBUTTON, TB_HIDEBUTTON, TB_PRESSBUTTON, TB_SETIMAGELIST, TB_ADDBITMAP, TB_LOADIMAGES, TB_CHANGEBITMAP, TB_SETBUTTONINFOA, TB_SETBUTTONINFOW, TB_SETCMDID, TB_SETSTYLE, TB_SETEXTENDEDSTYLE, TB_SETBUTTONSIZE, TB_SETBITMAPSIZE, TB_AUTOSIZE, WM_LBUTTONUP, WM_SIZE, WM_PARENTNOTIFY };
+static const UINT w2s_state_rebar[] = { RB_INSERTBANDA, RB_INSERTBANDW, RB_SETBANDINFOA, RB_SETBANDINFOW, RB_DELETEBAND, RB_MAXIMIZEBAND, RB_SHOWBAND, WM_SIZE, WM_PARENTNOTIFY };
 static const UINT w2s_state_statusbar[] = { SB_SETPARTS, SB_SETTEXTA, SB_SETTEXTW, SB_SIMPLE, SB_SETICON, SB_SETTIPTEXTA, SB_SETTIPTEXTW };
 static const UINT w2s_state_pager[] = { 0 };
 static const UINT w2s_state_mdiclient[] = { 0 };
@@ -137,8 +137,8 @@ static const struct w2s_map_entry w2s_map_entries[] =
     { "propsheet", w2s_state_propsheet, 8, NULL, 0 },
     { "propsheet.wizard", w2s_state_propsheet_wizard, 8, NULL, 0 },
     { "dialog", w2s_state_dialog, 3, NULL, 0 },
-    { "toolbar", w2s_state_toolbar, 12, NULL, 0 },
-    { "rebar", w2s_state_rebar, 7, NULL, 0 },
+    { "toolbar", w2s_state_toolbar, 25, NULL, 0 },
+    { "rebar", w2s_state_rebar, 9, NULL, 0 },
     { "statusbar", w2s_state_statusbar, 7, NULL, 0 },
     { "pager", w2s_state_pager, 0, NULL, 0 },
     { "mdiclient", w2s_state_mdiclient, 0, NULL, 0 },
@@ -270,6 +270,61 @@ static const struct w2s_icon_entry w2s_icon_entries[] =
     { L"regedit.exe", 134, "nsimage:NSComputer" },
     { L"regedit.exe", 135, "sf:textformat.abc" },
     { L"regedit.exe", 136, "sf:number" },
+};
+
+/* toolbar images (map: 75-icons.yaml toolbar_images): an image strip's image -> the macOS image */
+struct w2s_toolbar_image
+{
+    const WCHAR *module;
+    unsigned int bitmap;        /* comctl32: the standard strip's IDB_*_SMALL_COLOR; else the resource id */
+    unsigned int index;
+    const char *spec;
+};
+
+static const struct w2s_toolbar_image w2s_toolbar_images[] =
+{
+    { L"comctl32.dll", 0, 0, "sf:scissors" },
+    { L"comctl32.dll", 0, 1, "sf:doc.on.doc" },
+    { L"comctl32.dll", 0, 2, "sf:doc.on.clipboard" },
+    { L"comctl32.dll", 0, 3, "sf:arrow.uturn.backward" },
+    { L"comctl32.dll", 0, 4, "sf:arrow.uturn.forward" },
+    { L"comctl32.dll", 0, 5, "sf:trash" },
+    { L"comctl32.dll", 0, 6, "sf:doc.badge.plus" },
+    { L"comctl32.dll", 0, 7, "sf:folder" },
+    { L"comctl32.dll", 0, 8, "sf:square.and.arrow.down" },
+    { L"comctl32.dll", 0, 9, "sf:doc.text.magnifyingglass" },
+    { L"comctl32.dll", 0, 10, "sf:info.circle" },
+    { L"comctl32.dll", 0, 11, "sf:questionmark.circle" },
+    { L"comctl32.dll", 0, 12, "sf:magnifyingglass" },
+    { L"comctl32.dll", 0, 13, "sf:arrow.left.arrow.right" },
+    { L"comctl32.dll", 0, 14, "sf:printer" },
+    { L"comctl32.dll", 4, 0, "sf:square.grid.2x2" },
+    { L"comctl32.dll", 4, 1, "sf:square.grid.3x3" },
+    { L"comctl32.dll", 4, 2, "sf:list.bullet" },
+    { L"comctl32.dll", 4, 3, "sf:list.bullet.rectangle" },
+    { L"comctl32.dll", 4, 4, "sf:textformat" },
+    { L"comctl32.dll", 4, 5, "sf:arrow.up.arrow.down" },
+    { L"comctl32.dll", 4, 6, "sf:calendar" },
+    { L"comctl32.dll", 4, 7, "sf:doc" },
+    { L"comctl32.dll", 4, 8, "sf:arrow.turn.left.up" },
+    { L"comctl32.dll", 4, 9, "sf:network" },
+    { L"comctl32.dll", 4, 10, "sf:xmark.circle" },
+    { L"comctl32.dll", 4, 11, "sf:folder.badge.plus" },
+    { L"comctl32.dll", 4, 12, "sf:ellipsis.circle" },
+    { L"comctl32.dll", 8, 0, "sf:chevron.backward" },
+    { L"comctl32.dll", 8, 1, "sf:chevron.forward" },
+    { L"comctl32.dll", 8, 2, "sf:star" },
+    { L"comctl32.dll", 8, 3, "sf:star.circle" },
+    { L"comctl32.dll", 8, 4, "sf:sidebar.left" },
+    { L"wordpad.exe", 100, 0, "sf:calendar.badge.clock" },
+    { L"wordpad.exe", 101, 0, "sf:bold" },
+    { L"wordpad.exe", 101, 1, "sf:italic" },
+    { L"wordpad.exe", 101, 2, "sf:underline" },
+    { L"wordpad.exe", 101, 3, "sf:paintpalette" },
+    { L"wordpad.exe", 101, 4, "sf:text.alignleft" },
+    { L"wordpad.exe", 101, 5, "sf:text.aligncenter" },
+    { L"wordpad.exe", 101, 6, "sf:text.alignright" },
+    { L"wordpad.exe", 101, 7, "sf:list.bullet" },
 };
 
 #endif

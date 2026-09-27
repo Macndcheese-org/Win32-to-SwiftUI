@@ -46,6 +46,36 @@ def icon_rows(tree, icons):
     return rows
 
 
+# comctl32's standard strips: the image name's prefix -> the strip (IDB_*_SMALL_COLOR; the
+# large one is the next id and holds the same images)
+STANDARD_STRIPS = {"STD": 0, "VIEW": 4, "HIST": 8}
+
+
+def toolbar_rows(tree, images):
+    """{ L"module", bitmap, index, "spec" }: comctl32's standard strips (bitmap = the strip's
+    IDB_*_SMALL_COLOR) and wine's programs' own strips (bitmap = the resource id)."""
+    values = {}
+    for module, (_, header) in ICON_MODULES.items():
+        text = open(os.path.join(tree, header), errors="replace").read()
+        values[module] = {n: int(v) for n, v in re.findall(r"#\s*define\s+(\w+)\s+(\d+)\b", text)}
+    rows = []
+    for key, d in images.items():
+        parts = key.split("/")
+        module = parts[0]
+        if module == "comctl32":
+            name = parts[1]
+            if name not in values[module]:
+                sys.exit(f"toolbar_images.{key}: {name} is not defined in {ICON_MODULES[module][1]}")
+            bitmap, index = STANDARD_STRIPS[name.split("_")[0]], values[module][name]
+        else:
+            if parts[1] not in values[module]:
+                sys.exit(f"toolbar_images.{key}: {parts[1]} is not defined in {ICON_MODULES[module][1]}")
+            bitmap, index = values[module][parts[1]], int(parts[2])
+        spec = icon_spec(d).replace("\\", "\\\\").replace('"', '\\"')
+        rows.append(f'    {{ L"{ICON_MODULES[module][0]}", {bitmap}, {index}, "{spec}" }},')
+    return rows
+
+
 def main():
     tree = sys.argv[1]
     names = defined_names(tree)
@@ -122,6 +152,20 @@ struct w2s_icon_entry
 static const struct w2s_icon_entry w2s_icon_entries[] =
 {{
 {chr(10).join(icon_rows(tree, m["icons"]))}
+}};
+
+/* toolbar images (map: 75-icons.yaml toolbar_images): an image strip's image -> the macOS image */
+struct w2s_toolbar_image
+{{
+    const WCHAR *module;
+    unsigned int bitmap;        /* comctl32: the standard strip's IDB_*_SMALL_COLOR; else the resource id */
+    unsigned int index;
+    const char *spec;
+}};
+
+static const struct w2s_toolbar_image w2s_toolbar_images[] =
+{{
+{chr(10).join(toolbar_rows(tree, m["toolbar_images"]))}
 }};
 
 #endif

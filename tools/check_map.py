@@ -179,8 +179,11 @@ def main():
 
     # ---- stock icons: one macOS image each, SF Symbols that exist at the macOS 12 floor
     symbols = sf_symbols()
-    for k, d in m["icons"].items():
-        if not re.fullmatch(r"(%s)/[A-Z0-9_]+" % "|".join(ICON_MODULES), k):
+    for k, d in list(m["icons"].items()) + [("toolbar/" + k, v) for k, v in m["toolbar_images"].items()]:
+        if k.startswith("toolbar/"):
+            if not re.fullmatch(r"toolbar/(comctl32/(STD|VIEW|HIST)_[A-Z]+|(%s)/[A-Z0-9_]+/\d+)" % "|".join(ICON_MODULES), k):
+                err(f"toolbar_images.{k[8:]}: key is comctl32/<STD_|VIEW_|HIST_ name> or <program>/<bitmap>/<index>")
+        elif not re.fullmatch(r"(%s)/[A-Z0-9_]+" % "|".join(ICON_MODULES), k):
             err(f"icons.{k}: key is <{'|'.join(ICON_MODULES)}>/<resource name>")
         kinds = [x for x in ICON_KINDS if x in d]
         if len(kinds) != 1:
@@ -205,7 +208,8 @@ def main():
     print(f"flags: {len(flag_owner)} = {len(claimed['flag'])} as entry variants + {len(m['flags'])} dispositions + {len(auto)} masks/aliases/composites")
     print(f"dispositions by kind: {dict(disp)}")
     print(f"classes {len(classes)}, entry points {len(apis)}, visual parts {len(parts)}, fonts {len(fonts)}")
-    print(f"stock icons: {len(m['icons'])} ({dict(Counter(k for d in m['icons'].values() for k in ICON_KINDS if k in d))})"
+    print(f"stock icons: {len(m['icons'])}, toolbar images: {len(m['toolbar_images'])} "
+          f"({dict(Counter(k for d in list(m['icons'].values()) + list(m['toolbar_images'].values()) for k in ICON_KINDS if k in d))})"
           + ("" if symbols is not None else "; SF Symbol names not checked (no CoreGlyphs here)"))
     if errors:
         for e in errors[:400]:

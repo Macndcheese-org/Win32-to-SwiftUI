@@ -48,6 +48,28 @@ struct Snapshot: Codable, Equatable {
     var imageBGRA: String?
     var imageSymbol: String?    // a stock icon: the macOS image's spec (Icons.swift) instead of imageBGRA
     var titleAbove: Bool?       // group box: room for its title above the box
+    // toolbar
+    struct ToolbarButton: Codable, Equatable {
+        var i: Int
+        var rect: [Int]         // Win32: left, top, width, height in the toolbar
+        var hidden: Bool?
+        var sep: Bool?
+        var id: Int?
+        var enabled: Bool?
+        var check: Bool?
+        var group: Bool?
+        var checked: Bool?
+        var dropdown: Int?      // 1: an arrow beside the button, 2: the whole button drops down
+        var showText: Bool?
+        var text: String?
+        var tip: String?
+        var sym: String?        // a standard image's macOS image (Icons.swift)
+        var img: Int?           // else its image list index (ControlModel.images)
+    }
+    var buttons: [ToolbarButton]?
+    var children: [[Int]]?      // toolbar, rebar: the app's own windows in it (client left, top, right, bottom)
+    var list: Bool?
+    var mixed: Bool?
     var bottom: Bool?           // tab control: TCS_BOTTOM
     var fill: String?           // static.frame: "none" (an outline) or the rectangle's colour
     var cue: String?
@@ -192,8 +214,19 @@ final class PassThroughHostingView<Content: View>: NSHostingView<Content> {
     /// lives in the window, outside wine's content, and takes none here).
     static func region(for entry: String, model: ControlModel) -> ((NSPoint, NSSize) -> Bool)? {
         switch entry {
-        case "static.text", "static.frame", "static.separator", "static.image", "button.groupbox", "progress":
+        case "static.text", "static.frame", "static.separator", "static.image", "button.groupbox", "progress", "rebar":
             return { _, _ in false }
+        case "toolbar":
+            // the buttons; between them, the app's own windows (a font list) take the clicks
+            return { [weak model] point, size in
+                guard let snap = model?.snap else { return false }
+                let scale = size.width / CGFloat(max(1, snap.widthPx ?? Double(size.width)))
+                return (snap.buttons ?? []).contains { b in
+                    !(b.sep ?? false) && !(b.hidden ?? false) && b.rect.count == 4 &&
+                        NSRect(x: CGFloat(b.rect[0]) * scale, y: CGFloat(b.rect[1]) * scale,
+                               width: CGFloat(b.rect[2]) * scale, height: CGFloat(b.rect[3]) * scale).contains(point)
+                }
+            }
         case "tab":
             return { [weak model] point, size in
                 guard let snap = model?.snap else { return false }

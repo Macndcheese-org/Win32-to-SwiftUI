@@ -4,6 +4,7 @@
  * (snapshot), and how native events become Win32 actions (apply).
  */
 #include "w2s_pe.h"
+#include "w2s_map_tables.h"  /* w2s_toolbar_images */
 
 /* ---------- helpers ---------- */
 
@@ -1987,6 +1988,311 @@ WCHAR *w2s_tool_text( HWND hwnd )
 
 /* ---------- selection ---------- */
 
+/* ---------- Toolbar (map: toolbar) and rebar (map: rebar) ---------- */
+
+/* A toolbar's buttons as native controls, each where comctl32 lays it out, so
+ * the windows an app puts in a toolbar or its rebar (a font list) keep their
+ * place. Those windows are the app's: wine keeps drawing them (the region).
+ * A native click is the toolbar's own mouse click, so checks, groups,
+ * drop-downs and WM_COMMAND happen as comctl32 does them. */
+#define MAX_TB_BUTTONS 256
+#define MAX_TB_STRIPS 16
+
+struct tb_strip
+{
+    int first, count;               /* the strip's images in the toolbar's image list */
+    WCHAR module[64];               /* comctl32.dll for the standard strips */
+    UINT bitmap;
+};
+
+struct tb_data
+{
+    struct lv_data images;          /* the images that go as pixels (image_list_json) */
+    int total;                      /* the image list's size when last seen */
+    int strips;
+    struct tb_strip strip[MAX_TB_STRIPS];
+};
+
+static struct tb_data *toolbar_data( struct w2s_control *ctl )
+{
+    if (!ctl->data) ctl->data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(struct tb_data) );
+    return ctl->data;
+}
+
+/* comctl32's standard strips: the small one's id (the large holds the same images) and size */
+static int standard_strip( UINT *bitmap )
+{
+    switch (*bitmap)
+    {
+    case IDB_STD_SMALL_COLOR: case IDB_STD_LARGE_COLOR: *bitmap = IDB_STD_SMALL_COLOR; return STD_PRINT + 1;
+    case IDB_VIEW_SMALL_COLOR: case IDB_VIEW_LARGE_COLOR: *bitmap = IDB_VIEW_SMALL_COLOR; return VIEW_VIEWMENU + 1;
+    case IDB_HIST_SMALL_COLOR: case IDB_HIST_LARGE_COLOR: case IDB_HIST_NORMAL: case IDB_HIST_HOT:
+    case IDB_HIST_DISABLED: case IDB_HIST_PRESSED: *bitmap = IDB_HIST_SMALL_COLOR; return HIST_VIEWTREE + 1;
+    }
+    return 0;
+}
+
+/* where the images a TB_ADDBITMAP or TB_LOADIMAGES just added came from. They
+ * start where the image list ended before (wine doesn't always add a standard
+ * strip's every image); an image list the app sets starts over. */
+static void toolbar_observe( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    struct tb_data *data;
+    struct tb_strip *strip;
+    HIMAGELIST himl;
+    HINSTANCE inst;
+    WCHAR path[MAX_PATH], *name;
+    UINT bitmap;
+    int total, first;
+
+    if (msg != TB_ADDBITMAP && msg != TB_LOADIMAGES && msg != TB_SETIMAGELIST) return;
+    data = toolbar_data( ctl );
+    himl = (HIMAGELIST)SendMessageW( ctl->hwnd, TB_GETIMAGELIST, 0, 0 );
+    total = himl ? ImageList_GetImageCount( himl ) : 0;
+    first = data->total;
+    data->total = total;
+    if (msg == TB_SETIMAGELIST)
+    {
+        data->strips = 0;
+        return;
+    }
+    if (data->strips >= MAX_TB_STRIPS || total <= first) return;
+    if (msg == TB_LOADIMAGES)
+    {
+        inst = (HINSTANCE)lparam;
+        bitmap = wparam;
+    }
+    else
+    {
+        const TBADDBITMAP *ab = (const TBADDBITMAP *)lparam;
+        if (!ab) return;
+        inst = ab->hInst;
+        bitmap = ab->nID;
+    }
+    strip = &data->strip[data->strips];
+    strip->count = total - first;
+    if (inst == HINST_COMMCTRL)
+    {
+        /* wine can complete a standard strip after the call returns: its size is known */
+        int count = standard_strip( &bitmap );
+        if (!count) return;
+        strip->count = max( strip->count, count );
+        lstrcpyW( strip->module, L"comctl32.dll" );
+    }
+    else if (inst && GetModuleFileNameW( inst, path, MAX_PATH ))
+    {
+        name = wcsrchr( path, '\\' );
+        lstrcpynW( strip->module, name ? name + 1 : path, ARRAYSIZE(strip->module) );
+    }
+    else return;    /* an HBITMAP of the app's */
+    strip->first = first;
+    strip->bitmap = bitmap;
+    data->strips++;
+    TRACE( "%p: images %d-%d from %ls/%u\n", ctl->hwnd, first, first + strip->count - 1, strip->module, bitmap );
+}
+
+/* the macOS image for an image from a known strip (map: toolbar_images), or NULL */
+static const char *toolbar_image_spec( const struct tb_data *data, int image )
+{
+    unsigned int i, k;
+
+    for (i = data->strips; i-- > 0;)
+    {
+        const struct tb_strip *strip = &data->strip[i];
+        if (image < strip->first || image >= strip->first + strip->count) continue;
+        for (k = 0; k < ARRAYSIZE(w2s_toolbar_images); k++)
+            if (w2s_toolbar_images[k].bitmap == strip->bitmap && w2s_toolbar_images[k].index == image - strip->first &&
+                !_wcsicmp( w2s_toolbar_images[k].module, strip->module ))
+                return w2s_toolbar_images[k].spec;
+        return NULL;
+    }
+    return NULL;
+}
+
+/* a button's tooltip, which the app gives on TTN_GETDISPINFO: asked the way the
+ * toolbar's own tooltip control asks it */
+static void toolbar_tip( HWND hwnd, int id, WCHAR *buf, int size )
+{
+    HWND tips = (HWND)SendMessageW( hwnd, TB_GETTOOLTIPS, 0, 0 );
+    NMTTDISPINFOW di;
+
+    buf[0] = 0;
+    if (!tips) return;
+    memset( &di, 0, sizeof(di) );
+    di.hdr.hwndFrom = tips;
+    di.hdr.idFrom = id;
+    di.hdr.code = TTN_GETDISPINFOW;
+    SendMessageW( hwnd, WM_NOTIFY, id, (LPARAM)&di );
+    if (di.lpszText && di.lpszText != LPSTR_TEXTCALLBACKW)
+    {
+        if (!IS_INTRESOURCE( di.lpszText )) lstrcpynW( buf, di.lpszText, size );
+        else if (di.hinst) LoadStringW( di.hinst, LOWORD( di.lpszText ), buf, size );
+    }
+    if (!buf[0] && di.szText[0]) lstrcpynW( buf, di.szText, size );
+}
+
+/* the app's own windows in a toolbar or rebar that the native view doesn't
+ * stand in for: wine keeps drawing them. Window coordinates. */
+static HRGN children_region( HWND hwnd, struct json *j )
+{
+    HRGN rgn = NULL, part;
+    HWND child;
+    RECT rc, wr;
+
+    GetWindowRect( hwnd, &wr );
+    if (j) json_arr_begin( j, "children" );
+    for (child = GetWindow( hwnd, GW_CHILD ); child; child = GetWindow( child, GW_HWNDNEXT ))
+    {
+        if (!IsWindowVisible( child ) || w2s_control_from_hwnd( child )) continue;
+        GetWindowRect( child, &rc );
+        if (j)
+        {
+            /* the native view is the client area */
+            RECT cr = rc;
+            MapWindowPoints( NULL, hwnd, (POINT *)&cr, 2 );
+            json_arr_begin( j, NULL );
+            json_int( j, NULL, cr.left );
+            json_int( j, NULL, cr.top );
+            json_int( j, NULL, cr.right );
+            json_int( j, NULL, cr.bottom );
+            json_arr_end( j );
+        }
+        OffsetRect( &rc, -wr.left, -wr.top );
+        part = CreateRectRgnIndirect( &rc );
+        if (!rgn) rgn = part;
+        else
+        {
+            CombineRgn( rgn, rgn, part, RGN_OR );
+            DeleteObject( part );
+        }
+    }
+    if (j) json_arr_end( j );
+    return rgn;
+}
+
+static HRGN container_region( struct w2s_control *ctl )
+{
+    return children_region( ctl->hwnd, NULL );
+}
+
+static void toolbar_snapshot( struct w2s_control *ctl, struct json *j )
+{
+    struct tb_data *data = toolbar_data( ctl );
+    DWORD style = GetWindowLongW( ctl->hwnd, GWL_STYLE );
+    DWORD ex = (DWORD)SendMessageW( ctl->hwnd, TB_GETEXTENDEDSTYLE, 0, 0 );
+    HIMAGELIST himl = (HIMAGELIST)SendMessageW( ctl->hwnd, TB_GETIMAGELIST, 0, 0 );
+    int count = min( (int)SendMessageW( ctl->hwnd, TB_BUTTONCOUNT, 0, 0 ), MAX_TB_BUTTONS ), i, npixels = 0;
+    int pixels[MAX_TB_BUTTONS];
+    WCHAR text[256];
+    HRGN rgn;
+
+    json_bool( j, "list", (style & TBSTYLE_LIST) != 0 );
+    json_bool( j, "mixed", (ex & TBSTYLE_EX_MIXEDBUTTONS) != 0 );
+    json_arr_begin( j, "buttons" );
+    for (i = 0; i < count; i++)
+    {
+        TBBUTTON b;
+        RECT rc = { 0 };
+        const char *spec;
+        int image, len;
+
+        memset( &b, 0, sizeof(b) );
+        if (!SendMessageW( ctl->hwnd, TB_GETBUTTON, i, (LPARAM)&b )) continue;
+        SendMessageW( ctl->hwnd, TB_GETITEMRECT, i, (LPARAM)&rc );
+        json_obj_begin( j );
+        json_int( j, "i", i );
+        json_arr_begin( j, "rect" );
+        json_int( j, NULL, rc.left );
+        json_int( j, NULL, rc.top );
+        json_int( j, NULL, rc.right - rc.left );
+        json_int( j, NULL, rc.bottom - rc.top );
+        json_arr_end( j );
+        if (b.fsState & TBSTATE_HIDDEN) json_bool( j, "hidden", TRUE );
+        if (b.fsStyle & BTNS_SEP)
+        {
+            json_bool( j, "sep", TRUE );
+            json_obj_end( j );
+            continue;
+        }
+        json_int( j, "id", b.idCommand );
+        json_bool( j, "enabled", (b.fsState & TBSTATE_ENABLED) != 0 );
+        if (b.fsStyle & BTNS_CHECK) json_bool( j, "check", TRUE );
+        if ((b.fsStyle & BTNS_CHECKGROUP) == BTNS_CHECKGROUP) json_bool( j, "group", TRUE );
+        if (b.fsState & (TBSTATE_CHECKED | TBSTATE_PRESSED)) json_bool( j, "checked", TRUE );
+        if (b.fsStyle & BTNS_WHOLEDROPDOWN) json_int( j, "dropdown", 2 );
+        else if (b.fsStyle & BTNS_DROPDOWN) json_int( j, "dropdown", 1 );
+        if (b.fsStyle & BTNS_SHOWTEXT) json_bool( j, "showText", TRUE );
+        text[0] = 0;
+        len = (int)SendMessageW( ctl->hwnd, TB_GETBUTTONTEXTW, b.idCommand, 0 );
+        if (len > 0 && len < ARRAYSIZE(text)) SendMessageW( ctl->hwnd, TB_GETBUTTONTEXTW, b.idCommand, (LPARAM)text );
+        if (text[0]) json_str( j, "text", text );
+        toolbar_tip( ctl->hwnd, b.idCommand, text, ARRAYSIZE(text) );
+        if (text[0]) json_str( j, "tip", text );
+        /* list 0 of several image lists (MAKELONG(index, list)): the only one there is mostly */
+        image = (b.iBitmap >= 0 && !HIWORD( b.iBitmap )) ? b.iBitmap : -1;
+        if (image >= 0)
+        {
+            if ((spec = toolbar_image_spec( data, image ))) json_str_a( j, "sym", spec );
+            else
+            {
+                json_int( j, "img", image );
+                pixels[npixels++] = image;
+            }
+        }
+        json_obj_end( j );
+    }
+    json_arr_end( j );
+    image_list_json( &data->images, himl, pixels, npixels, j );
+    if (data->images.more) PostMessageW( ctl->hwnd, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
+    /* where the app's own windows are, so moving one refreshes the region */
+    if ((rgn = children_region( ctl->hwnd, j ))) DeleteObject( rgn );
+}
+
+static void toolbar_apply( struct w2s_control *ctl, const struct w2s_event *ev )
+{
+    BOOL dropdown = !strcmp( ev->type, "dropdown" );
+    TBBUTTON b;
+    RECT rc;
+    POINT pt;
+    int i;
+
+    if (!ev->has_value || (strcmp( ev->type, "click" ) && !dropdown)) return;
+    i = (int)ev->value;
+    memset( &b, 0, sizeof(b) );
+    if (!SendMessageW( ctl->hwnd, TB_GETBUTTON, i, (LPARAM)&b ) ||
+        !SendMessageW( ctl->hwnd, TB_GETITEMRECT, i, (LPARAM)&rc )) return;
+    pt.x = (rc.left + rc.right) / 2;
+    pt.y = (rc.top + rc.bottom) / 2;
+    if ((b.fsStyle & BTNS_DROPDOWN) && !(b.fsStyle & BTNS_WHOLEDROPDOWN) &&
+        (SendMessageW( ctl->hwnd, TB_GETEXTENDEDSTYLE, 0, 0 ) & TBSTYLE_EX_DRAWDDARROWS))
+    {
+        /* the arrow part or the button part of a split drop-down */
+        pt.x = dropdown ? rc.right - 4 : rc.left + (rc.right - rc.left - 12) / 2;
+    }
+    /* the toolbar's own click: comctl32 checks, groups, drops down and sends WM_COMMAND */
+    SendMessageW( ctl->hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM( pt.x, pt.y ) );
+    if (IsWindow( ctl->hwnd )) SendMessageW( ctl->hwnd, WM_LBUTTONUP, 0, MAKELPARAM( pt.x, pt.y ) );
+}
+
+static const struct w2s_kind kind_toolbar =
+{
+    "toolbar", toolbar_snapshot, toolbar_apply, NULL, NULL, container_region, toolbar_observe
+};
+
+/* A rebar draws nothing of its own on macOS (no grippers, no etched lines): its
+ * bands' windows are translated or stay the app's (the region) */
+static void rebar_snapshot( struct w2s_control *ctl, struct json *j )
+{
+    HRGN rgn;
+    json_int( j, "bands", (int)SendMessageW( ctl->hwnd, RB_GETBANDCOUNT, 0, 0 ) );
+    if ((rgn = children_region( ctl->hwnd, j ))) DeleteObject( rgn );
+}
+
+static const struct w2s_kind kind_rebar =
+{
+    "rebar", rebar_snapshot, nothing_apply, NULL, NULL, container_region
+};
+
 const struct w2s_kind *w2s_select_kind( HWND hwnd )
 {
     DWORD style = GetWindowLongW( hwnd, GWL_STYLE );
@@ -1996,6 +2302,10 @@ const struct w2s_kind *w2s_select_kind( HWND hwnd )
     if (!(style & WS_CHILD) || !parent) return NULL;
     class_name( hwnd, name, ARRAYSIZE(name) );
     class_name( parent, parent_name, ARRAYSIZE(parent_name) );
+
+    /* a rebar's toolbars are translated as any toolbar (map: rebar) */
+    if (is_class( parent_name, L"ReBarWindow32" ) && is_class( name, TOOLBARCLASSNAMEW ))
+        return (style & CCS_VERT) ? NULL : &kind_toolbar;
 
     /* parts of composite controls belong to their parent */
     if (is_class( parent_name, L"ComboBox" ) || is_class( parent_name, L"ComboBoxEx32" ) ||
@@ -2086,6 +2396,8 @@ const struct w2s_kind *w2s_select_kind( HWND hwnd )
         }
     }
     if (is_class( name, STATUSCLASSNAMEW )) return &kind_statusbar;
+    if (is_class( name, TOOLBARCLASSNAMEW )) return (style & CCS_VERT) ? NULL : &kind_toolbar;
+    if (is_class( name, REBARCLASSNAMEW )) return (style & CCS_VERT) ? NULL : &kind_rebar;
     if (is_class( name, UPDOWN_CLASSW )) return &kind_updown;
     if (is_class( name, DATETIMEPICK_CLASSW )) return &kind_datetime;
     if (is_class( name, MONTHCAL_CLASSW ))

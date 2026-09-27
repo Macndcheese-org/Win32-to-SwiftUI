@@ -37,7 +37,8 @@ def inventories():
 
 def load_map():
     """Merge map/ui-map/*.yaml, remembering which file each item came from."""
-    merged = {"entries": [], "flags": {}, "parts": {}, "classes": {}, "apis": {}, "fonts": {}, "icons": {}}
+    merged = {"entries": [], "flags": {}, "parts": {}, "classes": {}, "apis": {}, "fonts": {}, "icons": {},
+              "toolbar_images": {}}
     origin = {}
     for path in sorted(glob.glob(os.path.join(MAP_DIR, "*.yaml"))):
         doc = load_yaml(path) or {}
@@ -45,7 +46,7 @@ def load_map():
         for e in doc.get("entries", []) or []:
             e["_file"] = name
             merged["entries"].append(e)
-        for sect in ("flags", "parts", "classes", "apis", "fonts", "icons"):
+        for sect in ("flags", "parts", "classes", "apis", "fonts", "icons", "toolbar_images"):
             for k, v in (doc.get(sect) or {}).items():
                 if k in merged[sect]:
                     raise SystemExit(f"{name}: {sect}.{k} already set in {origin[(sect, k)]}")
@@ -59,6 +60,8 @@ ICON_MODULES = {
     "user32": ("user32.dll", "include/winuser.rh"),
     "shell32": ("shell32.dll", "dlls/shell32/shresdef.h"),
     "regedit": ("regedit.exe", "programs/regedit/resource.h"),
+    "comctl32": ("comctl32.dll", "include/commctrl.h"),
+    "wordpad": ("wordpad.exe", "programs/wordpad/wordpad.h"),
 }
 
 # what a stock icon (map section `icons`) may become

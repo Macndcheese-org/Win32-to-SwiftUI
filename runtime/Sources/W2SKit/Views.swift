@@ -12,6 +12,7 @@ enum ControlViews {
     // map: updown datetime monthcal tooltip (as .help on every control: HelpText)
     // map: listview.checkboxes listview.icon
     // map: propsheet propsheet.wizard (modes of the sheet's tab control: WindowSidebar, WizardSteps)
+    // map: toolbar rebar
     static let entries: Set<String> = [
         "button.push", "button.default", "button.checkbox", "button.pushlike", "button.radio", "button.groupbox",
         "button.3state", "button.split", "button.commandlink",
@@ -20,6 +21,7 @@ enum ControlViews {
         "combobox.dropdownlist", "listbox.single", "listbox.multi", "listview.list", "listview.report",
         "progress", "trackbar", "tab", "static.frame", "statusbar", "edit.multiline", "combobox.editable",
         "treeview", "updown", "datetime", "monthcal", "listview.checkboxes", "listview.icon",
+        "toolbar", "rebar",
     ]
 
     static func supports(_ entry: String) -> Bool { entries.contains(entry) }
@@ -128,6 +130,10 @@ struct ControlRoot: View {
             StaticFrame(fill: snap.fill ?? "none")
         case "statusbar":
             StatusBar(model: model, scale: metrics.scale)
+        case "toolbar":
+            ToolbarBar(model: model, scale: metrics.scale)
+        case "rebar":
+            RebarBackground(children: snap.children ?? [], scale: metrics.scale)
         case "edit.single", "edit.password", "edit.number":
             EditField(model: model, secure: entry == "edit.password")
         case "edit.multiline":
@@ -1515,6 +1521,116 @@ struct StatusBar: View {
                 .gesture(TapGesture(count: 2).onEnded { model.emit(["t": "dblclick", "v": index]) }
                     .exclusively(before: TapGesture().onEnded { model.emit(["t": "click", "v": index]) }))
         }
+    }
+}
+
+// MARK: - toolbar (map: toolbar)
+
+/// A toolbar's buttons as native controls, each at the place comctl32 gives it,
+/// so the windows an app puts in the toolbar or its rebar keep theirs: plain
+/// icon buttons, toggles for check buttons, a chevron for a drop-down (the app's
+/// menu comes as a native one through TrackPopupMenu). Standard images are SF
+/// Symbols (map: toolbar_images); the app's own come as its pixels.
+struct ToolbarBar: View {
+    @ObservedObject var model: ControlModel
+    let scale: CGFloat
+
+    var body: some View {
+        let buttons = model.snap.buttons ?? []
+        ZStack(alignment: .topLeading) {
+            ForEach(buttons, id: \.i) { b in
+                if !(b.hidden ?? false), b.rect.count == 4 {
+                    item(b)
+                        .frame(width: CGFloat(b.rect[2]) * scale, height: CGFloat(b.rect[3]) * scale)
+                        .offset(x: CGFloat(b.rect[0]) * scale, y: CGFloat(b.rect[1]) * scale)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    func item(_ b: Snapshot.ToolbarButton) -> some View {
+        if b.sep ?? false {
+            Rectangle().fill(Color(nsColor: .separatorColor))
+                .frame(width: 1, height: CGFloat(b.rect[3]) * scale * 0.6)
+        } else {
+            let click = { model.emit(["t": "click", "v": b.i]) }
+            let drop = { model.emit(["t": "dropdown", "v": b.i]) }
+            Group {
+                if b.dropdown == 2 {
+                    Button(action: drop) { HStack(spacing: 2) { label(b); chevron } }
+                } else if b.dropdown == 1 {
+                    HStack(spacing: 0) {
+                        Button(action: click) { label(b) }
+                        Button(action: drop) { chevron }
+                    }
+                } else {
+                    Button(action: click) { label(b) }
+                }
+            }
+            .buttonStyle(.borderless)
+            // on (a check button, a state the app sets): a selected toolbar item's fill.
+            // Win32 decides it (groups, the app): a click asks, the snapshot answers
+            .background(RoundedRectangle(cornerRadius: 5)
+                .fill(Color(nsColor: .quaternaryLabelColor)).opacity((b.checked ?? false) ? 1 : 0))
+            .disabled(!(b.enabled ?? true))
+            .help(b.tip ?? b.text ?? "")
+        }
+    }
+
+    var chevron: some View {
+        Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(.secondary)
+    }
+
+    /// TBSTYLE_LIST puts the text beside the image (TBSTYLE_EX_MIXEDBUTTONS: only
+    /// BTNS_SHOWTEXT buttons show it), otherwise under it.
+    @ViewBuilder
+    func label(_ b: Snapshot.ToolbarButton) -> some View {
+        let list = model.snap.list ?? false
+        let text = (b.text ?? "").isEmpty || (list && (model.snap.mixed ?? false) && !(b.showText ?? false)) ? nil : b.text
+        if list {
+            HStack(spacing: 4) { image(b); if let text = text { Text(text).font(.system(size: 11)).lineLimit(1) } }
+        } else {
+            VStack(spacing: 1) { image(b); if let text = text { Text(text).font(.system(size: 10)).lineLimit(1) } }
+        }
+    }
+
+    @ViewBuilder
+    func image(_ b: Snapshot.ToolbarButton) -> some View {
+        let side = 16 * scale
+        if let sym = b.sym, sym.hasPrefix("sf:"), !sym.contains(";") {
+            // a toolbar's symbols are drawn in the text colour, as macOS toolbars do
+            Image(systemName: String(sym.dropFirst(3)))
+                .font(.system(size: 13 * scale))
+                .foregroundStyle(Color(nsColor: .labelColor))
+        } else if let sym = b.sym, let image = Icons.image(sym, size: NSSize(width: side, height: side)) {
+            Image(nsImage: image)
+        } else if let index = b.img, let image = model.images[index] {
+            Image(nsImage: image).resizable().interpolation(.high).frame(width: side, height: side)
+        }
+    }
+}
+
+/// map: rebar. The window's background (the app may paint nothing under its
+/// bands), with holes where its own windows are, which wine keeps drawing
+/// under this view.
+struct RebarBackground: View {
+    let children: [[Int]]
+    let scale: CGFloat
+
+    var body: some View {
+        GeometryReader { geo in
+            Path { path in
+                path.addRect(CGRect(origin: .zero, size: geo.size))
+                for r in children where r.count == 4 {
+                    path.addRect(CGRect(x: CGFloat(r[0]) * scale, y: CGFloat(r[1]) * scale,
+                                        width: CGFloat(r[2] - r[0]) * scale, height: CGFloat(r[3] - r[1]) * scale))
+                }
+            }
+            .fill(Color(nsColor: .windowBackgroundColor), style: FillStyle(eoFill: true))
+        }
+        .allowsHitTesting(false)
     }
 }
 

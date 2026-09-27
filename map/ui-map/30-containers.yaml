@@ -176,14 +176,21 @@ entries:
           tb.displayMode = .iconOnly
           window.toolbar = tb
     glass: explicit
-    state_in: [TB_ADDBUTTONS, TB_INSERTBUTTON, TB_DELETEBUTTON, TB_SETSTATE, TB_CHECKBUTTON, TB_ENABLEBUTTON, TB_SETIMAGELIST, TB_SETBUTTONINFO, TB_AUTOSIZE]
+    state_in: [TB_ADDBUTTONS, TB_INSERTBUTTON, TB_DELETEBUTTON, TB_SETSTATE, TB_CHECKBUTTON, TB_ENABLEBUTTON, TB_HIDEBUTTON, TB_PRESSBUTTON, TB_SETIMAGELIST, TB_ADDBITMAP, TB_LOADIMAGES, TB_CHANGEBITMAP, TB_SETBUTTONINFO, TB_SETCMDID, TB_SETSTYLE, TB_SETEXTENDEDSTYLE, TB_SETBUTTONSIZE, TB_SETBITMAPSIZE, TB_AUTOSIZE, WM_LBUTTONUP, WM_SIZE, WM_PARENTNOTIFY]
     events_out: {activate: WM_COMMAND with the button id, dropdown: WM_NOTIFY/TBN_DROPDOWN, tooltip: TBN_GETINFOTIP}
     notes: >-
-      Default: the buttons are drawn in place, in the toolbar's own strip, so the app's
-      client layout is untouched. On 26 they are glass buttons in a GlassEffectContainer,
-      as in Apple's toolbars. Moving the toolbar into the window's unified title bar
-      (NSToolbar, the appkit item) is the more Mac-like option. It changes the client area
-      height the app laid out, so it is opt-in per app.
+      The buttons are native in place, in the toolbar's own strip, as TextEdit's format bar
+      sits in its window, so the app's client layout is untouched: each at the place
+      comctl32 gives it (TB_GETITEMRECT), so the windows an app puts in a toolbar or its
+      rebar (a font list) keep theirs, and wine keeps drawing those (the region). Plain
+      icon buttons with the tooltip as .help, the selected-item fill for a checked or
+      pressed button, a chevron for a drop-down (the app's menu comes native through
+      TrackPopupMenu). A native click is the toolbar's own mouse click, so checks, groups,
+      drop-downs and WM_COMMAND are comctl32's. Images from comctl32's standard strips and
+      wine's programs' strips are SF Symbols in the text colour (map: toolbar_images, found
+      by watching TB_ADDBITMAP and TB_LOADIMAGES); others are the app's pixels. Moving the
+      toolbar into the window's unified title bar (NSToolbar, the appkit item) is the more
+      Mac-like option; it changes the client area the app laid out, so it waits.
 
   - id: rebar
     kind: control
@@ -192,14 +199,15 @@ entries:
     runtime: swiftui
     swiftui:
       - since: 12
-        code: "Color.clear.background(.bar)"
+        code: "Color.clear"
     glass: none
-    state_in: [RB_INSERTBAND, RB_SETBANDINFO, RB_DELETEBAND, RB_MAXIMIZEBAND, RB_SHOWBAND]
+    state_in: [RB_INSERTBAND, RB_SETBANDINFO, RB_DELETEBAND, RB_MAXIMIZEBAND, RB_SHOWBAND, WM_SIZE, WM_PARENTNOTIFY]
     events_out: {layout: RBN_HEIGHTCHANGE, chevron: RBN_CHEVRONPUSHED}
     notes: >-
       A rebar is only a background with bands; each band's child (toolbar, combo box) is
-      translated by its own entry. Grippers are dropped; a band's chevron becomes an
-      overflow menu.
+      translated by its own entry or stays the app's. The rebar draws nothing (no grippers,
+      no etched lines): its area shows the window's background, as TextEdit's format bar
+      sits on it, and wine keeps drawing only the bands' windows nothing stands in for.
 
   - id: statusbar
     kind: control

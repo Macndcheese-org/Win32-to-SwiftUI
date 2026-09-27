@@ -103,3 +103,52 @@ icons:
   regedit/IDI_ROOT: {nsimage: NSComputer}
   regedit/IDI_STRING: {sf: textformat.abc}
   regedit/IDI_BIN: {sf: number}
+
+# Toolbar images: the images of an image strip a toolbar adds (TB_ADDBITMAP, TB_LOADIMAGES),
+# by strip and index. comctl32/<STD_*|VIEW_*|HIST_*> are the standard strips
+# (IDB_STD_*, IDB_VIEW_*, IDB_HIST_*, small or large); <program>/<bitmap>/<index> are the
+# strips of wine's own programs. Same image kinds as the icons above.
+toolbar_images:
+  comctl32/STD_CUT: {sf: scissors}
+  comctl32/STD_COPY: {sf: doc.on.doc}
+  comctl32/STD_PASTE: {sf: doc.on.clipboard}
+  comctl32/STD_UNDO: {sf: arrow.uturn.backward}
+  comctl32/STD_REDOW: {sf: arrow.uturn.forward}
+  comctl32/STD_DELETE: {sf: trash}
+  comctl32/STD_FILENEW: {sf: doc.badge.plus}
+  comctl32/STD_FILEOPEN: {sf: folder}
+  comctl32/STD_FILESAVE: {sf: square.and.arrow.down}
+  comctl32/STD_PRINTPRE: {sf: doc.text.magnifyingglass}
+  comctl32/STD_PROPERTIES: {sf: info.circle}
+  comctl32/STD_HELP: {sf: questionmark.circle}
+  comctl32/STD_FIND: {sf: magnifyingglass}
+  comctl32/STD_REPLACE: {sf: arrow.left.arrow.right}
+  comctl32/STD_PRINT: {sf: printer}
+  comctl32/VIEW_LARGEICONS: {sf: square.grid.2x2}
+  comctl32/VIEW_SMALLICONS: {sf: square.grid.3x3}
+  comctl32/VIEW_LIST: {sf: list.bullet}
+  comctl32/VIEW_DETAILS: {sf: list.bullet.rectangle}
+  comctl32/VIEW_SORTNAME: {sf: textformat}
+  comctl32/VIEW_SORTSIZE: {sf: arrow.up.arrow.down}
+  comctl32/VIEW_SORTDATE: {sf: calendar}
+  comctl32/VIEW_SORTTYPE: {sf: doc}
+  comctl32/VIEW_PARENTFOLDER: {sf: arrow.turn.left.up}
+  comctl32/VIEW_NETCONNECT: {sf: network}
+  comctl32/VIEW_NETDISCONNECT: {sf: xmark.circle}
+  comctl32/VIEW_NEWFOLDER: {sf: folder.badge.plus}
+  comctl32/VIEW_VIEWMENU: {sf: ellipsis.circle}
+  comctl32/HIST_BACK: {sf: chevron.backward}
+  comctl32/HIST_FORWARD: {sf: chevron.forward}
+  comctl32/HIST_FAVORITES: {sf: star}
+  comctl32/HIST_ADDTOFAVORITES: {sf: star.circle}
+  comctl32/HIST_VIEWTREE: {sf: sidebar.left}
+  # wordpad: its toolbar's date button, and the format bar (TextEdit's own symbols)
+  wordpad/IDB_TOOLBAR/0: {sf: calendar.badge.clock}
+  wordpad/IDB_FORMATBAR/0: {sf: bold}
+  wordpad/IDB_FORMATBAR/1: {sf: italic}
+  wordpad/IDB_FORMATBAR/2: {sf: underline}
+  wordpad/IDB_FORMATBAR/3: {sf: paintpalette}
+  wordpad/IDB_FORMATBAR/4: {sf: text.alignleft}
+  wordpad/IDB_FORMATBAR/5: {sf: text.aligncenter}
+  wordpad/IDB_FORMATBAR/6: {sf: text.alignright}
+  wordpad/IDB_FORMATBAR/7: {sf: list.bullet}
