@@ -63,6 +63,7 @@ enum w2s_unix_func
     unix_w2s_debug,
     unix_w2s_control_state,
     unix_w2s_request_update,
+    unix_w2s_system_colors,
     unix_w2s_func_count,
 };
 
@@ -160,6 +161,19 @@ struct w2s_request_update_params
     uint32_t pad;
 };
 
+/* wine's system colours from the macOS appearance (map: 70-look.yaml): the
+ * table the native side keeps current, read without waiting for the main
+ * thread. count is 0 while the caller's version is still current. */
+#define W2S_SYSTEM_COLORS 32
+
+struct w2s_system_colors_params
+{
+    uint64_t version;           /* in: the version the caller has; out: the current one */
+    uint32_t colors[W2S_SYSTEM_COLORS]; /* out: COLORREF by COLOR_* index, 0xffffffff: leave it */
+    uint32_t count;             /* out: entries in colors, 0 when unchanged */
+    uint32_t dark;              /* out: the appearance is a dark one */
+};
+
 /* test hooks for tests/gallery: {"op":"query"} or {"op":"inject","event":{...}} */
 struct w2s_debug_params
 {
@@ -190,5 +204,6 @@ W2S_CHECK_OFFSET(w2s_request_poll_params, done, 24);
 W2S_CHECK_OFFSET(w2s_request_update_params, json_len, 16);
 W2S_CHECK_OFFSET(w2s_debug_params, buffer, 16);
 W2S_CHECK_OFFSET(w2s_debug_params, len, 32);
+W2S_CHECK_OFFSET(w2s_system_colors_params, count, 136);
 
 #endif /* W2S_PROTOCOL_H */

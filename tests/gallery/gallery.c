@@ -35,6 +35,8 @@ enum
     ID_DATETIME, ID_MONTHCAL, ID_STATUS, ID_LVCHECK, ID_LVICON, ID_TOOLTIP,
     /* dialogs (milestone 2) */
     ID_TASKDLG, ID_FOLDER, ID_COLOR, ID_FONT, ID_PRINT, ID_ITEMDLG, ID_PROPSHEET, ID_WIZARD,
+    /* light and dark */
+    ID_WHITEPANEL, ID_WHITECHECK,
     ID_LAST
 };
 
@@ -46,6 +48,7 @@ static int got_menu_new, got_initmenupopup, status_bar_checked = 1;
 static int got_expanding, got_treesel, got_deltapos, got_vscroll, got_datechange, got_mcselchange, got_mcselect;
 static int got_dispinfo, got_check_changed, got_icon_changed, got_icon_activate;
 static int got_wiznext, got_wizback;
+static int got_syscolorchange, got_themechanged;
 static HWND test_wizard;
 static HTREEITEM tree_fruits, tree_apple, tree_pear, tree_veg;
 static BOOL in_selftest;
@@ -417,6 +420,13 @@ static void create_controls2(void)
             make( L"Button", titles[i], BS_PUSHBUTTON | WS_TABSTOP, 16 + i * 128, 544, 120, 24, ID_TASKDLG + i );
     }
     make( L"Static", NULL, SS_ETCHEDFRAME, 724, 112, 120, 60, ID_FRAME );
+    {
+        HWND panel = make( L"W2SWhitePanel", NULL, 0, 16, 580, 376, 56, ID_WHITEPANEL );
+        ctl[ID_WHITECHECK] = CreateWindowExW( 0, L"Button", L"A check box on a page the app paints white",
+                                              WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX, 12, 18, 340, 20,
+                                              panel, (HMENU)ID_WHITECHECK, GetModuleHandleW( NULL ), NULL );
+        SendMessageW( ctl[ID_WHITECHECK], WM_SETFONT, (WPARAM)GetStockObject( DEFAULT_GUI_FONT ), TRUE );
+    }
     make( L"Static", NULL, SS_GRAYRECT, 852, 112, 40, 60, ID_RECT );
 
     {
@@ -666,6 +676,29 @@ static void print_dialog(void)
     }
 }
 
+/* a page the app paints white itself, whatever the system colours say */
+static LRESULT CALLBACK white_panel_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    switch (msg)
+    {
+    case WM_ERASEBKGND:
+    {
+        RECT rc;
+        GetClientRect( hwnd, &rc );
+        FillRect( (HDC)wparam, &rc, GetStockObject( WHITE_BRUSH ) );
+        return 1;
+    }
+    case WM_CTLCOLORSTATIC:
+    case WM_CTLCOLORBTN:
+        SetTextColor( (HDC)wparam, RGB( 0, 0, 0 ) );
+        SetBkColor( (HDC)wparam, RGB( 255, 255, 255 ) );
+        return (LRESULT)GetStockObject( WHITE_BRUSH );
+    case WM_COMMAND:
+        return SendMessageW( main_window, msg, wparam, lparam );    /* counted there */
+    }
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
+}
+
 static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
     switch (msg)
@@ -710,6 +743,12 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     }
     case WM_SIZE:
         if (ctl[ID_STATUS]) SendMessageW( ctl[ID_STATUS], WM_SIZE, 0, 0 );
+        return 0;
+    case WM_SYSCOLORCHANGE:
+        got_syscolorchange++;
+        return 0;
+    case WM_THEMECHANGED:
+        got_themechanged++;
         return 0;
     case WM_DRAWITEM:
     {
@@ -977,6 +1016,60 @@ static BOOL near_rgb( COLORREF a, COLORREF b )
 {
     return abs( GetRValue( a ) - GetRValue( b ) ) <= 1 && abs( GetGValue( a ) - GetGValue( b ) ) <= 1 &&
            abs( GetBValue( a ) - GetBValue( b ) ) <= 1;
+}
+
+static BOOL is_dark( COLORREF c )
+{
+    return 0.2126 * GetRValue( c ) + 0.7152 * GetGValue( c ) + 0.0722 * GetBValue( c ) < 0.5 * 255;
+}
+
+/* Light and Dark mode: wine's colours from NSColor, each control light or dark as what's behind it */
+static void selftest_look(void)
+{
+    char want[96];
+    COLORREF face;
+    int sys_before, theme_before;
+
+    pump( 300 );
+    face = GetSysColor( COLOR_BTNFACE );
+    snprintf( want, sizeof(want), "\"btnFace\":%lu", face );
+    check( query_has( ctl[ID_PUSH], want ), "wine's COLOR_BTNFACE is the native table's (NSColor.windowBackgroundColor)" );
+    snprintf( want, sizeof(want), "\"appearance\":\"%s\"", is_dark( face ) ? "NSAppearanceNameDarkAqua" : "NSAppearanceNameAqua" );
+    check( query_has( ctl[ID_PUSH], want ), "a control on wine's dialog background is as light or dark as it" );
+    check( query_has( ctl[ID_WHITECHECK], "\"backdrop\":16777215" ) &&
+           query_has( ctl[ID_WHITECHECK], "\"appearance\":\"NSAppearanceNameAqua\"" ),
+           "a control on a page the app paints white stays light" );
+
+    /* as if macOS switched to Dark Mode, then back */
+    sys_before = got_syscolorchange;
+    theme_before = got_themechanged;
+    inject( ctl[ID_PUSH], "{\"t\":\"lookOverride\",\"s\":\"dark\"}" );
+    pump( 800 );
+    printf( "      dark: COLOR_BTNFACE %06lx, COLOR_WINDOW %06lx, COLOR_WINDOWTEXT %06lx, COLOR_HIGHLIGHT %06lx\n",
+            GetSysColor( COLOR_BTNFACE ), GetSysColor( COLOR_WINDOW ), GetSysColor( COLOR_WINDOWTEXT ),
+            GetSysColor( COLOR_HIGHLIGHT ) );
+    check( got_syscolorchange > sys_before && got_themechanged > theme_before && is_dark( GetSysColor( COLOR_BTNFACE ) ) &&
+           is_dark( GetSysColor( COLOR_WINDOW ) ) && !is_dark( GetSysColor( COLOR_WINDOWTEXT ) ),
+           "Dark Mode -> dark system colours, WM_SYSCOLORCHANGE and WM_THEMECHANGED" );
+    check( query_has( ctl[ID_PUSH], "\"appearance\":\"NSAppearanceNameDarkAqua\"" ) &&
+           query_has( ctl[ID_WHITECHECK], "\"appearance\":\"NSAppearanceNameAqua\"" ),
+           "then controls on the dialog go dark, the one on the white page stays light" );
+    inject( ctl[ID_PUSH], "{\"t\":\"lookOverride\",\"s\":\"light\"}" );
+    pump( 800 );
+    check( !is_dark( GetSysColor( COLOR_BTNFACE ) ) && is_dark( GetSysColor( COLOR_WINDOWTEXT ) ) &&
+           query_has( ctl[ID_PUSH], "\"appearance\":\"NSAppearanceNameAqua\"" ),
+           "Light Mode -> light colours and light controls again" );
+    inject( ctl[ID_PUSH], "{\"t\":\"lookOverride\",\"s\":\"\"}" );
+    pump( 500 );
+
+    /* the white page's check box, both ways */
+    inject( ctl[ID_WHITECHECK], "{\"t\":\"click\"}" );
+    pump( 200 );
+    check( SendMessageW( ctl[ID_WHITECHECK], BM_GETCHECK, 0, 0 ) == BST_CHECKED &&
+           got_command[ID_WHITECHECK][BN_CLICKED] == 1, "native click on the white page's check box -> BN_CLICKED" );
+    SendMessageW( ctl[ID_WHITECHECK], BM_SETCHECK, BST_UNCHECKED, 0 );
+    pump( 200 );
+    check( query_has( ctl[ID_WHITECHECK], "\"checked\":0" ), "BM_SETCHECK -> the white page's native check box" );
 }
 
 /* ChooseColor, ChooseFont and PrintDlg as the macOS panels */
@@ -1609,6 +1702,7 @@ static int selftest(void)
     }
 
     selftest_pickers();
+    selftest_look();
 
     printf( "%d passed, %d failed\n", passes, failures );
     return failures;
@@ -1627,6 +1721,10 @@ int WINAPI wWinMain( HINSTANCE inst, HINSTANCE prev, WCHAR *cmdline, int show )
     wc.hCursor = LoadCursorW( NULL, (LPCWSTR)IDC_ARROW );
     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
     wc.lpszClassName = L"W2SGallery";
+    RegisterClassW( &wc );
+    wc.lpfnWndProc = white_panel_proc;
+    wc.hbrBackground = NULL;
+    wc.lpszClassName = L"W2SWhitePanel";
     RegisterClassW( &wc );
     main_window = CreateWindowExW( 0, L"W2SGallery", L"Win32-to-SwiftUI gallery", WS_OVERLAPPEDWINDOW,
                                    CW_USEDEFAULT, CW_USEDEFAULT, 1150, 720, NULL, NULL, inst, NULL );

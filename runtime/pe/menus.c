@@ -36,8 +36,6 @@ struct w2s_frame
     int shrink;             /* menu bar height to take off a fixed-size window, pending */
 };
 
-#define W2S_WAKE_SHRINK 2   /* w2s_wake_message wparam on a frame: apply frame->shrink */
-
 /* ---------- snapshot ---------- */
 
 static void json_menu( struct json *j, HMENU menu, int depth );
@@ -273,6 +271,7 @@ static LRESULT CALLBACK frame_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     if (msg == w2s_wake_message && w2s_wake_message)
     {
         if (wparam == W2S_WAKE_SHRINK) shrink_frame( frame );
+        else if (wparam == W2S_WAKE_LOOK) w2s_sync_look();
         else if (frame->handle) apply_menu_events( frame );
         return 0;
     }

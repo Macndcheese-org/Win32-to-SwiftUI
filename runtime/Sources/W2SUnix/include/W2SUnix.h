@@ -15,5 +15,6 @@ uint32_t w2s_swift_request_poll(uint64_t id, char *buffer, uint32_t size, uint32
 uint32_t w2s_swift_control_state(uint64_t handle, uint64_t *version, char *buffer, uint32_t size);
 void w2s_swift_request_update(uint64_t id, const char *json, uint32_t json_len);
 uint32_t w2s_swift_debug(uint64_t handle, const char *json, uint32_t json_len, char *buffer, uint32_t size);
+uint32_t w2s_swift_system_colors(uint64_t *version, uint32_t *colors, uint32_t size, uint32_t *dark);
 
 #endif

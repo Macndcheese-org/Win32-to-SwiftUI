@@ -84,7 +84,10 @@ char *utf8_from_wide( const WCHAR *s, int len );                   /* HeapAlloc'
 WCHAR *wide_from_utf8( const char *s, int len );                   /* HeapAlloc'd */
 
 /* main.c */
-#define W2S_WAKE_REFRESH 1      /* w2s_wake_message wparam: send a fresh snapshot (from another thread) */
+/* w2s_wake_message's wparam; 0: the native view has events */
+#define W2S_WAKE_REFRESH 1      /* send a fresh snapshot (from another thread) */
+#define W2S_WAKE_SHRINK  2      /* a frame: take the menu bar's height off (menus.c) */
+#define W2S_WAKE_LOOK    3      /* the system colours changed (look.c; the native Look.wakeLook) */
 extern UINT w2s_wake_message;
 extern UINT w2s_os_major, w2s_os_minor;    /* the running macOS */
 BOOL w2s_get_host( HWND hwnd, struct w2s_host *host );
@@ -140,6 +143,8 @@ struct w2s_control
     UINT64 native_version;
     UINT native_size;
     struct w2s_control *follower;   /* pushed along with this one (a property sheet's sidebar) */
+    COLORREF backdrop;      /* what the app paints behind it (look.c), CLR_INVALID: not one colour */
+    BOOL backdrop_stale;    /* measure it again for the next snapshot */
 };
 
 const struct w2s_kind *w2s_select_kind( HWND hwnd );
@@ -153,6 +158,11 @@ const char *w2s_native_state( struct w2s_control *ctl, BOOL *changed );
 const UINT *w2s_map_state_in( const char *entry, unsigned int *count );
 void w2s_notify_parent_command( HWND hwnd, UINT code );
 LRESULT w2s_notify_parent( HWND hwnd, UINT code, NMHDR *hdr );
+
+/* look.c */
+void w2s_sync_look(void);
+BOOL w2s_look_pending(void);
+COLORREF w2s_backdrop( HWND hwnd );
 
 /* menus.c */
 void w2s_frame_created( HWND hwnd );

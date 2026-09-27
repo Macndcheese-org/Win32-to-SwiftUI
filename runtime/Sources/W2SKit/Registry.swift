@@ -28,6 +28,7 @@ struct Snapshot: Codable, Equatable {
     var heightPx: Double?
     var help: String?           // the text of the tooltip tool this control is
     var display: String?        // shown instead of text (a native wizard's Go Back / Continue)
+    var backdrop: Int?          // COLORREF the app paints behind the control (Look.appearance)
     // buttons
     var checked: Int?
     var isDefault: Bool?
@@ -262,6 +263,14 @@ enum W2S {
         let id = nextID
         nextID += 1
         return id
+    }
+
+    /// Wake the Win32 side through any live control (Look: the system colours changed).
+    static func wakeAny(cookie: UInt64) {
+        lock.lock()
+        let host = controls.values.filter { $0.postWake != nil }.min { $0.handle < $1.handle }
+        lock.unlock()
+        if let host = host { host.postWake?(host.hostView, cookie) }
     }
 
     static func control(_ handle: UInt64) -> ControlHost? {

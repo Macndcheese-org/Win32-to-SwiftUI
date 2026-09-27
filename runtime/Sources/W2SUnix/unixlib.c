@@ -95,6 +95,13 @@ static NTSTATUS w2s_request_update(void *args)
     return 0;
 }
 
+static NTSTATUS w2s_system_colors(void *args)
+{
+    struct w2s_system_colors_params *params = args;
+    params->count = w2s_swift_system_colors(&params->version, params->colors, W2S_SYSTEM_COLORS, &params->dark);
+    return 0;
+}
+
 __attribute__((visibility("default"))) const unixlib_entry_t __wine_unix_call_funcs[] =
 {
     w2s_init,
@@ -108,6 +115,7 @@ __attribute__((visibility("default"))) const unixlib_entry_t __wine_unix_call_fu
     w2s_debug,
     w2s_control_state,
     w2s_request_update,
+    w2s_system_colors,
 };
 
 _Static_assert(sizeof(__wine_unix_call_funcs) / sizeof(__wine_unix_call_funcs[0]) == unix_w2s_func_count,
@@ -127,6 +135,7 @@ __attribute__((visibility("default"))) const unixlib_entry_t __wine_unix_call_wo
     w2s_debug,
     w2s_control_state,
     w2s_request_update,
+    w2s_system_colors,
 };
 
 _Static_assert(sizeof(__wine_unix_call_wow64_funcs) / sizeof(__wine_unix_call_wow64_funcs[0]) == unix_w2s_func_count,

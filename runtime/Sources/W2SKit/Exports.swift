@@ -9,7 +9,10 @@ public func w2s_swift_init(_ version: UInt32, _ osMajor: UnsafeMutablePointer<UI
     let os = W2S.osVersion
     osMajor?.pointee = UInt32(os.major)
     osMinor?.pointee = UInt32(os.minor)
-    return version == W2S.protocolVersion ? 0 : -1
+    guard version == W2S.protocolVersion else { return -1 }
+    // wine's system colours follow the macOS appearance from now on
+    DispatchQueue.main.async { Look.start() }
+    return 0
 }
 
 @_cdecl("w2s_swift_control_create")
@@ -41,8 +44,8 @@ public func w2s_swift_control_create(_ hostView: UInt64, _ window: UInt64, _ pos
         let hosting = PassThroughHostingView(rootView: ControlViews.root(for: host.model, entry: entryID))
         hosting.frame = container.bounds
         hosting.autoresizingMask = [.width, .height]
-        // wine's dialogs are still drawn in its light theme; keep the controls on it
-        hosting.appearance = NSAppearance(named: .aqua)
+        // light or dark as what wine draws behind it (wine's colours follow macOS: Look)
+        Look.apply(host.model.snap.backdrop, to: hosting)
         container.addSubview(hosting)
         host.hosting = hosting
     }
@@ -73,6 +76,7 @@ public func w2s_swift_control_update(_ handle: UInt64, _ json: UnsafePointer<CCh
     guard let host = W2S.control(handle), let snap = W2S.decode(json, jsonLen) else { return }
     DispatchQueue.main.async {
         host.model.absorbImages(snap)
+        Look.apply(snap.backdrop, to: host.hosting)
         // taken before the PE side saw the user's latest events: showing it
         // would undo what the user just did; a fresh one follows once they're applied
         if (snap.ack ?? 0) < host.emittedSeq { return }

@@ -560,6 +560,11 @@ enum Debug {
             out["entry"] = host.entry
             out["attached"] = host.hosting?.superview != nil || host.owned != nil
             out["os"] = W2S.osVersion.major
+            W2S.lock.lock()
+            out["look"] = ["version": Look.version, "dark": Look.dark,
+                           "btnFace": Look.colors.count > 15 ? Int(Look.colors[15]) : -1,
+                           "window": Look.colors.count > 5 ? Int(Look.colors[5]) : -1]
+            W2S.lock.unlock()
             if let v = snap.rows { out["rowCount"] = v.count }
             if let v = snap.columns { out["columns"] = v.filter { ($0.width ?? 1) > 0 }.map { $0.title } }
             if let hosting = host.hosting {
@@ -569,10 +574,21 @@ enum Debug {
                 // clicks in the middle of the control: native, or through to wine?
                 // (hitTest takes the point in the superview's coordinates, as frame is)
                 out["passThrough"] = hosting.hitTest(NSPoint(x: hosting.frame.midX, y: hosting.frame.midY)) == nil
+                out["appearance"] = hosting.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])?.rawValue ?? ""
             }
             return W2S.json(out)
         case "inject":
             guard let event = op["event"] as? [String: Any] else { return "{\"error\":\"no event\"}" }
+            if event["t"] as? String == "lookOverride" {
+                // tests: {"t":"lookOverride","s":"dark"|"light"|""}: as if macOS switched
+                switch event["s"] as? String {
+                case "dark": Look.override = .darkAqua
+                case "light": Look.override = .aqua
+                default: Look.override = nil
+                }
+                Look.refresh()
+                return "{\"ok\":true}"
+            }
             if let host = W2S.control(handle), let bar = host.owned as? MenuBar {
                 bar.debugInject(event)
                 return "{\"ok\":true}"
