@@ -22,10 +22,11 @@ mkdir -p $OUT/x86_64-windows
 x86_64-w64-mingw32-gcc -O2 -Wall -Wno-unused-parameter -shared -D_WIN32_WINNT=0x0a00 -Iruntime/include \
   -o $OUT/x86_64-windows/win32swiftui.dll \
   runtime/pe/main.c runtime/pe/controls.c runtime/pe/json.c runtime/pe/dialogs.c runtime/pe/taskdialog.c runtime/pe/menus.c \
+  runtime/pe/pickers.c \
   runtime/pe/win32swiftui.def \
   -Wl,--file-alignment=4096 -static-libgcc \
   "$WINE_BUILD/libs/winecrt0/x86_64-windows/libwinecrt0.a" "$WINE_BUILD/dlls/ntdll/x86_64-windows/libntdll.a" \
-  -luser32 -lgdi32 -lcomctl32 -luxtheme -lkernel32
+  -luser32 -lgdi32 -lcomctl32 -luxtheme -lwinspool -lkernel32
 "$WINE_BUILD/tools/winebuild/winebuild" --builtin $OUT/x86_64-windows/win32swiftui.dll
 
 echo "=== win32swiftui.so (Swift + C, x86_64, macOS 12)"
@@ -36,7 +37,7 @@ codesign -f -s - $OUT/win32swiftui.so 2>/dev/null
 
 echo "=== gallery.exe"
 x86_64-w64-mingw32-gcc -O2 -Wall -municode -mwindows -o $OUT/gallery.exe tests/gallery/gallery.c \
-  -lcomctl32 -lcomdlg32 -lshell32 -lole32 -luuid -lgdi32 -luser32
+  -lcomctl32 -lcomdlg32 -lshell32 -lole32 -luuid -lwinspool -lgdi32 -luser32
 
 echo "=== install into $DEST"
 mkdir -p "$DEST/dlls/win32swiftui/x86_64-windows"

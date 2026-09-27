@@ -19,6 +19,9 @@ enum Requests {
         case "alert": alert(params, owner: sheetOwner, request: request)
         case "taskdialog": taskDialog(params, owner: sheetOwner, request: request)
         case "open", "save": panel(params, save: kind == "save", owner: sheetOwner, request: request)
+        case "color": colorPanel(params, request: request)
+        case "font": fontPanel(params, request: request)
+        case "print": printPanel(params, owner: sheetOwner, request: request)
         default: finish(request, ["error": "unknown request \(kind)"])
         }
     }

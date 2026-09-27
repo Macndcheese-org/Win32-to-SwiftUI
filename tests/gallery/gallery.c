@@ -17,6 +17,7 @@
 #include <commdlg.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <winspool.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -585,6 +586,86 @@ static HWND wizard_sheet( BOOL modeless )
     return modeless ? sheet : NULL;
 }
 
+/* ---------- colour, font and print ---------- */
+
+static COLORREF custom_colors[16];
+static int color_runs, font_runs, print_runs;
+static BOOL color_ok, font_ok, print_ok;
+static CHOOSECOLORW last_color;
+static CHOOSEFONTW last_cf;
+static LOGFONTW last_font;
+static PRINTDLGW last_print;
+
+static void choose_color(void)
+{
+    CHOOSECOLORW cc = { sizeof(cc) };
+    WCHAR text[64];
+
+    cc.hwndOwner = main_window;
+    cc.rgbResult = RGB( 10, 20, 30 );
+    cc.lpCustColors = custom_colors;
+    cc.Flags = CC_RGBINIT | CC_FULLOPEN;
+    color_ok = ChooseColorW( &cc );
+    last_color = cc;
+    color_runs++;
+    swprintf( text, 64, L"Colour: %d, #%06lx", color_ok, cc.rgbResult );
+    SetWindowTextW( ctl[ID_LABEL], text );
+}
+
+static void choose_font( DWORD extra_flags )
+{
+    CHOOSEFONTW cf = { sizeof(cf) };
+    LOGFONTW lf = { 0 };
+    HDC hdc = GetDC( NULL );
+    WCHAR text[96];
+
+    lf.lfHeight = -MulDiv( 12, GetDeviceCaps( hdc, LOGPIXELSY ), 72 );
+    ReleaseDC( NULL, hdc );
+    lf.lfWeight = FW_NORMAL;
+    wcscpy( lf.lfFaceName, L"Arial" );
+    cf.hwndOwner = main_window;
+    cf.lpLogFont = &lf;
+    cf.Flags = CF_SCREENFONTS | CF_EFFECTS | CF_INITTOLOGFONTSTRUCT | extra_flags;
+    font_ok = ChooseFontW( &cf );
+    last_cf = cf;
+    last_font = lf;
+    font_runs++;
+    swprintf( text, 96, L"Font: %d, %ls %d.%d pt", font_ok, lf.lfFaceName, cf.iPointSize / 10, cf.iPointSize % 10 );
+    SetWindowTextW( ctl[ID_LABEL], text );
+}
+
+static void print_dialog(void)
+{
+    PRINTDLGW pd = { sizeof(pd) };
+    WCHAR text[160];
+
+    pd.hwndOwner = main_window;
+    pd.Flags = PD_RETURNDC | PD_NOSELECTION;
+    pd.nMinPage = 1;
+    pd.nMaxPage = 9;
+    pd.nFromPage = 1;
+    pd.nToPage = 9;
+    pd.nCopies = 1;
+    print_ok = PrintDlgW( &pd );
+    last_print = pd;
+    print_runs++;
+    if (print_ok && pd.hDevNames)
+    {
+        DEVNAMES *dn = GlobalLock( pd.hDevNames );
+        swprintf( text, 160, L"Print: %ls, %d copies, pages %d-%d", (WCHAR *)dn + dn->wDeviceOffset,
+                  pd.nCopies, pd.nFromPage, pd.nToPage );
+        GlobalUnlock( pd.hDevNames );
+    }
+    else swprintf( text, 160, L"Print: %d (%#lx)", print_ok, CommDlgExtendedError() );
+    SetWindowTextW( ctl[ID_LABEL], text );
+    if (!in_selftest)
+    {
+        if (pd.hDC) DeleteDC( pd.hDC );
+        if (pd.hDevMode) GlobalFree( pd.hDevMode );
+        if (pd.hDevNames) GlobalFree( pd.hDevNames );
+    }
+}
+
 static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
     switch (msg)
@@ -612,6 +693,10 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         if (code == BN_CLICKED && id == ID_PROPSHEET && !in_selftest) property_sheet( 7, FALSE );
         /* the self-test opens it modeless, to drive it */
         if (code == BN_CLICKED && id == ID_WIZARD) test_wizard = wizard_sheet( in_selftest );
+        if (code == BN_CLICKED && id == ID_COLOR) choose_color();
+        /* the self-test checks that a proportional font can't be chosen then */
+        if (code == BN_CLICKED && id == ID_FONT) choose_font( in_selftest ? CF_FIXEDPITCHONLY : 0 );
+        if (code == BN_CLICKED && id == ID_PRINT) print_dialog();
         if (code == BN_CLICKED && id == ID_TASKDLG && !in_selftest)
         {
             int button = 0, radio = 0;
@@ -823,6 +908,150 @@ static void CALLBACK choose_file( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
 {
     KillTimer( hwnd, id );
     inject( NULL, "{\"t\":\"choose\",\"s\":\"/tmp/w2s-gallery-test.txt\"}" );
+}
+
+static void pump_until( const int *counter, int target, int ms )
+{
+    DWORD end = GetTickCount() + ms;
+    while (*counter < target && (int)(end - GetTickCount()) > 0) pump( 50 );
+}
+
+static void CALLBACK panel_cancel( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    KillTimer( hwnd, id );
+    inject( NULL, "{\"t\":\"cancel\"}" );
+}
+
+static BOOL color_native_ok, font_native_ok, print_native_ok;
+
+static void CALLBACK color_panel_ok( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    KillTimer( hwnd, id );
+    color_native_ok = query_has( NULL, "\"color\":[10,20,30]" ) && query_has( NULL, "\"custom\":[1,2,3," ) &&
+                      query_has( NULL, "\"alpha\":false" );
+    inject( NULL, "{\"t\":\"custom\",\"a\":[1,200,0,0]}" );
+    inject( NULL, "{\"t\":\"pick\",\"a\":[200,100,50]}" );
+    inject( NULL, "{\"t\":\"ok\"}" );
+}
+
+static void CALLBACK font_panel_ok( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    KillTimer( hwnd, id );
+    /* CF_FIXEDPITCHONLY: Arial can't be taken, Menlo can */
+    font_native_ok = query_has( NULL, "\"family\":\"Arial\"" ) && query_has( NULL, "\"size\":12" ) &&
+                     query_has( NULL, "\"valid\":false" ) && query_has( NULL, "\"effects\":true" );
+    inject( NULL, "{\"t\":\"font\",\"s\":\"Menlo\",\"v\":14}" );
+    font_native_ok = font_native_ok && query_has( NULL, "\"valid\":true" );
+    inject( NULL, "{\"t\":\"underline\",\"v\":1}" );
+    inject( NULL, "{\"t\":\"pick\",\"a\":[0,0,255]}" );
+    inject( NULL, "{\"t\":\"ok\"}" );
+}
+
+static void CALLBACK print_panel_ok( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    KillTimer( hwnd, id );
+    print_native_ok = query_has( NULL, "\"open\":true" ) && query_has( NULL, "\"copies\":1" );
+    inject( NULL, "{\"t\":\"print\",\"copies\":2,\"from\":2,\"to\":3}" );
+}
+
+static int CALLBACK font_exists_proc( const LOGFONTW *lf, const TEXTMETRICW *tm, DWORD type, LPARAM lparam )
+{
+    *(BOOL *)lparam = TRUE;
+    return 0;
+}
+
+static BOOL font_exists( const WCHAR *face )
+{
+    LOGFONTW lf = { 0 };
+    HDC hdc = GetDC( NULL );
+    BOOL found = FALSE;
+
+    lf.lfCharSet = DEFAULT_CHARSET;
+    wcscpy( lf.lfFaceName, face );
+    EnumFontFamiliesExW( hdc, &lf, font_exists_proc, (LPARAM)&found, 0 );
+    ReleaseDC( NULL, hdc );
+    return found;
+}
+
+static BOOL near_rgb( COLORREF a, COLORREF b )
+{
+    return abs( GetRValue( a ) - GetRValue( b ) ) <= 1 && abs( GetGValue( a ) - GetGValue( b ) ) <= 1 &&
+           abs( GetBValue( a ) - GetBValue( b ) ) <= 1;
+}
+
+/* ChooseColor, ChooseFont and PrintDlg as the macOS panels */
+static void selftest_pickers(void)
+{
+    DWORD needed = 0, count = 0;
+    HDC hdc;
+    int dpi;
+
+    custom_colors[0] = RGB( 1, 2, 3 );
+    SetTimer( main_window, 7, 1000, color_panel_ok );
+    inject( ctl[ID_COLOR], "{\"t\":\"click\"}" );
+    pump_until( &color_runs, 1, 8000 );
+    printf( "      colour panel returned %d: #%06lx\n", color_ok, last_color.rgbResult );
+    check( got_command[ID_COLOR][BN_CLICKED] == 1 && color_native_ok,
+           "native click on Colour… -> BN_CLICKED; the colour panel starts at the app's colour and custom colours" );
+    check( color_ok && near_rgb( last_color.rgbResult, RGB( 200, 100, 50 ) ) && custom_colors[1] == RGB( 200, 0, 0 ),
+           "the colour panel's OK -> rgbResult and the edited custom colours" );
+    SetTimer( main_window, 7, 1000, panel_cancel );
+    choose_color();
+    check( color_runs == 2 && !color_ok, "Cancel on the colour panel -> FALSE" );
+
+    SetTimer( main_window, 8, 1000, font_panel_ok );
+    inject( ctl[ID_FONT], "{\"t\":\"click\"}" );
+    pump_until( &font_runs, 1, 8000 );
+    hdc = GetDC( NULL );
+    dpi = GetDeviceCaps( hdc, LOGPIXELSY );
+    ReleaseDC( NULL, hdc );
+    printf( "      font panel returned %d: %ls, %d, height %ld\n", font_ok, last_font.lfFaceName, last_cf.iPointSize,
+            last_font.lfHeight );
+    check( got_command[ID_FONT][BN_CLICKED] == 1 && font_native_ok,
+           "native click on Font… -> BN_CLICKED; the font panel starts at the app's font, CF_FIXEDPITCHONLY holds OK back" );
+    check( font_ok && last_cf.iPointSize == 140 && last_font.lfHeight == -MulDiv( 14, dpi, 72 ) && last_font.lfUnderline &&
+           last_cf.rgbColors == RGB( 0, 0, 255 ) &&
+           (font_exists( L"Menlo" ) ? !wcscmp( last_font.lfFaceName, L"Menlo" ) : last_font.lfFaceName[0] != 0),
+           "the font panel's OK -> a LOGFONT GDI can make, iPointSize, underline and colour" );
+
+    EnumPrintersW( PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS, NULL, 2, NULL, 0, &needed, &count );
+    if (!needed)
+    {
+        printf( "      no printer in this wine prefix: the print panel checks are skipped\n" );
+        return;
+    }
+    SetTimer( main_window, 9, 1200, print_panel_ok );
+    inject( ctl[ID_PRINT], "{\"t\":\"click\"}" );
+    pump_until( &print_runs, 1, 10000 );
+    check( got_command[ID_PRINT][BN_CLICKED] == 1 && print_native_ok,
+           "native click on Print… -> BN_CLICKED; the print panel opens as a sheet with the app's copies" );
+    {
+        BOOL devices = FALSE;
+        if (print_ok && last_print.hDevNames && last_print.hDevMode)
+        {
+            DEVNAMES *dn = GlobalLock( last_print.hDevNames );
+            DEVMODEW *dm = GlobalLock( last_print.hDevMode );
+            HANDLE printer;
+            if (OpenPrinterW( (WCHAR *)dn + dn->wDeviceOffset, &printer, NULL ))
+            {
+                devices = !wcsncmp( dm->dmDeviceName, (WCHAR *)dn + dn->wDeviceOffset, CCHDEVICENAME - 1 );
+                ClosePrinter( printer );
+            }
+            printf( "      print panel: %ls on %ls, %d copies, pages %d-%d\n", (WCHAR *)dn + dn->wDeviceOffset,
+                    (WCHAR *)dn + dn->wOutputOffset, last_print.nCopies, last_print.nFromPage, last_print.nToPage );
+            GlobalUnlock( last_print.hDevMode );
+            GlobalUnlock( last_print.hDevNames );
+        }
+        check( print_ok && devices && (last_print.Flags & PD_PAGENUMS) && last_print.nFromPage == 2 &&
+               last_print.nToPage == 3 && last_print.nCopies == 2 && last_print.hDC,
+               "Print -> the page range, copies, a wine printer's DEVMODE/DEVNAMES and its DC" );
+        if (last_print.hDC) DeleteDC( last_print.hDC );
+        if (last_print.hDevMode) GlobalFree( last_print.hDevMode );
+        if (last_print.hDevNames) GlobalFree( last_print.hDevNames );
+    }
+    SetTimer( main_window, 9, 1200, panel_cancel );
+    print_dialog();
+    check( print_runs == 2 && !print_ok, "Cancel on the print panel -> FALSE" );
 }
 
 /* milestone 2 controls, both ways */
@@ -1378,6 +1607,8 @@ static int selftest(void)
         printf( "      IFileOpenDialog returned %#lx: %ls\n", hr, path );
         check( hr == S_OK && !_wcsicmp( path, L"Z:\\tmp" ), "IFileOpenDialog (FOS_PICKFOLDERS) returns the chosen folder" );
     }
+
+    selftest_pickers();
 
     printf( "%d passed, %d failed\n", passes, failures );
     return failures;

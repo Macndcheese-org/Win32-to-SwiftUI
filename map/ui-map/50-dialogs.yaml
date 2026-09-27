@@ -165,7 +165,7 @@ entries:
               Button("Cancel", role: .cancel) {}.keyboardShortcut(.cancelAction)
               Button("OK") {}.keyboardShortcut(.defaultAction)
             }.padding(8))
-          _ = NSApp.runModal(for: c)
+          c.makeKeyAndOrderFront(nil)
     swiftui:
       - since: 12
         code: "ColorPicker(title, selection: $color, supportsOpacity: false)"
@@ -175,9 +175,12 @@ entries:
     not_translated_when: [CC_ENABLEHOOK, CC_ENABLETEMPLATE, CC_ENABLETEMPLATEHANDLE]
     notes: >-
       ColorPicker is the inline well; the dialog form is NSColorPanel, which SwiftUI opens
-      from the well. The system panel is modeless and has no OK button, so a small accessory
-      with Cancel/OK and a modal session reproduce ChooseColor's modal contract. The 16
-      custom colours are loaded into the panel's colour list.
+      from the well. The system panel is modeless and has no OK button, so it shows as a
+      plain window with a Cancel/OK accessory (wine's labels, in wine's language), and the
+      Win32 thread supplies ChooseColor's modality, as for every panel (no modal session).
+      Closing the panel is Cancel. The 16 custom colours are a colour list in the panel;
+      its "+" fills the slots from the first, like "Add to Custom Colors", and they come
+      back OK or not, as with wine's dialog. ChooseColorA goes through ChooseColorW.
 
   - id: fontdialog
     kind: dialog
@@ -197,15 +200,21 @@ entries:
               Button("OK") {}.keyboardShortcut(.defaultAction)
             }.padding(8))
           fm.orderFrontFontPanel(nil)
-          _ = NSApp.runModal(for: fp)
     glass: automatic
     improvised: true
     events_out: {result: CHOOSEFONT LOGFONT, iPointSize and rgbColors}
     not_translated_when: [CF_ENABLEHOOK, CF_ENABLETEMPLATE, CF_ENABLETEMPLATEHANDLE]
     notes: >-
-      SwiftUI has no font picker. The macOS font panel lists macOS fonts; the chosen family
-      is returned only if wine can load it (it sees /System/Library/Fonts and ~/Library/Fonts),
-      otherwise the closest face that GDI enumerates.
+      SwiftUI has no font picker. The macOS font panel shows as a plain window (no modal
+      session) with an accessory: a sample, the CF_EFFECTS choices (underline, strikeout,
+      colour; the panel's own effects stay off) and Cancel/OK in wine's language. Its
+      choices go to the runtime (NSFontManager's target), not to whichever wine window has
+      the focus. The panel lists macOS fonts; the chosen family is returned only if GDI
+      enumerates it, otherwise the closest face that GDI enumerates (a shorter form of the
+      name, then the app's own face), and lfHeight follows the DC's LOGPIXELSY.
+      CF_FIXEDPITCHONLY and CF_LIMITSIZE hold OK back until the choice fits. A
+      printer-only list (CF_PRINTERFONTS alone) keeps wine's dialog; ChooseFontA converts
+      to ChooseFontW's structures and back.
 
   - id: printdialog
     kind: dialog
@@ -218,14 +227,21 @@ entries:
           let info = NSPrintInfo.shared
           let pp = NSPrintPanel()
           pp.options = [.showsCopies, .showsPageRange, .showsPaperSize, .showsOrientation]
-          _ = pp.runModal(with: info)
+          pp.beginSheet(with: info, modalFor: window, delegate: nil, didEnd: nil, contextInfo: nil)
     glass: automatic
     events_out: {result: 'PRINTDLG hDevMode/hDevNames, page range, copies; hDC from the chosen printer'}
     not_translated_when: [PD_ENABLEPRINTHOOK, PD_ENABLEPRINTTEMPLATE, PD_ENABLEPRINTTEMPLATEHANDLE]
     notes: >-
-      The macOS print panel picks the printer and options; the result is written back into
-      the DEVMODE that wine's CUPS printing (wineps) already uses. "Save as PDF" replaces
-      "Print to file".
+      The macOS print panel picks the printer and options, only as a sheet on the owner:
+      without a visible owner window wine's dialog runs. wine names each CUPS printer by
+      its queue and keeps the name macOS shows as its comment, which is how the panel's
+      choice is found among wine's printers. The result is written back as comdlg32 does:
+      hDevMode from the printer driver (DocumentProperties, the app's DEVMODE merged when
+      it is for the same printer) with copies, collation, orientation and the paper
+      size, hDevNames, the page range, and hDC with PD_RETURNDC/PD_RETURNIC.
+      PD_RETURNDEFAULT, Print Setup (PD_PRINTSETUP) and PrintDlgEx's own pages and
+      callback keep wine's dialog; PrintDlgA isn't offered yet. The panel has no "current
+      page" choice.
 
   - id: pagesetup
     kind: dialog
@@ -234,7 +250,9 @@ entries:
     runtime: appkit
     appkit:
       - since: 12
-        code: "_ = NSPageLayout().runModal(with: NSPrintInfo.shared)"
+        code: |-
+          let layout = NSPageLayout()
+          layout.beginSheet(with: NSPrintInfo.shared, modalFor: window, delegate: nil, didEnd: nil, contextInfo: nil)
     glass: automatic
     not_translated_when: [PSD_ENABLEPAGESETUPHOOK, PSD_ENABLEPAGESETUPTEMPLATE, PSD_ENABLEPAGESETUPTEMPLATEHANDLE]
     notes: >-

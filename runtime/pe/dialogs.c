@@ -161,19 +161,23 @@ BOOL w2s_run_request_ex( const char *kind, HWND owner, const char *json, struct 
 
 /* ---------- MessageBox ---------- */
 
-/* The button labels wine shows, in its current language: taken from user32's
- * MSGBOX dialog template, so a French wine gets French buttons. */
-WCHAR *w2s_msgbox_label( LANGID lang, int id )
+/* The label of an item in one of wine's own dialog templates, in wine's
+ * current language (lang 0: the thread's), without the '&': user32's MSGBOX
+ * buttons, comdlg32's colour and font dialogs. So a French wine gets French
+ * buttons. */
+WCHAR *w2s_dialog_label( HMODULE module, const WCHAR *dialog, LANGID lang, int id )
 {
-    HMODULE user32 = GetModuleHandleW( L"user32.dll" );
-    HRSRC res = FindResourceExW( user32, (LPCWSTR)RT_DIALOG, L"MSGBOX", lang );
+    HRSRC res = lang ? FindResourceExW( module, (LPCWSTR)RT_DIALOG, dialog, lang )
+                     : FindResourceW( module, dialog, (LPCWSTR)RT_DIALOG );
     const BYTE *p;
     const DLGTEMPLATE *tmpl;
     DWORD style;
     WORD count, i;
 
-    if (!res && !(res = FindResourceExW( user32, (LPCWSTR)RT_DIALOG, L"MSGBOX", LANG_NEUTRAL ))) return NULL;
-    if (!(tmpl = LockResource( LoadResource( user32, res ) ))) return NULL;
+    if (!module) return NULL;
+    if (!res && !(res = FindResourceExW( module, (LPCWSTR)RT_DIALOG, dialog, LANG_NEUTRAL ))) return NULL;
+    if (!(tmpl = LockResource( LoadResource( module, res ) ))) return NULL;
+    if (*(const WORD *)((const BYTE *)tmpl + 2) == 0xffff) return NULL;   /* a DIALOGEX */
     style = tmpl->style;
     count = tmpl->cdit;
     p = (const BYTE *)(tmpl + 1);
@@ -212,6 +216,12 @@ WCHAR *w2s_msgbox_label( LANGID lang, int id )
     }
 #undef SKIP_SZ_OR_ORD
     return NULL;
+}
+
+/* the button labels wine shows in a message box */
+WCHAR *w2s_msgbox_label( LANGID lang, int id )
+{
+    return w2s_dialog_label( GetModuleHandleW( L"user32.dll" ), L"MSGBOX", lang ? lang : LANG_NEUTRAL, id );
 }
 
 WCHAR *w2s_resource_string( HINSTANCE inst, const WCHAR *s )

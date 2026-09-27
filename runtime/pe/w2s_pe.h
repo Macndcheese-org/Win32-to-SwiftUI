@@ -8,6 +8,7 @@
 #include <windows.h>
 #include <winternl.h>
 #include <commctrl.h>
+#include <objbase.h>        /* before commdlg.h: PRINTDLGEX needs the COM macros */
 #include <commdlg.h>
 #include <shlobj.h>
 #include <shobjidl.h>
@@ -168,6 +169,7 @@ struct w2s_request_handler
 
 WCHAR *w2s_resource_string( HINSTANCE inst, const WCHAR *s );    /* HeapAlloc'd; s may be a MAKEINTRESOURCE id */
 WCHAR *w2s_msgbox_label( LANGID lang, int id );                   /* a button of user32's MSGBOX template, localized */
+WCHAR *w2s_dialog_label( HMODULE module, const WCHAR *dialog, LANGID lang, int id );  /* HeapAlloc'd, no '&' */
 BOOL w2s_run_request( const char *kind, HWND owner, const char *json, char **result );
 BOOL w2s_run_request_ex( const char *kind, HWND owner, const char *json, struct w2s_request_handler *handler,
                          char **result );
