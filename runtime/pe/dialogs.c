@@ -163,7 +163,7 @@ BOOL w2s_run_request_ex( const char *kind, HWND owner, const char *json, struct 
 
 /* The button labels wine shows, in its current language: taken from user32's
  * MSGBOX dialog template, so a French wine gets French buttons. */
-static WCHAR *label_from_template( LANGID lang, int id )
+WCHAR *w2s_msgbox_label( LANGID lang, int id )
 {
     HMODULE user32 = GetModuleHandleW( L"user32.dll" );
     HRSRC res = FindResourceExW( user32, (LPCWSTR)RT_DIALOG, L"MSGBOX", lang );
@@ -214,7 +214,7 @@ static WCHAR *label_from_template( LANGID lang, int id )
     return NULL;
 }
 
-static WCHAR *resource_string( HINSTANCE inst, const WCHAR *s )
+WCHAR *w2s_resource_string( HINSTANCE inst, const WCHAR *s )
 {
     WCHAR buf[1024];
     if (!s) return NULL;
@@ -225,7 +225,7 @@ static WCHAR *resource_string( HINSTANCE inst, const WCHAR *s )
 
 static void add_button( struct json *j, LANGID lang, int id, BOOL is_default, BOOL is_cancel )
 {
-    WCHAR *label = label_from_template( lang, id );
+    WCHAR *label = w2s_msgbox_label( lang, id );
     json_obj_begin( j );
     json_str( j, "title", label ? label : L"OK" );
     json_int( j, "id", id );
@@ -267,8 +267,8 @@ BOOL WINAPI W2SMessageBox( const MSGBOXPARAMSW *params, INT *ret )
     if (!cancel_id && n == 1) cancel_id = sets[type][0]; /* Escape closes a lone OK */
     if (def >= (UINT)n) def = 0;
 
-    text = resource_string( params->hInstance, params->lpszText );
-    caption = resource_string( params->hInstance, params->lpszCaption );
+    text = w2s_resource_string( params->hInstance, params->lpszText );
+    caption = w2s_resource_string( params->hInstance, params->lpszCaption );
 
     /* macOS alerts show the app icon, so a caption that's just the program's
      * name adds nothing: the text becomes the bold message. Otherwise the

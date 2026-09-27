@@ -158,6 +158,8 @@ struct w2s_request_handler
     void (*idle)( struct w2s_request_handler *handler, UINT64 id );
 };
 
+WCHAR *w2s_resource_string( HINSTANCE inst, const WCHAR *s );    /* HeapAlloc'd; s may be a MAKEINTRESOURCE id */
+WCHAR *w2s_msgbox_label( LANGID lang, int id );                   /* a button of user32's MSGBOX template, localized */
 BOOL w2s_run_request( const char *kind, HWND owner, const char *json, char **result );
 BOOL w2s_run_request_ex( const char *kind, HWND owner, const char *json, struct w2s_request_handler *handler,
                          char **result );

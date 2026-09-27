@@ -7,3 +7,4 @@ EXPORTS
     W2SDebugInject
     W2SDebugFree
     W2SIsTranslated
+    W2STaskDialog

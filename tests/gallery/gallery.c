@@ -25,6 +25,8 @@ enum
     /* milestone 2 */
     ID_3STATE, ID_SPLIT, ID_CMDLINK, ID_FRAME, ID_RECT, ID_MLEDIT, ID_ECOMBO, ID_TREE, ID_UDEDIT, ID_UPDOWN,
     ID_DATETIME, ID_MONTHCAL, ID_STATUS, ID_LVCHECK, ID_LVICON, ID_TOOLTIP,
+    /* dialogs (milestone 2) */
+    ID_TASKDLG, ID_FOLDER, ID_COLOR, ID_FONT, ID_PRINT, ID_ITEMDLG, ID_PROPSHEET, ID_WIZARD,
     ID_LAST
 };
 
@@ -73,6 +75,66 @@ static BOOL v6_begin( ULONG_PTR *cookie )
 static void v6_end( ULONG_PTR cookie )
 {
     DeactivateActCtx( 0, cookie );
+}
+
+/* ---------- task dialog (comctl32 v6 only) ---------- */
+
+static HRESULT (WINAPI *pTaskDialogIndirect)( const TASKDIALOGCONFIG *, int *, int *, BOOL * );
+static int td_created, td_radio = -1, td_verify = -1, td_clicks, td_vetoed, td_native_ok;
+
+static HRESULT CALLBACK td_callback( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, LONG_PTR data )
+{
+    switch (msg)
+    {
+    case TDN_CREATED:
+        td_created++;
+        SendMessageW( hwnd, TDM_SET_PROGRESS_BAR_POS, 40, 0 );
+        SendMessageW( hwnd, TDM_SET_ELEMENT_TEXT, TDE_CONTENT, (LPARAM)L"Updated content" );
+        break;
+    case TDN_RADIO_BUTTON_CLICKED:
+        td_radio = (int)wparam;
+        break;
+    case TDN_VERIFICATION_CLICKED:
+        td_verify = (int)wparam;
+        break;
+    case TDN_BUTTON_CLICKED:
+        td_clicks++;
+        /* the first "Don't Save" is refused: the dialog stays open */
+        if (wparam == 1002 && in_selftest && !td_vetoed++) return S_FALSE;
+        break;
+    }
+    return S_OK;
+}
+
+static HRESULT run_task_dialog( int *button, int *radio, BOOL *verified )
+{
+    static const TASKDIALOG_BUTTON buttons[] = { { 1001, L"Save" }, { 1002, L"Don't Save" } };
+    static const TASKDIALOG_BUTTON radios[] = { { 2001, L"Keep a copy" }, { 2002, L"Replace it" } };
+    TASKDIALOGCONFIG tdc = { sizeof(tdc) };
+
+    if (!pTaskDialogIndirect)
+    {
+        ULONG_PTR cookie;
+        if (!v6_begin( &cookie )) return E_FAIL;
+        pTaskDialogIndirect = (void *)GetProcAddress( LoadLibraryW( L"comctl32.dll" ), "TaskDialogIndirect" );
+        v6_end( cookie );
+        if (!pTaskDialogIndirect) return E_FAIL;
+    }
+    tdc.hwndParent = main_window;
+    tdc.dwFlags = TDF_SHOW_PROGRESS_BAR | TDF_ALLOW_DIALOG_CANCELLATION | TDF_ENABLE_HYPERLINKS;
+    tdc.dwCommonButtons = TDCBF_CANCEL_BUTTON;
+    tdc.pszMainInstruction = L"Save changes to the document?";
+    tdc.pszContent = L"Your changes will be lost if you don't save them. <a href=\"help\">Why?</a>";
+    tdc.cButtons = ARRAYSIZE(buttons);
+    tdc.pButtons = buttons;
+    tdc.nDefaultButton = 1001;
+    tdc.cRadioButtons = ARRAYSIZE(radios);
+    tdc.pRadioButtons = radios;
+    tdc.pszVerificationText = L"Don't ask again";
+    tdc.pszExpandedInformation = L"The document was changed 3 minutes ago.";
+    tdc.pszFooter = L"Changes are kept for 30 days.";
+    tdc.pfCallback = td_callback;
+    return pTaskDialogIndirect( &tdc, button, radio, verified );
 }
 
 static char *(WINAPI *pQuery)( HWND );
@@ -276,6 +338,13 @@ static void create_controls2(void)
         item.state = INDEXTOSTATEIMAGEMASK( 2 );
         SendMessageW( ctl[ID_LVCHECK], LVM_SETITEMSTATE, 1, (LPARAM)&item );
     }
+    {
+        static const WCHAR *titles[] = { L"Task dialog…", L"Folder…", L"Colour…", L"Font…", L"Print…",
+                                         L"Item dialog…", L"Property sheet…", L"Wizard…" };
+        int i;
+        for (i = 0; i < ARRAYSIZE(titles); i++)
+            make( L"Button", titles[i], BS_PUSHBUTTON | WS_TABSTOP, 16 + i * 128, 544, 120, 24, ID_TASKDLG + i );
+    }
     make( L"Static", NULL, SS_ETCHEDFRAME, 724, 112, 120, 60, ID_FRAME );
     make( L"Static", NULL, SS_GRAYRECT, 852, 112, 40, 60, ID_RECT );
 
@@ -320,6 +389,15 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
             SetWindowTextW( ctl[ID_LABEL], text );
         }
         if (code == BN_CLICKED && (id == ID_OPEN || id == ID_SAVE)) open_file( id == ID_SAVE );
+        if (code == BN_CLICKED && id == ID_TASKDLG && !in_selftest)
+        {
+            int button = 0, radio = 0;
+            BOOL verified = FALSE;
+            WCHAR text[96];
+            run_task_dialog( &button, &radio, &verified );
+            swprintf( text, 96, L"Task dialog: button %d, radio %d, verified %d", button, radio, verified );
+            SetWindowTextW( ctl[ID_LABEL], text );
+        }
         return 0;
     }
     case WM_SIZE:
@@ -460,6 +538,27 @@ static void CALLBACK press_alert_button( HWND hwnd, UINT msg, UINT_PTR id, DWORD
 {
     KillTimer( hwnd, id );
     inject( NULL, "{\"t\":\"alertButton\",\"v\":1}" );
+}
+
+static void CALLBACK task_dialog_second( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    KillTimer( hwnd, id );
+    inject( NULL, "{\"t\":\"press\",\"v\":1001}" );
+}
+
+/* while the task dialog is up: read it, then answer it natively */
+static void CALLBACK task_dialog_first( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    char *q = pQuery( NULL );
+
+    KillTimer( hwnd, id );
+    td_native_ok = q && strstr( q, "\"progressPos\":40" ) && strstr( q, "Updated content" );
+    if (!td_native_ok) printf( "      task dialog: %s\n", q ? q : "(null)" );
+    pFree( q );
+    inject( NULL, "{\"t\":\"radio\",\"v\":2002}" );
+    inject( NULL, "{\"t\":\"verify\",\"v\":1}" );
+    inject( NULL, "{\"t\":\"press\",\"v\":1002}" );    /* refused by the callback */
+    SetTimer( hwnd, 4, 500, task_dialog_second );
 }
 
 static void CALLBACK choose_file( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
@@ -844,6 +943,22 @@ static int selftest(void)
     SetTimer( main_window, 1, 800, press_alert_button );
     r = MessageBoxW( main_window, L"Save changes?", L"Gallery test", MB_YESNO | MB_ICONQUESTION );
     check( r == IDNO, "native alert returns IDNO for its second button" );
+
+    /* task dialog -> NSAlert with an accessory */
+    {
+        int button = 0, radio = 0;
+        BOOL verified = FALSE;
+        HRESULT hr;
+
+        SetTimer( main_window, 3, 1000, task_dialog_first );
+        hr = run_task_dialog( &button, &radio, &verified );
+        printf( "      task dialog returned %#lx: button %d, radio %d, verified %d\n", hr, button, radio, verified );
+        check( hr == S_OK && td_created == 1 && td_native_ok,
+               "TDN_CREATED, and TDM_SET_PROGRESS_BAR_POS / TDM_SET_ELEMENT_TEXT reach the open alert" );
+        check( td_radio == 2002 && td_verify == 1 && td_vetoed == 1 && td_clicks == 2,
+               "native radio, check box and buttons -> TDN_* (a refused button keeps it open)" );
+        check( button == 1001 && radio == 2002 && verified, "the task dialog returns the button, radio and check box" );
+    }
 
     /* open panel: choose a Unix path, get a drive path back */
     CloseHandle( CreateFileW( L"Z:\\tmp\\w2s-gallery-test.txt", GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL ) );

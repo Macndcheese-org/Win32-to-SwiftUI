@@ -1358,7 +1358,7 @@ a.addButton(withTitle: "Cancel")
 a.beginSheetModal(for: window) { response in _ = response }
 ```
 
-Main instruction -> messageText; content -> informativeText; verification check box -> NSAlert's suppression button. Radio buttons, the progress bar, expanded information and the footer are SwiftUI in the alert's accessory view (NSHostingView). Custom and command-link buttons are added as alert buttons, which NSAlert stacks vertically when there are more than three, the macOS form of a command-link list.
+Main instruction -> messageText; content -> informativeText; verification check box -> NSAlert's suppression button. Radio buttons, the progress bar, expanded information and the footer are SwiftUI in the alert's accessory view (NSHostingView). Custom and command-link buttons are added as alert buttons, which NSAlert stacks vertically when there are more than three, the macOS form of a command-link list. The callback's HWND is a hidden window of the runtime: the app's TDM_* messages sent to it update the open alert. A native button click is reported before anything closes, so TDN_BUTTON_CLICKED can keep the dialog open (S_FALSE), as on Windows; TDN_TIMER comes about every 200 ms. TDM_NAVIGATE_PAGE isn't supported yet.
 
 ### Open file dialog
 <a id="filedialogopen"></a>`filedialog.open` · AppKit · Liquid Glass: automatic on 26+
