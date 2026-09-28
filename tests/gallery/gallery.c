@@ -39,7 +39,7 @@ enum
     /* light and dark */
     ID_WHITEPANEL, ID_WHITECHECK,
     /* toolbars, ComboBoxEx, links */
-    ID_TOOLBAR, ID_CBEX, ID_LINK,
+    ID_TOOLBAR, ID_CBEX, ID_LINK, ID_VTRACK,
     ID_LAST
 };
 
@@ -51,6 +51,7 @@ static int got_link_click = -1;                 /* NM_CLICK's link index */
 static WCHAR got_link_id[MAX_LINKID_TEXT];
 static int got_hscroll, got_tabchange, got_lvchanged, got_dropdown, got_status_click = -1;
 static int got_menu_new, got_initmenupopup, status_bar_checked = 1;
+static int got_vtrack_pos = -1, got_vtrack_end;
 static int got_expanding, got_treesel, got_deltapos, got_vscroll, got_datechange, got_mcselchange, got_mcselect;
 static int got_dispinfo, got_check_changed, got_icon_changed, got_icon_activate;
 static int got_wiznext, got_wizback;
@@ -466,6 +467,9 @@ static void create_controls2(void)
             make( L"Button", titles[i], BS_PUSHBUTTON | WS_TABSTOP, 16 + i * 128, 544, 120, 24, ID_TASKDLG + i );
     }
     make( L"Static", NULL, SS_ETCHEDFRAME, 724, 112, 120, 60, ID_FRAME );
+    make( TRACKBAR_CLASSW, NULL, TBS_VERT | TBS_AUTOTICKS | WS_TABSTOP, 740, 596, 30, 90, ID_VTRACK );
+    SendMessageW( ctl[ID_VTRACK], TBM_SETRANGE, TRUE, MAKELPARAM( 0, 10 ) );
+    SendMessageW( ctl[ID_VTRACK], TBM_SETPOS, TRUE, 2 );
     {
         /* SysLink only exists in v6 */
         INITCOMMONCONTROLSEX link = { sizeof(link), ICC_LINK_CLASS };
@@ -851,6 +855,11 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         return 0;
     case WM_VSCROLL:
         if ((HWND)lparam == ctl[ID_UPDOWN]) got_vscroll++;
+        if ((HWND)lparam == ctl[ID_VTRACK])
+        {
+            if (LOWORD( wparam ) == TB_THUMBPOSITION) got_vtrack_pos = HIWORD( wparam );
+            if (LOWORD( wparam ) == TB_ENDTRACK) got_vtrack_end++;
+        }
         return 0;
     case WM_INITMENUPOPUP:
         /* apps update their menus here; the native menu must show it */
@@ -1522,6 +1531,25 @@ static void selftest2(void)
         GetWindowTextW( edit, text, ARRAYSIZE(text) );
         check( !wcscmp( text, L"Consolas" ) && query_has( cbex, "\"text\":\"Consolas\"" ), "native typing goes into its edit" );
     }
+
+    /* vertical trackbar: a vertical NSSlider, mirrored (Win32's minimum is at the top) */
+    check( pIsTranslated( ctl[ID_VTRACK] ) && query_has( ctl[ID_VTRACK], "\"sliderVertical\":true" ) &&
+           query_has( ctl[ID_VTRACK], "\"sliderValue\":8" ) && query_has( ctl[ID_VTRACK], "\"sliderTicks\":11" ),
+           "a vertical trackbar is a vertical NSSlider with its ticks, minimum at the top" );
+    SendMessageW( ctl[ID_VTRACK], TBM_SETPOS, TRUE, 7 );
+    pump( 150 );
+    check( query_has( ctl[ID_VTRACK], "\"sliderValue\":3" ), "TBM_SETPOS reaches the vertical slider" );
+    inject( ctl[ID_VTRACK], "{\"t\":\"valueEnd\",\"v\":4}" );
+    pump( 200 );
+    check( SendMessageW( ctl[ID_VTRACK], TBM_GETPOS, 0, 0 ) == 4 && got_vtrack_pos == 4 && got_vtrack_end == 1,
+           "the vertical slider -> TBM_GETPOS, WM_VSCROLL TB_THUMBPOSITION and TB_ENDTRACK" );
+    inject( ctl[ID_VTRACK], "{\"t\":\"realClick\"}" );
+    pump( 300 );
+    if (got_vtrack_end != 2)
+        printf( "      vertical slider after a real click: position %d, %d TB_ENDTRACK\n",
+                (int)SendMessageW( ctl[ID_VTRACK], TBM_GETPOS, 0, 0 ), got_vtrack_end );
+    check( SendMessageW( ctl[ID_VTRACK], TBM_GETPOS, 0, 0 ) == 5 && got_vtrack_end == 2,
+           "a real click in the vertical slider's middle -> position 5 and TB_ENDTRACK" );
 
     /* SysLink: its markup as real links; a click -> NM_CLICK with the link */
     check( pIsTranslated( ctl[ID_LINK] ) && query_has( ctl[ID_LINK], "\"links\":[\"Wine site\",\"help\"]" ),

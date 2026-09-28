@@ -1383,28 +1383,34 @@ static void trackbar_snapshot( struct w2s_control *ctl, struct json *j )
     json_int( j, "min", SendMessageW( ctl->hwnd, TBM_GETRANGEMIN, 0, 0 ) );
     json_int( j, "max", SendMessageW( ctl->hwnd, TBM_GETRANGEMAX, 0, 0 ) );
     json_int( j, "ticks", (style & TBS_NOTICKS) ? 0 : SendMessageW( ctl->hwnd, TBM_GETNUMTICS, 0, 0 ) );
+    /* a vertical one's ticks: on the right unless TBS_LEFT (TBS_BOTH: the right, one side on macOS) */
+    if (style & TBS_VERT) json_str_a( j, "tickSide", (style & (TBS_LEFT | TBS_BOTH)) == TBS_LEFT ? "leading" : "trailing" );
 }
 
+/* a native drag: TB_THUMBTRACK as it moves; at the end TB_THUMBPOSITION and
+ * TB_ENDTRACK. WM_VSCROLL for a vertical trackbar. */
 static void trackbar_apply( struct w2s_control *ctl, const struct w2s_event *ev )
 {
     HWND parent = GetParent( ctl->hwnd );
+    UINT msg = (GetWindowLongW( ctl->hwnd, GWL_STYLE ) & TBS_VERT) ? WM_VSCROLL : WM_HSCROLL;
     int pos = (int)ev->value;
 
     if (!ev->has_value) return;
     if (!strcmp( ev->type, "value" ))
     {
         SendMessageW( ctl->hwnd, TBM_SETPOS, TRUE, pos );
-        SendMessageW( parent, WM_HSCROLL, MAKEWPARAM( TB_THUMBTRACK, pos ), (LPARAM)ctl->hwnd );
+        SendMessageW( parent, msg, MAKEWPARAM( TB_THUMBTRACK, pos ), (LPARAM)ctl->hwnd );
     }
     else if (!strcmp( ev->type, "valueEnd" ))
     {
         SendMessageW( ctl->hwnd, TBM_SETPOS, TRUE, pos );
-        SendMessageW( parent, WM_HSCROLL, MAKEWPARAM( TB_THUMBPOSITION, pos ), (LPARAM)ctl->hwnd );
-        SendMessageW( parent, WM_HSCROLL, MAKEWPARAM( TB_ENDTRACK, 0 ), (LPARAM)ctl->hwnd );
+        SendMessageW( parent, msg, MAKEWPARAM( TB_THUMBPOSITION, pos ), (LPARAM)ctl->hwnd );
+        SendMessageW( parent, msg, MAKEWPARAM( TB_ENDTRACK, 0 ), (LPARAM)ctl->hwnd );
     }
 }
 
 static const struct w2s_kind kind_trackbar = { "trackbar", trackbar_snapshot, trackbar_apply };
+static const struct w2s_kind kind_trackbar_vertical = { "trackbar.vertical", trackbar_snapshot, trackbar_apply };
 
 /* ---------- Up-down, date and time ---------- */
 
@@ -2512,7 +2518,7 @@ const struct w2s_kind *w2s_select_kind( HWND hwnd )
         return &kind_treeview;
     }
     if (is_class( name, PROGRESS_CLASSW )) return (style & PBS_VERTICAL) ? NULL : &kind_progress;
-    if (is_class( name, TRACKBAR_CLASSW )) return (style & TBS_VERT) ? NULL : &kind_trackbar;
+    if (is_class( name, TRACKBAR_CLASSW )) return (style & TBS_VERT) ? &kind_trackbar_vertical : &kind_trackbar;
     if (is_class( name, WC_TABCONTROLW ))
     {
         if (is_wizard_tab( hwnd )) return &kind_wizard;

@@ -99,6 +99,13 @@ enum Requests {
         request.query = { ["visible": panel.isVisible, "texts": texts(in: panel.contentView), "icon": iconSource] }
     }
 
+    /// The first view of a class under a view, depth first (tests).
+    static func first<T: NSView>(_ type: T.Type, in view: NSView) -> T? {
+        if let match = view as? T { return match }
+        for sub in view.subviews { if let match = first(type, in: sub) { return match } }
+        return nil
+    }
+
     /// The strings a window shows, in view order (tests).
     static func texts(in view: NSView?) -> [String] {
         guard let view = view else { return [] }
@@ -643,6 +650,11 @@ enum Debug {
             out["imageCount"] = host.model.images.count
             out["imageSymbols"] = Dictionary(uniqueKeysWithValues: host.model.imageSymbols.map { (String($0.key), $0.value) })
             out["entry"] = host.entry
+            if host.entry == "trackbar.vertical", let slider = host.hosting.flatMap({ Requests.first(NSSlider.self, in: $0) }) {
+                out["sliderVertical"] = slider.isVertical
+                out["sliderValue"] = slider.doubleValue
+                out["sliderTicks"] = slider.numberOfTickMarks
+            }
             if host.entry == "syslink" {
                 // the runs the native text shows as links, in order
                 let text = LinkText.attributed(snap.text ?? "")

@@ -12,7 +12,7 @@ enum ControlViews {
     // map: updown datetime monthcal tooltip (as .help on every control: HelpText)
     // map: listview.checkboxes listview.icon
     // map: propsheet propsheet.wizard (modes of the sheet's tab control: WindowSidebar, WizardSteps)
-    // map: toolbar rebar comboboxex syslink
+    // map: toolbar rebar comboboxex syslink trackbar.vertical
     static let entries: Set<String> = [
         "button.push", "button.default", "button.checkbox", "button.pushlike", "button.radio", "button.groupbox",
         "button.3state", "button.split", "button.commandlink",
@@ -21,7 +21,7 @@ enum ControlViews {
         "combobox.dropdownlist", "listbox.single", "listbox.multi", "listview.list", "listview.report",
         "progress", "trackbar", "tab", "static.frame", "statusbar", "edit.multiline", "combobox.editable",
         "treeview", "updown", "datetime", "monthcal", "listview.checkboxes", "listview.icon",
-        "toolbar", "rebar", "comboboxex", "syslink",
+        "toolbar", "rebar", "comboboxex", "syslink", "trackbar.vertical",
     ]
 
     static func supports(_ entry: String) -> Bool { entries.contains(entry) }
@@ -175,6 +175,8 @@ struct ControlRoot: View {
             ProgressBar(snap: snap)
         case "trackbar":
             TrackBar(model: model)
+        case "trackbar.vertical":
+            VerticalTrackBar(model: model)
         case "tab":
             TabStrip(model: model)
         case "updown":
@@ -1475,6 +1477,92 @@ struct TrackBar: View {
         }
         .labelsHidden()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// A vertical trackbar: NSSlider's vertical form (SwiftUI's Slider is
+/// horizontal only). Win32 has the minimum at the top, AppKit at the bottom,
+/// so the value is mirrored: the thumb stays where the app puts it.
+struct VerticalTrackBar: NSViewRepresentable {
+    @ObservedObject var model: ControlModel
+
+    final class Coordinator: NSObject {
+        var model: ControlModel
+        var updating = false        // the app moved it: not the user
+        var settled: Double?        // where the app put it, or the last change ended
+        var pending = false
+        weak var slider: NSSlider?
+        init(model: ControlModel) { self.model = model }
+
+        @objc func changed(_ slider: NSSlider) {
+            guard !updating else { return }
+            let pos = position(slider)
+            if pos != model.snap.value {
+                model.snap.value = pos
+                model.emit(["t": "value", "v": pos])
+            }
+            // The end of a change (TB_ENDTRACK) once the button is up. macOS 27's
+            // slider calls again after the mouse-up (its knob animation ends in a
+            // task), so neither the current event nor the call count tells.
+            if !pending {
+                pending = true
+                RunLoop.main.perform(inModes: [.common]) { [weak self] in self?.settle() }
+            }
+        }
+
+        private func position(_ slider: NSSlider) -> Double {
+            (slider.minValue + slider.maxValue - slider.doubleValue).rounded()
+        }
+
+        private func settle() {
+            guard let slider = slider else { pending = false; return }
+            if NSEvent.pressedMouseButtons & 1 != 0 {
+                // still dragging: look again
+                RunLoop.main.perform(inModes: [.common]) { [weak self] in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self?.settle() }
+                }
+                return
+            }
+            pending = false
+            let pos = position(slider)
+            guard pos != settled else { return }
+            settled = pos
+            model.emit(["t": "valueEnd", "v": pos])
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(model: model) }
+
+    func makeNSView(context: Context) -> NSSlider {
+        let slider = NSSlider(value: 0, minValue: 0, maxValue: 100, target: context.coordinator,
+                              action: #selector(Coordinator.changed(_:)))
+        slider.isVertical = true
+        slider.isContinuous = true
+        context.coordinator.slider = slider
+        return slider
+    }
+
+    func updateNSView(_ slider: NSSlider, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.model = model
+        coordinator.updating = true
+        defer { coordinator.updating = false }
+        let snap = model.snap
+        let lo = snap.min ?? 0, hi = max(snap.max ?? 100, lo + 1)
+        if slider.minValue != lo { slider.minValue = lo }
+        if slider.maxValue != hi { slider.maxValue = hi }
+        let ticks = (snap.ticks ?? 0) > 1 ? snap.ticks ?? 0 : 0
+        if slider.numberOfTickMarks != ticks { slider.numberOfTickMarks = ticks }
+        let side: NSSlider.TickMarkPosition = snap.tickSide == "leading" ? .leading : .trailing
+        if slider.tickMarkPosition != side { slider.tickMarkPosition = side }
+        let value = lo + hi - (snap.value ?? lo)
+        if slider.doubleValue != value {
+            // the app moved it (the user's own moves are already there)
+            slider.doubleValue = value
+            coordinator.settled = snap.value ?? lo
+        }
+        if coordinator.settled == nil { coordinator.settled = snap.value ?? lo }
+        if slider.isEnabled != (snap.enabled ?? true) { slider.isEnabled = snap.enabled ?? true }
     }
 }
 

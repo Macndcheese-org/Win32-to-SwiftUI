@@ -106,6 +106,7 @@ struct Snapshot: Codable, Equatable {
     var marquee: Bool?
     var state: Int?
     var ticks: Int?
+    var tickSide: String?       // a vertical trackbar's ticks: "leading" (TBS_LEFT) or "trailing"
     var buddy: Bool?            // up-down
     // date and time: [year, month, day, hour, minute, second], local, Gregorian
     var date: [Int]?

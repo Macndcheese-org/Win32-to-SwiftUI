@@ -56,9 +56,13 @@ entries:
           let s = NSSlider(value: 50, minValue: 0, maxValue: 100, target: nil, action: nil)
           s.isVertical = true
     glass: automatic
-    improvised: true
-    events_out: {drag: WM_VSCROLL with TB_THUMBTRACK}
-    notes: SwiftUI's Slider is horizontal only; rotating it breaks hit-testing and accessibility.
+    state_in: [TBM_SETPOS, TBM_SETRANGE, TBM_SETRANGEMIN, TBM_SETRANGEMAX, TBM_SETTICFREQ, TBM_SETTIC, TBM_CLEARTICS, TBM_SETLINESIZE, TBM_SETPAGESIZE]
+    events_out: {drag: WM_VSCROLL with TB_THUMBTRACK, then TB_THUMBPOSITION and TB_ENDTRACK}
+    notes: >-
+      SwiftUI's Slider is horizontal only; rotating it breaks hit-testing and accessibility,
+      so it is AppKit's vertical NSSlider. Win32 has the minimum at the top and AppKit at the
+      bottom: the value is mirrored so the thumb stays where the app puts it. Ticks go on
+      the right, or the left with TBS_LEFT (TBS_BOTH: the right, a macOS slider has one side).
 
   - id: updown
     kind: control
