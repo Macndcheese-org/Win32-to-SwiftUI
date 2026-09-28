@@ -339,20 +339,28 @@ static BOOL wine_printer( const WCHAR *mac_name, WCHAR *name, DWORD size )
     return ok;
 }
 
-/* PWG paper names (what macOS reports) -> DMPAPER_* */
+/* PWG paper names (what macOS reports) and DMPAPER_* */
+static const struct { const WCHAR *name; short paper; } papers[] =
+{
+    { L"na-letter", DMPAPER_LETTER }, { L"na-legal", DMPAPER_LEGAL }, { L"na-ledger", DMPAPER_TABLOID },
+    { L"na-executive", DMPAPER_EXECUTIVE }, { L"iso-a3", DMPAPER_A3 }, { L"iso-a4", DMPAPER_A4 },
+    { L"iso-a5", DMPAPER_A5 }, { L"iso-b5", DMPAPER_B5 }, { L"jis-b5", DMPAPER_B5 },
+    { L"na-number-10", DMPAPER_ENV_10 }, { L"iso-dl", DMPAPER_ENV_DL }, { L"iso-c5", DMPAPER_ENV_C5 },
+};
+
 static short paper_size( const WCHAR *pwg )
 {
-    static const struct { const WCHAR *name; short paper; } papers[] =
-    {
-        { L"na-letter", DMPAPER_LETTER }, { L"na-legal", DMPAPER_LEGAL }, { L"na-ledger", DMPAPER_TABLOID },
-        { L"na-executive", DMPAPER_EXECUTIVE }, { L"iso-a3", DMPAPER_A3 }, { L"iso-a4", DMPAPER_A4 },
-        { L"iso-a5", DMPAPER_A5 }, { L"iso-b5", DMPAPER_B5 }, { L"jis-b5", DMPAPER_B5 },
-        { L"na-number-10", DMPAPER_ENV_10 }, { L"iso-dl", DMPAPER_ENV_DL }, { L"iso-c5", DMPAPER_ENV_C5 },
-    };
     unsigned int i;
     for (i = 0; i < ARRAYSIZE(papers); i++)
         if (!_wcsnicmp( pwg, papers[i].name, wcslen( papers[i].name ) )) return papers[i].paper;
     return 0;
+}
+
+static const WCHAR *paper_pwg( short paper )
+{
+    unsigned int i;
+    for (i = 0; i < ARRAYSIZE(papers); i++) if (papers[i].paper == paper) return papers[i].name;
+    return NULL;
 }
 
 static BOOL set_devnames( HGLOBAL *handle, const WCHAR *driver, const WCHAR *device, const WCHAR *port )
@@ -446,18 +454,43 @@ static BOOL set_devmode( struct print_job *job, const WCHAR *name, const char *r
     return ok;
 }
 
+/* the printer a panel chose into the app's hDevMode and hDevNames */
+static BOOL store_printer( struct print_job *job, const WCHAR *name, const char *result, BOOL copies_in_devmode )
+{
+    PRINTER_INFO_2W *info;
+    DRIVER_INFO_3W *driver = NULL;
+    HANDLE printer;
+    DWORD needed = 0;
+    BOOL ok = FALSE;
+
+    if (!(info = printer_info( name ))) return FALSE;
+    if (OpenPrinterW( (WCHAR *)name, &printer, NULL ))
+    {
+        GetPrinterDriverW( printer, NULL, 3, NULL, 0, &needed );
+        if (needed && (driver = HeapAlloc( GetProcessHeap(), 0, needed )) &&
+            !GetPrinterDriverW( printer, NULL, 3, (BYTE *)driver, needed, &needed ))
+        {
+            HeapFree( GetProcessHeap(), 0, driver );
+            driver = NULL;
+        }
+        ClosePrinter( printer );
+        ok = driver && set_devmode( job, name, result, copies_in_devmode ) &&
+             set_devnames( job->devnames, driver->pDriverPath, info->pPrinterName, info->pPortName );
+    }
+    if (driver) HeapFree( GetProcessHeap(), 0, driver );
+    HeapFree( GetProcessHeap(), 0, info );
+    return ok;
+}
+
 /* shows the panel; FALSE: declined (no owner window to put the sheet on, no
  * printer), wine's dialog takes over. *printed: the user chose Print. */
 static BOOL run_print_panel( struct print_job *job, DWORD in_flags, BOOL *printed )
 {
     WCHAR name[256], chosen[256], *mac_name;
     PRINTER_INFO_2W *info;
-    DRIVER_INFO_3W *driver = NULL;
-    HANDLE printer;
     DEVMODEW *dm;
     struct json j;
     char *result;
-    DWORD needed = 0;
     BOOL copies_in_devmode = (in_flags & PD_USEDEVMODECOPIESANDCOLLATE) != 0, landscape = FALSE, ok;
 
     *printed = FALSE;
@@ -526,20 +559,7 @@ static BOOL run_print_panel( struct print_job *job, DWORD in_flags, BOOL *printe
         }
     }
 
-    ok = FALSE;
-    if ((info = printer_info( name )) && OpenPrinterW( name, &printer, NULL ))
-    {
-        GetPrinterDriverW( printer, NULL, 3, NULL, 0, &needed );
-        if (needed && (driver = HeapAlloc( GetProcessHeap(), 0, needed )) &&
-            !GetPrinterDriverW( printer, NULL, 3, (BYTE *)driver, needed, &needed ))
-        {
-            HeapFree( GetProcessHeap(), 0, driver );
-            driver = NULL;
-        }
-        ClosePrinter( printer );
-        ok = driver && set_devmode( job, name, result, copies_in_devmode ) &&
-             set_devnames( job->devnames, driver->pDriverPath, info->pPrinterName, info->pPortName );
-    }
+    ok = store_printer( job, name, result, copies_in_devmode );
     if (ok && copies_in_devmode) job->copies = 1;   /* the driver makes them */
     if (ok && (in_flags & (PD_RETURNDC | PD_RETURNIC)))
     {
@@ -553,8 +573,6 @@ static BOOL run_print_panel( struct print_job *job, DWORD in_flags, BOOL *printe
         GlobalUnlock( *job->devmode );
         GlobalUnlock( *job->devnames );
     }
-    if (driver) HeapFree( GetProcessHeap(), 0, driver );
-    if (info) HeapFree( GetProcessHeap(), 0, info );
     HeapFree( GetProcessHeap(), 0, result );
     *printed = ok;
     return TRUE;
@@ -644,5 +662,101 @@ BOOL WINAPI W2SPrintDlgEx( PRINTDLGEXW *pd, HRESULT *hr )
         }
         if (pd->Flags & (PD_RETURNDC | PD_RETURNIC)) pd->hDC = job.dc;
     }
+    return TRUE;
+}
+
+/* ---------- PageSetupDlg ---------- */
+
+/***********************************************************************
+ *      W2SPageSetupDlg  (win32swiftui.@)
+ *
+ * The macOS Page Setup sheet (NSPageLayout): the printer to format for, the
+ * paper size and the orientation, into hDevMode, hDevNames and ptPaperSize.
+ * It has no margins: the app's stay as they are (1 inch when it gave none,
+ * where wine's dialog starts). comdlg32 calls it with the printer and the
+ * units filled in. Hooks, templates and the PSD_DISABLE* flags keep wine's
+ * dialog: the sheet can't honour them.
+ */
+BOOL WINAPI W2SPageSetupDlg( PAGESETUPDLGW *psd, BOOL *ret )
+{
+    struct print_job job = { 0 };
+    WCHAR name[256], chosen[256], *mac_name;
+    const WCHAR *pwg = NULL;
+    PRINTER_INFO_2W *info;
+    DEVMODEW *dm;
+    struct json j;
+    char *result;
+    double width = 0, height = 0, per_point;
+    BOOL landscape = FALSE, ok;
+
+    if (!psd || psd->lStructSize != sizeof(*psd)) return FALSE;
+    if (psd->Flags & (PSD_RETURNDEFAULT | PSD_ENABLEPAGESETUPHOOK | PSD_ENABLEPAGEPAINTHOOK | PSD_ENABLEPAGESETUPTEMPLATE |
+                      PSD_ENABLEPAGESETUPTEMPLATEHANDLE | PSD_DISABLEPRINTER | PSD_DISABLEORIENTATION | PSD_DISABLEPAPER))
+        return FALSE;
+    job.owner = psd->hwndOwner;
+    job.devmode = &psd->hDevMode;
+    job.devnames = &psd->hDevNames;
+    if (!job.owner || !IsWindowVisible( GetAncestor( job.owner, GA_ROOT ) )) return FALSE;
+    if (!initial_printer( &job, name, ARRAYSIZE(name) ) || !(info = printer_info( name ))) return FALSE;
+
+    job.copies = 1;
+    if (*job.devmode && (dm = GlobalLock( *job.devmode )))
+    {
+        if (dm->dmFields & DM_ORIENTATION) landscape = dm->dmOrientation == DMORIENT_LANDSCAPE;
+        if (dm->dmFields & DM_PAPERSIZE) pwg = paper_pwg( dm->dmPaperSize );
+        /* Page Setup leaves the copies as they are */
+        if (dm->dmFields & DM_COPIES) job.copies = dm->dmCopies;
+        if ((dm->dmFields & DM_COLLATE) && dm->dmCollate == DMCOLLATE_TRUE) job.flags |= PD_COLLATE;
+        GlobalUnlock( *job.devmode );
+    }
+
+    json_init( &j );
+    json_obj_begin( &j );
+    json_str( &j, "printer", info->pComment && info->pComment[0] ? info->pComment : info->pPrinterName );
+    if (pwg) json_str( &j, "paper", pwg );
+    json_bool( &j, "landscape", landscape );
+    json_obj_end( &j );
+    HeapFree( GetProcessHeap(), 0, info );
+
+    ok = w2s_run_request( "pagesetup", job.owner, j.buf, &result );
+    json_free( &j );
+    if (!ok) return FALSE;
+    if (result_flag( result, "declined" ))
+    {
+        HeapFree( GetProcessHeap(), 0, result );
+        return FALSE;
+    }
+    *ret = FALSE;
+    if (result_flag( result, "ok" ))
+    {
+        if ((mac_name = json_get_str( result, "printer" )))
+        {
+            if (wine_printer( mac_name, chosen, ARRAYSIZE(chosen) )) lstrcpyW( name, chosen );
+            HeapFree( GetProcessHeap(), 0, mac_name );
+        }
+        if (store_printer( &job, name, result, TRUE ))
+        {
+            /* points -> the app's units, landscape across */
+            per_point = (psd->Flags & PSD_INHUNDREDTHSOFMILLIMETERS) ? 2540.0 / 72 : 1000.0 / 72;
+            json_get_num( result, "paperWidth", &width );
+            json_get_num( result, "paperHeight", &height );
+            if (result_flag( result, "landscape" ) == (width < height))
+            {
+                double t = width;
+                width = height;
+                height = t;
+            }
+            psd->ptPaperSize.x = (LONG)(width * per_point + 0.5);
+            psd->ptPaperSize.y = (LONG)(height * per_point + 0.5);
+            if (!(psd->Flags & PSD_MARGINS))
+            {
+                LONG inch = (psd->Flags & PSD_INHUNDREDTHSOFMILLIMETERS) ? 2540 : 1000;
+                SetRect( &psd->rtMargin, inch, inch, inch, inch );
+            }
+            *ret = TRUE;
+        }
+    }
+    HeapFree( GetProcessHeap(), 0, result );
+    TRACE( "PageSetupDlg -> %d, paper %ldx%ld\n", *ret, psd->ptPaperSize.x, psd->ptPaperSize.y );
     return TRUE;
 }

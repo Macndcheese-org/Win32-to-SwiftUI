@@ -1,5 +1,5 @@
 // Whole dialogs as macOS panels (map: messagebox, taskdialog, filedialog.*,
-// colordialog, fontdialog, printdialog, shellabout). Never an AppKit modal session: a
+// colordialog, fontdialog, printdialog, pagesetup, shellabout). Never an AppKit modal session: a
 // sheet on the owner, or the panel's own window; the Win32 thread provides the
 // modality.
 import AppKit
@@ -22,6 +22,7 @@ enum Requests {
         case "color": colorPanel(params, request: request)
         case "font": fontPanel(params, request: request)
         case "print": printPanel(params, owner: sheetOwner, request: request)
+        case "pagesetup": pageLayout(params, owner: sheetOwner, request: request)
         case "about": aboutPanel(params, request: request)
         default: finish(request, ["error": "unknown request \(kind)"])
         }

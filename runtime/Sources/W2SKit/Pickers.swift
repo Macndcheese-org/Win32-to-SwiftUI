@@ -198,6 +198,59 @@ extension Requests {
         @objc func printPanelDidEnd(_ panel: NSPrintPanel, returnCode: Int, contextInfo: UnsafeMutableRawPointer?) {
             done(returnCode == NSApplication.ModalResponse.OK.rawValue)
         }
+        @objc func pageLayoutDidEnd(_ layout: NSPageLayout, returnCode: Int, contextInfo: UnsafeMutableRawPointer?) {
+            done(returnCode == NSApplication.ModalResponse.OK.rawValue)
+        }
+    }
+
+    // MARK: PageSetupDlg -> NSPageLayout (map: pagesetup)
+
+    /// The macOS Page Setup sheet: the printer to format for, paper size and
+    /// orientation. A sheet or nothing: the PE side then shows wine's dialog.
+    static func pageLayout(_ params: [String: Any], owner: NSWindow?, request: Request) {
+        guard let owner = owner, owner.attachedSheet == nil else {
+            finish(request, ["declined": true])
+            return
+        }
+        let info = (NSPrintInfo.shared.copy() as? NSPrintInfo) ?? NSPrintInfo()
+        if let name = params["printer"] as? String, let printer = NSPrinter(name: name) { info.printer = printer }
+        if let paper = params["paper"] as? String, !paper.isEmpty { info.paperName = NSPrinter.PaperName(paper) }
+        info.orientation = params["landscape"] as? Bool == true ? .landscape : .portrait
+
+        let layout = NSPageLayout()
+        var done = false
+        var keep: ObjectIdentifier?
+        func result() -> [String: Any] {
+            ["printer": info.printer.name, "landscape": info.orientation == .landscape,
+             "paper": info.paperName?.rawValue ?? "",
+             "paperWidth": Double(info.paperSize.width), "paperHeight": Double(info.paperSize.height)]
+        }
+        func close(_ ok: Bool) {
+            guard !done else { return }
+            done = true
+            var out = result()
+            out["ok"] = ok
+            finish(request, out)
+            if let keep = keep { retained.removeValue(forKey: keep) }
+        }
+        let target = PrintTarget { ok in close(ok) }
+        request.inject = { event in
+            // tests: {"t":"pagesetup","landscape":bool} or {"t":"cancel"}
+            guard let e = event as? [String: Any] else { return }
+            if e["t"] as? String == "pagesetup" {
+                if let landscape = e["landscape"] as? Bool { info.orientation = landscape ? .landscape : .portrait }
+                close(true)
+            } else {
+                close(false)
+            }
+            if let sheet = owner.attachedSheet { owner.endSheet(sheet) }
+        }
+        request.query = { result() }
+        // the sheet doesn't keep its delegate
+        keep = ObjectIdentifier(target)
+        retained[ObjectIdentifier(target)] = [target, layout, info] as NSArray
+        layout.beginSheet(with: info, modalFor: owner, delegate: target,
+                          didEnd: #selector(PrintTarget.pageLayoutDidEnd(_:returnCode:contextInfo:)), contextInfo: nil)
     }
 
     static func printPanel(_ params: [String: Any], owner: NSWindow?, request: Request) {

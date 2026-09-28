@@ -1237,6 +1237,51 @@ static void selftest_look(void)
     check( query_has( ctl[ID_WHITECHECK], "\"checked\":0" ), "BM_SETCHECK -> the white page's native check box" );
 }
 
+/* PageSetupDlg as the macOS Page Setup sheet */
+static BOOL pagesetup_native_ok;
+
+static void CALLBACK pagesetup_landscape( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    KillTimer( hwnd, id );
+    pagesetup_native_ok = query_has( NULL, "\"landscape\":false" );
+    inject( NULL, "{\"t\":\"pagesetup\",\"landscape\":true}" );
+}
+
+static void selftest_pagesetup(void)
+{
+    PAGESETUPDLGW psd = { sizeof(psd) };
+    DWORD needed = 0, count = 0;
+    DEVMODEW *dm;
+    BOOL ret, landscape = FALSE;
+
+    EnumPrintersW( PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS, NULL, 2, NULL, 0, &needed, &count );
+    if (!needed)
+    {
+        printf( "      no printer in this wine prefix: the page setup checks are skipped\n" );
+        return;
+    }
+    psd.hwndOwner = main_window;
+    psd.Flags = PSD_INHUNDREDTHSOFMILLIMETERS;
+    SetTimer( main_window, 32, 1200, pagesetup_landscape );
+    ret = PageSetupDlgW( &psd );
+    if (psd.hDevMode && (dm = GlobalLock( psd.hDevMode )))
+    {
+        landscape = (dm->dmFields & DM_ORIENTATION) && dm->dmOrientation == DMORIENT_LANDSCAPE;
+        GlobalUnlock( psd.hDevMode );
+    }
+    printf( "      page setup returned %d: paper %ldx%ld, margins %ld\n", ret, psd.ptPaperSize.x, psd.ptPaperSize.y,
+            psd.rtMargin.left );
+    check( ret && pagesetup_native_ok && landscape && psd.hDevNames && psd.ptPaperSize.x > psd.ptPaperSize.y &&
+           psd.ptPaperSize.y > 10000 && psd.rtMargin.left == 2540,
+           "PageSetupDlg -> the macOS Page Setup sheet: landscape into hDevMode, ptPaperSize across in 1/100 mm, "
+           "1 inch margins when the app gives none" );
+    SetTimer( main_window, 32, 1200, panel_cancel );
+    ret = PageSetupDlgW( &psd );
+    check( !ret, "Cancel on the Page Setup sheet -> FALSE" );
+    if (psd.hDevMode) GlobalFree( psd.hDevMode );
+    if (psd.hDevNames) GlobalFree( psd.hDevNames );
+}
+
 /* ITaskbarList3 progress on the Dock icon */
 static BOOL dock_has( const char *needle )
 {
@@ -2136,6 +2181,7 @@ static int selftest(void)
     }
 
     selftest_pickers();
+    selftest_pagesetup();
     selftest_about();
     selftest_taskbar();
     selftest_flash();

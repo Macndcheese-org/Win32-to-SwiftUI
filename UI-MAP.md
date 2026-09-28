@@ -1507,7 +1507,7 @@ let layout = NSPageLayout()
 layout.beginSheet(with: NSPrintInfo.shared, modalFor: window, delegate: nil, didEnd: nil, contextInfo: nil)
 ```
 
-macOS Page Setup has paper size, orientation and scale but no margins; the app's margins are passed through unchanged.
+macOS Page Setup (a sheet on the owner) has the printer to format for, paper size, orientation and scale, but no margins: the app's margins are passed through unchanged (1 inch when it gives none, where wine's dialog starts). The choice goes into hDevMode and hDevNames as the print panel's does, and ptPaperSize in the app's units, across in landscape. Without an owner window, and with hooks, templates or PSD_DISABLEPRINTER/ORIENTATION/PAPER (the sheet can't disable its parts), wine's dialog runs. PageSetupDlgA isn't offered yet.
 
 ### Find / Replace
 <a id="findreplace"></a>`findreplace` · SwiftUI · Liquid Glass: automatic on 26+
