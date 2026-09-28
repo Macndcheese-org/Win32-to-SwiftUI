@@ -46,17 +46,23 @@ struct HelpText: ViewModifier {
 }
 
 /// Win32 text uses '&' for access keys; macOS has none. "&&" is a literal '&'.
+/// A title's trailing "..." (more input follows) is macOS's ellipsis
+/// character, as the HIG writes it ("Font…").
 func stripMnemonic(_ text: String, keep: Bool = false) -> String {
-    if keep { return text }
     var out = ""
-    var chars = text.makeIterator()
-    while let c = chars.next() {
-        if c == "&" {
-            if let n = chars.next() { out.append(n) }
-        } else {
-            out.append(c)
+    if keep {
+        out = text
+    } else {
+        var chars = text.makeIterator()
+        while let c = chars.next() {
+            if c == "&" {
+                if let n = chars.next() { out.append(n) }
+            } else {
+                out.append(c)
+            }
         }
     }
+    if out.hasSuffix("...") && !out.hasSuffix("....") { out = String(out.dropLast(3)) + "…" }
     return out
 }
 
@@ -180,8 +186,9 @@ struct ControlRoot: View {
         case "tab":
             TabStrip(model: model)
         case "updown":
-            Stepper("", onIncrement: { model.emit(["t": "step", "v": 1]) },
-                    onDecrement: { model.emit(["t": "step", "v": -1]) })
+            // Shift-click steps by 10, as the HIG asks of macOS steppers
+            Stepper("", onIncrement: { model.emit(["t": "step", "v": NSEvent.modifierFlags.contains(.shift) ? 10 : 1]) },
+                    onDecrement: { model.emit(["t": "step", "v": NSEvent.modifierFlags.contains(.shift) ? -10 : -1]) })
                 .labelsHidden()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case "datetime":

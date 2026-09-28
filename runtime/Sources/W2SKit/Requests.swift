@@ -652,6 +652,7 @@ enum Debug {
             out["imageCount"] = host.model.images.count
             out["imageSymbols"] = Dictionary(uniqueKeysWithValues: host.model.imageSymbols.map { (String($0.key), $0.value) })
             out["entry"] = host.entry
+            out["label"] = stripMnemonic(snap.display ?? snap.text ?? "", keep: snap.noPrefix ?? false)
             if host.entry == "trackbar.vertical", let slider = host.hosting.flatMap({ Requests.first(NSSlider.self, in: $0) }) {
                 out["sliderVertical"] = slider.isVertical
                 out["sliderValue"] = slider.doubleValue

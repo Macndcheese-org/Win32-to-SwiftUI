@@ -1518,12 +1518,18 @@ static void updown_apply( struct w2s_control *ctl, const struct w2s_event *ev )
     RECT rc;
     LPARAM pt;
 
+    int count;
+
     if (strcmp( ev->type, "step" ) || !ev->has_value) return;
     GetClientRect( ctl->hwnd, &rc );
     if (style & UDS_HORZ) pt = MAKELPARAM( up ? rc.right * 3 / 4 : rc.right / 4, rc.bottom / 2 );
     else pt = MAKELPARAM( rc.right / 2, up ? rc.bottom / 4 : rc.bottom * 3 / 4 );
-    SendMessageW( ctl->hwnd, WM_LBUTTONDOWN, MK_LBUTTON, pt );
-    SendMessageW( ctl->hwnd, WM_LBUTTONUP, 0, pt );
+    /* a click per step (Shift-click is 10, as macOS steppers do): the app sees its usual steps */
+    for (count = min( abs( (int)ev->value ), 100 ); count > 0; count--)
+    {
+        SendMessageW( ctl->hwnd, WM_LBUTTONDOWN, MK_LBUTTON, pt );
+        SendMessageW( ctl->hwnd, WM_LBUTTONUP, 0, pt );
+    }
 }
 
 static const struct w2s_kind kind_updown = { "updown", updown_snapshot, updown_apply };

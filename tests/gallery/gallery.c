@@ -1811,6 +1811,11 @@ static void selftest2(void)
     GetWindowTextW( ctl[ID_UDEDIT], text, ARRAYSIZE(text) );
     check( SendMessageW( ctl[ID_UPDOWN], UDM_GETPOS32, 0, 0 ) == 43 && !wcscmp( text, L"43" ) &&
            got_deltapos > 0 && got_vscroll > 0, "native step -> UDN_DELTAPOS, position 43, buddy text, WM_VSCROLL" );
+    check( query_has( ctl[ID_FONT], "\"label\":\"Font\u2026\"" ) || query_has( ctl[ID_FONT], "\"label\":\"Font\xe2\x80\xa6\"" ),
+           "a button's trailing \"...\" shows as macOS's ellipsis: Font\u2026" );
+    inject( ctl[ID_UPDOWN], "{\"t\":\"step\",\"v\":-10}" );
+    pump( 200 );
+    check( SendMessageW( ctl[ID_UPDOWN], UDM_GETPOS32, 0, 0 ) == 33, "a Shift-click step (10) -> position 33, as ten steps" );
 
     /* date and time picker */
     {
