@@ -37,8 +37,8 @@ enum
     ID_TASKDLG, ID_FOLDER, ID_COLOR, ID_FONT, ID_PRINT, ID_ITEMDLG, ID_PROPSHEET, ID_WIZARD,
     /* light and dark */
     ID_WHITEPANEL, ID_WHITECHECK,
-    /* toolbars, ComboBoxEx */
-    ID_TOOLBAR, ID_CBEX,
+    /* toolbars, ComboBoxEx, links */
+    ID_TOOLBAR, ID_CBEX, ID_LINK,
     ID_LAST
 };
 
@@ -46,6 +46,8 @@ static HWND ctl[ID_LAST];
 static HWND main_window;
 static int got_command[ID_LAST][16];   /* [id][notification code & 15] */
 static int got_tb_command[4], got_tb_dropdown;  /* the gallery toolbar's buttons 9101..9104 */
+static int got_link_click = -1;                 /* NM_CLICK's link index */
+static WCHAR got_link_id[MAX_LINKID_TEXT];
 static int got_hscroll, got_tabchange, got_lvchanged, got_dropdown, got_status_click = -1;
 static int got_menu_new, got_initmenupopup, status_bar_checked = 1;
 static int got_expanding, got_treesel, got_deltapos, got_vscroll, got_datechange, got_mcselchange, got_mcselect;
@@ -464,6 +466,19 @@ static void create_controls2(void)
     }
     make( L"Static", NULL, SS_ETCHEDFRAME, 724, 112, 120, 60, ID_FRAME );
     {
+        /* SysLink only exists in v6 */
+        INITCOMMONCONTROLSEX link = { sizeof(link), ICC_LINK_CLASS };
+        ULONG_PTR cookie;
+
+        if (v6_begin( &cookie ))
+        {
+            InitCommonControlsEx( &link );
+            make( WC_LINK, L"Read the <a href=\"https://www.winehq.org\" id=\"site\">Wine site</a> or the <a id=\"help\">help</a>.",
+                  WS_TABSTOP, 408, 600, 300, 20, ID_LINK );
+            v6_end( cookie );
+        }
+    }
+    {
         HWND panel = make( L"W2SWhitePanel", NULL, 0, 16, 580, 376, 56, ID_WHITEPANEL );
         ctl[ID_WHITECHECK] = CreateWindowExW( 0, L"Button", L"A check box on a page the app paints white",
                                               WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX, 12, 18, 340, 20,
@@ -849,6 +864,11 @@ static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     {
         NMHDR *hdr = (NMHDR *)lparam;
         if (hdr->hwndFrom == ctl[ID_TAB] && hdr->code == TCN_SELCHANGE) got_tabchange++;
+        if (hdr->hwndFrom == ctl[ID_LINK] && hdr->code == NM_CLICK)
+        {
+            got_link_click = ((NMLINK *)hdr)->item.iLink;
+            lstrcpyW( got_link_id, ((NMLINK *)hdr)->item.szID );
+        }
         if (hdr->hwndFrom == ctl[ID_TOOLBAR] && hdr->code == TBN_DROPDOWN)
         {
             got_tb_dropdown++;
@@ -1477,6 +1497,13 @@ static void selftest2(void)
         GetWindowTextW( edit, text, ARRAYSIZE(text) );
         check( !wcscmp( text, L"Consolas" ) && query_has( cbex, "\"text\":\"Consolas\"" ), "native typing goes into its edit" );
     }
+
+    /* SysLink: its markup as real links; a click -> NM_CLICK with the link */
+    check( pIsTranslated( ctl[ID_LINK] ) && query_has( ctl[ID_LINK], "\"links\":[\"Wine site\",\"help\"]" ),
+           "a SysLink's text and links reach the native view" );
+    inject( ctl[ID_LINK], "{\"t\":\"link\",\"v\":1}" );
+    pump( 200 );
+    check( got_link_click == 1 && !wcscmp( got_link_id, L"help" ), "a native link click -> NM_CLICK with the link's index and id" );
 
     /* up-down with its buddy edit */
     SendMessageW( ctl[ID_UPDOWN], UDM_SETPOS32, 0, 42 );

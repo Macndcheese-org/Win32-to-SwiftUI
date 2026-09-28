@@ -560,6 +560,11 @@ enum Debug {
             out["imageCount"] = host.model.images.count
             out["imageSymbols"] = Dictionary(uniqueKeysWithValues: host.model.imageSymbols.map { (String($0.key), $0.value) })
             out["entry"] = host.entry
+            if host.entry == "syslink" {
+                // the runs the native text shows as links, in order
+                let text = LinkText.attributed(snap.text ?? "")
+                out["links"] = text.runs.compactMap { $0.link == nil ? nil : String(text[$0.range].characters) }
+            }
             out["attached"] = host.hosting?.superview != nil || host.owned != nil
             out["os"] = W2S.osVersion.major
             W2S.lock.lock()

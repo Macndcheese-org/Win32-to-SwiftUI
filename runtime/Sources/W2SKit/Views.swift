@@ -12,7 +12,7 @@ enum ControlViews {
     // map: updown datetime monthcal tooltip (as .help on every control: HelpText)
     // map: listview.checkboxes listview.icon
     // map: propsheet propsheet.wizard (modes of the sheet's tab control: WindowSidebar, WizardSteps)
-    // map: toolbar rebar comboboxex
+    // map: toolbar rebar comboboxex syslink
     static let entries: Set<String> = [
         "button.push", "button.default", "button.checkbox", "button.pushlike", "button.radio", "button.groupbox",
         "button.3state", "button.split", "button.commandlink",
@@ -21,7 +21,7 @@ enum ControlViews {
         "combobox.dropdownlist", "listbox.single", "listbox.multi", "listview.list", "listview.report",
         "progress", "trackbar", "tab", "static.frame", "statusbar", "edit.multiline", "combobox.editable",
         "treeview", "updown", "datetime", "monthcal", "listview.checkboxes", "listview.icon",
-        "toolbar", "rebar", "comboboxex",
+        "toolbar", "rebar", "comboboxex", "syslink",
     ]
 
     static func supports(_ entry: String) -> Bool { entries.contains(entry) }
@@ -130,6 +130,8 @@ struct ControlRoot: View {
             StaticFrame(fill: snap.fill ?? "none")
         case "statusbar":
             StatusBar(model: model, scale: metrics.scale)
+        case "syslink":
+            LinkText(model: model, markup: snap.text ?? "", enabled: snap.enabled ?? true)
         case "toolbar":
             ToolbarBar(model: model, scale: metrics.scale)
         case "rebar":
@@ -1527,6 +1529,61 @@ struct StatusBar: View {
                 .gesture(TapGesture(count: 2).onEnded { model.emit(["t": "dblclick", "v": index]) }
                     .exclusively(before: TapGesture().onEnded { model.emit(["t": "click", "v": index]) }))
         }
+    }
+}
+
+// MARK: - links (map: syslink)
+
+/// SysLink's text with its <a href="..." id="...">markup</a> as real links. A
+/// click tells Win32 which link (NM_CLICK there), and the app opens it itself.
+struct LinkText: View {
+    @ObservedObject var model: ControlModel
+    let markup: String
+    let enabled: Bool
+
+    var body: some View {
+        Text(LinkText.attributed(markup))
+            .foregroundColor(enabled ? .primary : .secondary)
+            .disabled(!enabled)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .environment(\.openURL, OpenURLAction { url in
+                if url.scheme == "w2slink", let index = Int(url.host ?? "") { model.emit(["t": "link", "v": index]) }
+                return .handled
+            })
+    }
+
+    /// Text runs, and each <a ...>...</a> as a link run to w2slink://<its index>.
+    static func attributed(_ markup: String) -> AttributedString {
+        var out = AttributedString()
+        var rest = Substring(markup)
+        var index = 0
+        while let open = linkTag(in: rest) {
+            out += AttributedString(String(rest[..<open.lowerBound]))
+            guard let tagEnd = rest[open.upperBound...].firstIndex(of: ">"),
+                  let close = rest[tagEnd...].range(of: "</a>", options: .caseInsensitive) else {
+                rest = rest[open.lowerBound...]
+                break
+            }
+            var link = AttributedString(String(rest[rest.index(after: tagEnd)..<close.lowerBound]))
+            link.link = URL(string: "w2slink://\(index)")
+            out += link
+            index += 1
+            rest = rest[close.upperBound...]
+        }
+        out += AttributedString(String(rest))
+        return out
+    }
+
+    /// The next "<a" that opens a link tag ("<a>" or "<a " ...), as comctl32 reads it.
+    private static func linkTag(in text: Substring) -> Range<Substring.Index>? {
+        var from = text.startIndex
+        while let open = text[from...].range(of: "<a", options: .caseInsensitive) {
+            if open.upperBound < text.endIndex, text[open.upperBound] == ">" || text[open.upperBound].isWhitespace {
+                return open
+            }
+            from = open.upperBound
+        }
+        return nil
     }
 }
 

@@ -142,6 +142,10 @@ static void nothing_apply( struct w2s_control *ctl, const struct w2s_event *ev )
 {
 }
 
+static void nothing_snapshot( struct w2s_control *ctl, struct json *j )
+{
+}
+
 /* BS_SPLITBUTTON: the arrow half raises BCN_DROPDOWN; the app answers with its
  * own TrackPopupMenu (a native menu too, see menu.popup) */
 static void split_snapshot( struct w2s_control *ctl, struct json *j )
@@ -892,6 +896,34 @@ static void comboex_apply( struct w2s_control *ctl, const struct w2s_event *ev )
 
 static const struct w2s_kind kind_comboboxex =
     { "comboboxex", comboex_snapshot, comboex_apply, NULL, NULL, NULL, NULL, NULL, W2S_OWN_TEXT };
+
+/* ---------- SysLink (map: syslink) ---------- */
+
+/* The text keeps its <a href="..." id="...">markup</a> (WM_GETTEXT is the
+ * window text): the native view makes links of it. A native click on link n
+ * tells the parent what comctl32 tells it (NM_CLICK with the link's id and
+ * URL), so the app opens the link itself, as on Windows. */
+static void syslink_apply( struct w2s_control *ctl, const struct w2s_event *ev )
+{
+    NMLINK nml;
+    LITEM item;
+
+    if (strcmp( ev->type, "link" ) || !ev->has_value) return;
+    memset( &item, 0, sizeof(item) );
+    item.mask = LIF_ITEMINDEX | LIF_ITEMID | LIF_URL;
+    item.iLink = (int)ev->value;
+    if (!SendMessageW( ctl->hwnd, LM_GETITEM, 0, (LPARAM)&item )) return;
+    memset( &nml, 0, sizeof(nml) );
+    nml.hdr.hwndFrom = ctl->hwnd;
+    nml.hdr.idFrom = GetWindowLongPtrW( ctl->hwnd, GWLP_ID );
+    nml.hdr.code = NM_CLICK;
+    nml.item.iLink = item.iLink;
+    lstrcpyW( nml.item.szID, item.szID );
+    lstrcpyW( nml.item.szUrl, item.szUrl );
+    SendMessageW( GetParent( ctl->hwnd ), WM_NOTIFY, nml.hdr.idFrom, (LPARAM)&nml );
+}
+
+static const struct w2s_kind kind_syslink = { "syslink", nothing_snapshot, syslink_apply };
 
 /* ---------- ListBox ---------- */
 
@@ -2462,6 +2494,7 @@ const struct w2s_kind *w2s_select_kind( HWND hwnd )
         }
     }
     if (is_class( name, STATUSCLASSNAMEW )) return &kind_statusbar;
+    if (is_class( name, WC_LINK )) return &kind_syslink;
     if (is_class( name, TOOLBARCLASSNAMEW )) return (style & CCS_VERT) ? NULL : &kind_toolbar;
     if (is_class( name, REBARCLASSNAMEW )) return (style & CCS_VERT) ? NULL : &kind_rebar;
     if (is_class( name, UPDOWN_CLASSW )) return &kind_updown;
