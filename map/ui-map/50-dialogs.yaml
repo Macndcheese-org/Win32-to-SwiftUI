@@ -304,6 +304,15 @@ entries:
             .applicationIcon: image,
           ])
     glass: automatic
+    notes: >-
+      The standard About panel shows what a Mac app's does: the program's name (the title
+      part of "title#line"; the line joins the credits), its version and copyright from its
+      version resource (as a Mac app's come from Info.plist) and the caller's text as
+      credits. No Windows or wine version: a Mac app's About panel doesn't name the OS. The
+      icon is the caller's, else the program's own, else macOS's generic application icon.
+      ShellAbout returns when the panel closes, as the dialog does. A program that calls it
+      before making any window (winver, msinfo32) keeps wine's dialog: win32swiftui.dll is
+      loaded with the first window.
 
   - id: rundialog
     kind: dialog
