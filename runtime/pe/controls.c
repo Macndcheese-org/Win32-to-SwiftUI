@@ -221,7 +221,7 @@ static void static_separator_snapshot( struct w2s_control *ctl, struct json *j )
 }
 
 /* icon/bitmap -> 32bpp BGRA, base64 */
-static void json_base64( struct json *j, const char *key, const BYTE *data, size_t n )
+void json_base64( struct json *j, const char *key, const BYTE *data, size_t n )
 {
     static const char tab[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     char *out = HeapAlloc( GetProcessHeap(), 0, (n + 2) / 3 * 4 + 1 ), *o = out;

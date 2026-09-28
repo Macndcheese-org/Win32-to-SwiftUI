@@ -27,7 +27,7 @@ x86_64-w64-mingw32-gcc -O2 -Wall -Wno-unused-parameter -shared -D_WIN32_WINNT=0x
   runtime/pe/win32swiftui.def \
   -Wl,--file-alignment=4096 -static-libgcc \
   "$WINE_BUILD/libs/winecrt0/x86_64-windows/libwinecrt0.a" "$WINE_BUILD/dlls/ntdll/x86_64-windows/libntdll.a" \
-  -luser32 -lgdi32 -lcomctl32 -luxtheme -lwinspool -lkernel32
+  -luser32 -lgdi32 -lcomctl32 -luxtheme -lwinspool -lversion -lkernel32
 "$WINE_BUILD/tools/winebuild/winebuild" --builtin $OUT/x86_64-windows/win32swiftui.dll
 
 # 32-bit apps (installers) run under WoW64: an i386 PE over the same unix
@@ -45,7 +45,7 @@ if [[ -f "$WINE_BUILD/libs/winecrt0/i386-windows/libwinecrt0.a" ]] && whence i68
     runtime/pe/win32swiftui.def \
     -Wl,--file-alignment=4096 -Wl,--enable-stdcall-fixup -static-libgcc \
     "$WINE_BUILD/libs/winecrt0/i386-windows/libwinecrt0.a" "$WINE_BUILD/dlls/ntdll/i386-windows/libntdll.a" \
-    -luser32 -lgdi32 -lcomctl32 -luxtheme -lwinspool -lkernel32
+    -luser32 -lgdi32 -lcomctl32 -luxtheme -lwinspool -lversion -lkernel32
   "$WINE_BUILD/tools/winebuild/winebuild" --builtin $OUT/i386-windows/win32swiftui.dll
 else
   echo "=== win32swiftui.dll (i386 PE): SKIPPED, no i686-w64-mingw32-gcc or no WoW64 wine build"
@@ -58,11 +58,13 @@ install_name_tool -id @rpath/win32swiftui.so $OUT/win32swiftui.so
 codesign -f -s - $OUT/win32swiftui.so 2>/dev/null
 
 echo "=== gallery.exe"
-x86_64-w64-mingw32-gcc -O2 -Wall -municode -mwindows -o $OUT/gallery.exe tests/gallery/gallery.c \
+x86_64-w64-mingw32-windres tests/gallery/gallery.rc -O coff -o $OUT/gallery-res.o
+x86_64-w64-mingw32-gcc -O2 -Wall -municode -mwindows -o $OUT/gallery.exe tests/gallery/gallery.c $OUT/gallery-res.o \
   -lcomctl32 -lcomdlg32 -lshell32 -lole32 -luuid -lwinspool -lgdi32 -luser32
 if (( I386 )); then
   echo "=== gallery32.exe (the same self-test from a 32-bit app)"
-  i686-w64-mingw32-gcc -O2 -Wall -municode -mwindows -o $OUT/gallery32.exe tests/gallery/gallery.c \
+  i686-w64-mingw32-windres tests/gallery/gallery.rc -O coff -o $OUT/gallery32-res.o
+  i686-w64-mingw32-gcc -O2 -Wall -municode -mwindows -o $OUT/gallery32.exe tests/gallery/gallery.c $OUT/gallery32-res.o \
     -lcomctl32 -lcomdlg32 -lshell32 -lole32 -luuid -lwinspool -lgdi32 -luser32
 fi
 

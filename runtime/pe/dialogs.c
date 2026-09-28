@@ -331,6 +331,152 @@ BOOL WINAPI W2SMessageBox( const MSGBOXPARAMSW *params, INT *ret )
     return TRUE;
 }
 
+/* ---------- ShellAbout ---------- */
+
+/* a string of the program's version resource, in its first language */
+static WCHAR *version_string( void *info, const WCHAR *name )
+{
+    struct { WORD lang, codepage; } *trans;
+    WCHAR path[80], *value;
+    UINT len;
+
+    if (!VerQueryValueW( info, L"\\VarFileInfo\\Translation", (void **)&trans, &len ) || len < sizeof(*trans))
+        return NULL;
+    wsprintfW( path, L"\\StringFileInfo\\%04x%04x\\%s", trans->lang, trans->codepage, name );
+    if (!VerQueryValueW( info, path, (void **)&value, &len ) || !len || !value[0]) return NULL;
+    return value;
+}
+
+/* the icon as the About panel shows it: a stock icon's macOS image, else its
+ * pixels, at the panel's size when it comes from a resource that has it */
+static void json_about_icon( struct json *j, HICON icon )
+{
+    enum { SIZE = 128 };   /* 64 points on a Retina screen */
+    ICONINFOEXW info = { sizeof(info) };
+    HICON large = NULL;
+    const char *spec;
+    BITMAP bm;
+    BYTE *bits;
+    int w = 0, h = 0;
+
+    if (GetIconInfoExW( icon, &info ))
+    {
+        HMODULE module = info.szModName[0] ? GetModuleHandleW( info.szModName ) : NULL;
+        const WCHAR *res = info.wResID ? MAKEINTRESOURCEW( info.wResID ) : info.szResName[0] ? info.szResName : NULL;
+
+        if (info.hbmColor && GetObjectW( info.hbmColor, sizeof(bm), &bm )) { w = bm.bmWidth; h = bm.bmHeight; }
+        else if (info.hbmMask && GetObjectW( info.hbmMask, sizeof(bm), &bm )) { w = bm.bmWidth; h = bm.bmHeight / 2; }
+        if (info.hbmColor) DeleteObject( info.hbmColor );
+        if (info.hbmMask) DeleteObject( info.hbmMask );
+        if (module && res && w < SIZE && (large = LoadImageW( module, res, IMAGE_ICON, SIZE, SIZE, 0 )))
+            w = h = SIZE;
+    }
+    if (w <= 0 || h <= 0 || w > 512 || h > 512) return;
+    if (!(bits = w2s_image_bgra( large ? large : icon, NULL, w, h ))) goto done;
+    if ((spec = w2s_stock_icon( icon, bits, w, h, NULL ))) json_str_a( j, "iconSymbol", spec );
+    else
+    {
+        json_int( j, "iconWidth", w );
+        json_int( j, "iconHeight", h );
+        json_base64( j, "iconBGRA", bits, (size_t)w * h * 4 );
+    }
+    HeapFree( GetProcessHeap(), 0, bits );
+done:
+    if (large) DestroyIcon( large );
+}
+
+static BOOL CALLBACK first_icon_group( HMODULE module, const WCHAR *type, WCHAR *name, LONG_PTR param )
+{
+    *(HICON *)param = LoadImageW( module, name, IMAGE_ICON, 128, 128, 0 );
+    return FALSE;
+}
+
+/* the program's own icon, as Finder and the Dock show it */
+static HICON program_icon(void)
+{
+    HICON icon = NULL;
+
+    EnumResourceNamesW( GetModuleHandleW( NULL ), (const WCHAR *)RT_GROUP_ICON, first_icon_group, (LONG_PTR)&icon );
+    return icon;
+}
+
+/***********************************************************************
+ *      W2SShellAbout  (win32swiftui.@)
+ *
+ * ShellAbout as the standard macOS About panel: the program's name and icon,
+ * its version and copyright (from its version resource, as a Mac app's come
+ * from its Info.plist) and the caller's text as credits. It returns when the
+ * panel closes, as wine's dialog does. ShellAboutA goes through ShellAboutW.
+ */
+BOOL WINAPI W2SShellAbout( HWND owner, const WCHAR *app, const WCHAR *other, HICON icon, BOOL *ret )
+{
+    WCHAR module[MAX_PATH], *name = NULL, *hash, *credits;
+    const WCHAR *line = NULL, *value;
+    void *info = NULL;
+    DWORD size, handle;
+    HICON own;
+    struct json j;
+    char *result;
+    size_t len;
+
+    /* "title#first line": the title is the program's name */
+    if (app && (name = HeapAlloc( GetProcessHeap(), 0, (wcslen( app ) + 1) * sizeof(WCHAR) )))
+    {
+        wcscpy( name, app );
+        if ((hash = wcschr( name, '#' )))
+        {
+            *hash = 0;
+            if (hash[1] && wcscmp( hash + 1, name )) line = hash + 1;
+        }
+    }
+    len = (line ? wcslen( line ) + 2 : 0) + (other ? wcslen( other ) : 0) + 1;
+    if (!(credits = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) )))
+    {
+        HeapFree( GetProcessHeap(), 0, name );
+        return FALSE;
+    }
+    credits[0] = 0;
+    if (line) wcscat( wcscat( credits, line ), other && other[0] ? L"\n" : L"" );
+    if (other) wcscat( credits, other );
+
+    if (GetModuleFileNameW( NULL, module, MAX_PATH ) && (size = GetFileVersionInfoSizeW( module, &handle )) &&
+        (info = HeapAlloc( GetProcessHeap(), 0, size )) && !GetFileVersionInfoW( module, 0, size, info ))
+    {
+        HeapFree( GetProcessHeap(), 0, info );
+        info = NULL;
+    }
+
+    json_init( &j );
+    json_obj_begin( &j );
+    json_str( &j, "name", name ? name : L"" );
+    json_str( &j, "credits", credits );
+    if (info && ((value = version_string( info, L"ProductVersion" )) || (value = version_string( info, L"FileVersion" ))))
+        json_str( &j, "version", value );
+    if (info && (value = version_string( info, L"LegalCopyright" ))) json_str( &j, "copyright", value );
+    if (icon) json_about_icon( &j, icon );
+    else if ((own = program_icon()))
+    {
+        json_about_icon( &j, own );
+        DestroyIcon( own );
+    }
+    /* no icon at all: macOS's generic application icon */
+    else json_str_a( &j, "iconSymbol", "uttype:com.apple.application-bundle" );
+    json_obj_end( &j );
+    HeapFree( GetProcessHeap(), 0, info );
+    HeapFree( GetProcessHeap(), 0, credits );
+    HeapFree( GetProcessHeap(), 0, name );
+
+    if (!w2s_run_request( "about", owner, j.buf, &result ))
+    {
+        json_free( &j );
+        return FALSE;
+    }
+    json_free( &j );
+    HeapFree( GetProcessHeap(), 0, result );
+    *ret = TRUE;
+    return TRUE;
+}
+
 /* ---------- GetOpenFileName / GetSaveFileName ---------- */
 
 static void json_unix_path( struct json *j, const char *key, const WCHAR *path )

@@ -358,6 +358,7 @@ final class Request {
     var inject: ((Any) -> Void)?            // main thread: tests drive the open panel/alert
     var update: (([String: Any]) -> Void)?  // main thread: the Win32 side changes the open panel
     var query: (() -> [String: Any])?       // main thread: tests read the open panel
+    weak var window: NSWindow?              // main thread: the panel's own window (tests capture it)
     init(id: UInt64) { self.id = id }
 
     /// Tell the Win32 thread waiting on this panel that something happened.

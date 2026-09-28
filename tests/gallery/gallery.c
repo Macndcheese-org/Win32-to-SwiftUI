@@ -16,6 +16,7 @@
 #include <commctrl.h>
 #include <commdlg.h>
 #include <shlobj.h>
+#include <shellapi.h>
 #include <shobjidl.h>
 #include <winspool.h>
 #include <stdio.h>
@@ -1227,6 +1228,30 @@ static void selftest_look(void)
     check( query_has( ctl[ID_WHITECHECK], "\"checked\":0" ), "BM_SETCHECK -> the white page's native check box" );
 }
 
+/* ShellAbout as the standard About panel */
+static BOOL about_native_ok;
+
+static void CALLBACK about_close( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    KillTimer( hwnd, id );
+    about_native_ok = query_has( NULL, "\"visible\":true" ) && query_has( NULL, "\"Gallery\"" ) &&
+                      query_has( NULL, "Win32-to-SwiftUI gallery\\nEvery control the runtime translates." ) &&
+                      query_has( NULL, "1.2.3" ) && query_has( NULL, "\"Copyright 2026 MacNdCheese\"" ) &&
+                      query_has( NULL, "\"icon\":\"uttype:com.apple.application-bundle\"" );
+    inject( NULL, "{\"t\":\"close\"}" );
+}
+
+static void selftest_about(void)
+{
+    BOOL ret;
+
+    SetTimer( main_window, 30, 1000, about_close );
+    ret = ShellAboutW( main_window, L"Gallery#Win32-to-SwiftUI gallery", L"Every control the runtime translates.", NULL );
+    check( ret && about_native_ok,
+           "ShellAbout -> the About panel: the program's name, version and copyright, the caller's text, "
+           "the generic app icon for a program without one; it returns once closed" );
+}
+
 /* ChooseColor, ChooseFont and PrintDlg as the macOS panels */
 static void selftest_pickers(void)
 {
@@ -2032,6 +2057,7 @@ static int selftest(void)
     }
 
     selftest_pickers();
+    selftest_about();
     selftest_look();
 
     printf( "%d passed, %d failed\n", passes, failures );
@@ -2046,6 +2072,15 @@ static void capture_window( HWND control, const char *dir, const char *name )
     snprintf( event, sizeof(event), "{\"t\":\"capture\",\"s\":\"%s/%s.png\"}", dir, name );
     inject( control, event );
     printf( "captured %s/%s.png\n", dir, name );
+}
+
+static const char *about_dir, *about_name;
+
+static void CALLBACK about_capture( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    KillTimer( hwnd, id );
+    capture_window( NULL, about_dir, about_name );
+    inject( NULL, "{\"t\":\"close\"}" );
 }
 
 static int capture( const WCHAR *args )
@@ -2082,6 +2117,21 @@ static int capture( const WCHAR *args )
     pump( 1500 );
     capture_window( (HWND)SendMessageW( sheet, PSM_GETTABCONTROL, 0, 0 ), dir, "wizard" );
     DestroyWindow( sheet );
+    about_dir = dir;
+    about_name = "about";
+    SetTimer( main_window, 31, 1500, about_capture );
+    ShellAboutW( main_window, L"Gallery#Win32-to-SwiftUI gallery", L"Every control the runtime translates.", NULL );
+    {
+        /* an app's own icon, as pixels */
+        HMODULE notepad = LoadLibraryExW( L"notepad.exe", NULL, LOAD_LIBRARY_AS_IMAGE_RESOURCE );
+        HICON icon = notepad ? LoadImageW( notepad, MAKEINTRESOURCEW( 0x300 ), IMAGE_ICON, 128, 128, 0 ) : NULL;
+
+        printf( "notepad icon: %p\n", icon );
+        about_name = "about-icon";
+        SetTimer( main_window, 31, 1500, about_capture );
+        ShellAboutW( main_window, L"Notepad", L"Wine Notepad", icon );
+        if (icon) DestroyIcon( icon );
+    }
     pump( 300 );
     return 0;
 }

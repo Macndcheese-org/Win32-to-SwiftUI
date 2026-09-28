@@ -1,5 +1,5 @@
 // Whole dialogs as macOS panels (map: messagebox, taskdialog, filedialog.*,
-// colordialog, fontdialog, printdialog). Never an AppKit modal session: a
+// colordialog, fontdialog, printdialog, shellabout). Never an AppKit modal session: a
 // sheet on the owner, or the panel's own window; the Win32 thread provides the
 // modality.
 import AppKit
@@ -22,8 +22,91 @@ enum Requests {
         case "color": colorPanel(params, request: request)
         case "font": fontPanel(params, request: request)
         case "print": printPanel(params, owner: sheetOwner, request: request)
+        case "about": aboutPanel(params, request: request)
         default: finish(request, ["error": "unknown request \(kind)"])
         }
+    }
+
+    /// Tests: draw a window (frame, toolbar, sidebar, wine's content) into a PNG:
+    /// works with the screen locked, unlike a window server capture.
+    static func capture(_ window: NSWindow?, to path: String?) -> String {
+        guard let path = path, let window = window,
+              let view = window.contentView?.superview ?? window.contentView,
+              let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
+        else { return "{\"error\":\"no window\"}" }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]),
+              (try? png.write(to: URL(fileURLWithPath: path))) != nil
+        else { return "{\"error\":\"can't write\"}" }
+        return "{\"ok\":true}"
+    }
+
+    // MARK: ShellAbout -> the standard About panel (map: shellabout)
+
+    /// AppKit keeps one About panel per application and shows it again.
+    static weak var aboutWindow: NSWindow?
+
+    static func aboutPanel(_ params: [String: Any], request: Request) {
+        let credits = params["credits"] as? String ?? ""
+        let centered = NSMutableParagraphStyle()
+        centered.alignment = .center
+        var options: [NSApplication.AboutPanelOptionKey: Any] = [
+            .applicationName: params["name"] as? String ?? "",
+            .applicationVersion: params["version"] as? String ?? "",
+            // a Windows program has no build number apart from its version
+            .version: "",
+            .credits: NSAttributedString(string: credits, attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                .foregroundColor: NSColor.labelColor,
+                .paragraphStyle: centered,
+            ]),
+            NSApplication.AboutPanelOptionKey(rawValue: "Copyright"): params["copyright"] as? String ?? "",
+        ]
+        // the program's icon (the PE side sends its own when the caller gives none)
+        var iconSource = "generic"
+        if let spec = params["iconSymbol"] as? String, let image = Icons.image(spec, size: NSSize(width: 64, height: 64)) {
+            options[.applicationIcon] = image
+            iconSource = spec
+        } else if let b64 = params["iconBGRA"] as? String,
+                  let image = bgraImage(b64, width: params["iconWidth"] as? Int ?? 0, height: params["iconHeight"] as? Int ?? 0) {
+            image.size = NSSize(width: 64, height: 64)
+            options[.applicationIcon] = image
+            iconSource = "pixels"
+        } else if let image = Icons.image("uttype:com.apple.application-bundle", size: NSSize(width: 64, height: 64)) {
+            // never AppKit's default: wine isn't a bundle, so that is its folder's icon
+            options[.applicationIcon] = image
+        }
+
+        let before = Set(NSApp.windows.map { ObjectIdentifier($0) })
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(options: options)
+        if aboutWindow == nil {
+            aboutWindow = NSApp.windows.first { !before.contains(ObjectIdentifier($0)) && $0.isVisible }
+        }
+        guard let panel = aboutWindow else {
+            finish(request, ["shown": false])
+            return
+        }
+        // it returns when the panel closes, as the dialog did
+        var observer: NSObjectProtocol?
+        observer = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: panel,
+                                                          queue: .main) { _ in
+            if let observer = observer { NotificationCenter.default.removeObserver(observer) }
+            finish(request, ["shown": true])
+        }
+        request.window = panel
+        request.inject = { _ in panel.close() }   // tests: {"t":"close"}
+        request.query = { ["visible": panel.isVisible, "texts": texts(in: panel.contentView), "icon": iconSource] }
+    }
+
+    /// The strings a window shows, in view order (tests).
+    static func texts(in view: NSView?) -> [String] {
+        guard let view = view else { return [] }
+        var out: [String] = []
+        if let field = view as? NSTextField, !field.stringValue.isEmpty { out.append(field.stringValue) }
+        if let text = view as? NSTextView, !text.string.isEmpty { out.append(text.string) }
+        for sub in view.subviews { out += texts(in: sub) }
+        return out
     }
 
     // MARK: message box -> NSAlert (map: messagebox)
@@ -640,23 +723,12 @@ enum Debug {
             }
             if handle == 0 || ["alertButton", "choose", "cancel", "press", "look", "popupChoose"].contains(event["t"] as? String ?? "") {
                 guard let request = Requests.latestOpen() else { return "{\"error\":\"no open request\"}" }
+                if event["t"] as? String == "capture" { return Requests.capture(request.window, to: event["s"] as? String) }
                 request.inject?(event)
                 return "{\"ok\":true}"
             }
             guard let host = W2S.control(handle) else { return "{\"error\":\"no control\"}" }
-            if event["t"] as? String == "capture" {
-                // tests: draw the control's window (frame, toolbar, sidebar, wine's content)
-                // into a PNG: works with the screen locked, unlike a window server capture
-                guard let path = event["s"] as? String, let window = host.hosting?.window,
-                      let view = window.contentView?.superview ?? window.contentView,
-                      let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
-                else { return "{\"error\":\"no window\"}" }
-                view.cacheDisplay(in: view.bounds, to: rep)
-                guard let png = rep.representation(using: .png, properties: [:]),
-                      (try? png.write(to: URL(fileURLWithPath: path))) != nil
-                else { return "{\"error\":\"can't write\"}" }
-                return "{\"ok\":true}"
-            }
+            if event["t"] as? String == "capture" { return Requests.capture(host.hosting?.window, to: event["s"] as? String) }
             if event["t"] as? String == "sidebarCollapse" {
                 // tests: collapse or expand the window sidebar (window chrome only,
                 // wine's content doesn't move, so nothing is reported to Win32)

@@ -85,6 +85,7 @@ WCHAR *wide_from_utf8( const char *s, int len );                   /* HeapAlloc'
 
 /* controls.c: an icon or bitmap as 32bpp premultiplied BGRA, top-down; HeapAlloc'd */
 BYTE *w2s_image_bgra( HICON icon, HBITMAP bitmap, int w, int h );
+void json_base64( struct json *j, const char *key, const BYTE *data, size_t n );
 
 /* icons.c: the macOS image (a spec for Icons.swift) for a stock icon, or NULL */
 const char *w2s_stock_icon( HICON icon, const BYTE *bits, int cx, int cy, HIMAGELIST himl );

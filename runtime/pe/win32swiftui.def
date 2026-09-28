@@ -15,3 +15,4 @@ EXPORTS
     W2SChooseFont
     W2SPrintDlg
     W2SPrintDlgEx
+    W2SShellAbout

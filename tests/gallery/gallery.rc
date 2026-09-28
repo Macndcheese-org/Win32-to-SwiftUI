@@ -1,0 +1,24 @@
+/* the gallery's version, as a program's About box shows it (ShellAbout) */
+#include <winver.h>
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION 1,2,3,0
+PRODUCTVERSION 1,2,3,0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+{
+    BLOCK "StringFileInfo"
+    {
+        BLOCK "040904b0"
+        {
+            VALUE "FileDescription", "Win32-to-SwiftUI gallery"
+            VALUE "FileVersion", "1.2.3.0"
+            VALUE "ProductVersion", "1.2.3"
+            VALUE "LegalCopyright", "Copyright 2026 MacNdCheese"
+        }
+    }
+    BLOCK "VarFileInfo"
+    {
+        VALUE "Translation", 0x409, 1200
+    }
+}
