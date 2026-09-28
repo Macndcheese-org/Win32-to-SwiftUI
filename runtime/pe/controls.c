@@ -583,8 +583,26 @@ struct ml_native
 struct ml_data
 {
     int caret_gen, scroll_gen, scroll_line;
+    int document;           /* what the last snapshot said: +1 a document's text, -1 not */
     struct ml_native nat;
 };
+
+/* a document's text (notepad's): the whole width of a top-level window that
+ * isn't a dialog. macOS draws those without a border, as TextEdit does. */
+static BOOL ml_is_document( HWND hwnd )
+{
+    HWND parent = GetParent( hwnd );
+    WCHAR cls[64] = { 0 };
+    RECT client, rect;
+
+    if (!parent || (GetWindowLongW( parent, GWL_STYLE ) & WS_CHILD)) return FALSE;
+    GetClassNameW( parent, cls, ARRAYSIZE(cls) );
+    if (!wcscmp( cls, L"#32770" )) return FALSE;
+    GetClientRect( parent, &client );
+    GetWindowRect( hwnd, &rect );
+    MapWindowPoints( NULL, parent, (POINT *)&rect, 2 );
+    return client.right > 0 && rect.left <= client.left && rect.right >= client.right;
+}
 
 static struct ml_data *ml_data( struct w2s_control *ctl )
 {
@@ -785,12 +803,21 @@ static void ml_snapshot( struct w2s_control *ctl, struct json *j )
     json_int( j, "caretGen", data->caret_gen );
     json_int( j, "scrollGen", data->scroll_gen );
     json_int( j, "scrollLine", data->scroll_line );
+    data->document = ml_is_document( ctl->hwnd ) ? 1 : -1;
+    json_bool( j, "document", data->document > 0 );
 }
 
 static void ml_observe( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM lparam )
 {
     struct ml_data *data;
 
+    if (msg == WM_WINDOWPOSCHANGED)
+    {
+        /* only when it becomes (or stops being) a document's text: a snapshot has all the text */
+        data = ml_data( ctl );
+        if (data->document && (ml_is_document( ctl->hwnd ) ? 1 : -1) != data->document) w2s_push( ctl, FALSE );
+        return;
+    }
     if (msg != EM_SCROLLCARET && msg != EM_LINESCROLL) return;
     data = ml_data( ctl );
     if (msg == EM_SCROLLCARET) data->caret_gen++;

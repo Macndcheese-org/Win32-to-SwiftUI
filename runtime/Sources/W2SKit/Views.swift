@@ -852,6 +852,9 @@ struct MultilineEdit: NSViewRepresentable {
         c.scale = scale
         guard let tv = c.textView, let container = tv.textContainer else { return }
         let snap = model.snap
+        // a document window's text has no border, as TextEdit's; a field in a form has one
+        let border: NSBorderType = snap.document == true ? .noBorder : .bezelBorder
+        if scroll.borderType != border { scroll.borderType = border }
         c.updating = true
         defer { c.updating = false }
 

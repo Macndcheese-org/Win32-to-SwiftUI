@@ -657,6 +657,9 @@ enum Debug {
                 out["sliderValue"] = slider.doubleValue
                 out["sliderTicks"] = slider.numberOfTickMarks
             }
+            if host.entry == "edit.multiline", let scroll = host.hosting.flatMap({ Requests.first(NSScrollView.self, in: $0) }) {
+                out["scrollBorder"] = Int(scroll.borderType.rawValue)
+            }
             if host.entry.hasPrefix("edit.") {
                 // a balloon tip's popover on screen
                 out["popoverShown"] = NSApp.windows.contains {

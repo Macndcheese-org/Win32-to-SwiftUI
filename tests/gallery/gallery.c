@@ -1252,6 +1252,36 @@ static void selftest_look(void)
     check( query_has( ctl[ID_WHITECHECK], "\"checked\":0" ), "BM_SETCHECK -> the white page's native check box" );
 }
 
+/* a document window's multi-line edit (notepad's) has no border, as TextEdit's */
+static void selftest_document(void)
+{
+    WNDCLASSW wc = { 0 };
+    HWND doc, edit;
+    RECT rc;
+
+    check( query_has( ctl[ID_MLEDIT], "\"document\":false" ) && query_has( ctl[ID_MLEDIT], "\"scrollBorder\":2" ),
+           "a multi-line edit in a form keeps its border" );
+    wc.lpfnWndProc = DefWindowProcW;
+    wc.hInstance = GetModuleHandleW( NULL );
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpszClassName = L"W2SDocument";
+    RegisterClassW( &wc );
+    doc = CreateWindowExW( 0, L"W2SDocument", L"Document", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 120, 120, 420, 300,
+                           NULL, NULL, GetModuleHandleW( NULL ), NULL );
+    GetClientRect( doc, &rc );
+    edit = CreateWindowExW( WS_EX_CLIENTEDGE, L"Edit", L"Some text", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE |
+                            ES_AUTOVSCROLL, 0, 0, rc.right, rc.bottom, doc, NULL, GetModuleHandleW( NULL ), NULL );
+    pump( 400 );
+    check( pIsTranslated( edit ) && query_has( edit, "\"document\":true" ) && query_has( edit, "\"scrollBorder\":0" ),
+           "a window's full-width multi-line edit is its document: no border" );
+    MoveWindow( edit, 12, 12, rc.right - 24, rc.bottom - 24, TRUE );
+    pump( 400 );
+    check( query_has( edit, "\"document\":false" ) && query_has( edit, "\"scrollBorder\":2" ),
+           "moved in from the window's edges, it has a border again" );
+    DestroyWindow( doc );
+    pump( 200 );
+}
+
 /* FindText and ReplaceText as AppKit's Find panel */
 static void selftest_find(void)
 {
@@ -2300,6 +2330,7 @@ static int selftest(void)
     selftest_pickers();
     selftest_pagesetup();
     selftest_find();
+    selftest_document();
     selftest_about();
     selftest_taskbar();
     selftest_flash();

@@ -56,6 +56,7 @@ struct Snapshot: Codable, Equatable {
         var serial: Int         // each EM_SHOWBALLOONTIP shows it again
     }
     var balloon: Balloon?
+    var document: Bool?         // multi-line edit: a document window's text, drawn without a border
     // toolbar
     struct ToolbarButton: Codable, Equatable {
         var i: Int

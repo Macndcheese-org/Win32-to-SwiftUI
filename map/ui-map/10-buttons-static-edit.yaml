@@ -366,6 +366,8 @@ entries:
       starts, and uses the average advance elsewhere. Each native edit reaches Win32 as
       EM_SETSEL + EM_REPLACESEL of the changed range, so EN_UPDATE/EN_CHANGE happen as for
       typing; line breaks are "\n" natively and CRLF in Win32.
+      A document window's text (the full width of a top-level window that isn't a dialog,
+      as notepad's) has no border, as TextEdit's; a field in a form keeps its bezel.
 
   - id: edit.balloon
     kind: control
