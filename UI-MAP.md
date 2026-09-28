@@ -843,7 +843,7 @@ TabView(selection: $choice) {
 }
 ```
 
-A real NSTabView (SwiftUI's TabView on macOS, HIG Tab views): the tabs straddle the top (TCS_BOTTOM: bottom) edge of its box. A Win32 tab control is only the strip and the pane frame; the page is a set of sibling windows the app shows and hides on TCN_SELCHANGE, drawn by wine under this view. The box's fill is translucent, so the page shows through it, and the tab control answers TCM_ADJUSTRECT with the box's insets (10, 33, 10, 13 points), so wine and the apps that ask put the page in it. Only the tabs take clicks. A property sheet with more than 5 pages gets the window's sidebar instead (propsheet).
+A real NSTabView (SwiftUI's TabView on macOS, HIG Tab views): the tabs straddle the top (TCS_BOTTOM: bottom) edge of its box. A Win32 tab control is only the strip and the pane frame; the page is a set of sibling windows the app shows and hides on TCN_SELCHANGE, drawn by wine under this view. The box's fill is translucent, so the page shows through it, and the tab control answers TCM_ADJUSTRECT with the box's insets (3, 23, 3, 7 points: SwiftUI's TabView fills the control with its box), so wine and the apps that ask put the page in it. The TabView is made again once it has its place in the window: made before, its tab bar comes out squeezed into one segment. Only the tabs take clicks. A property sheet with more than 5 pages gets the window's sidebar instead (propsheet).
 
 ### Toolbar
 <a id="toolbar"></a>`toolbar` · SwiftUI · Liquid Glass: explicit glass API

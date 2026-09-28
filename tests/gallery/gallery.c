@@ -366,7 +366,7 @@ static void create_controls2(void)
     }
     /* a toolbar with comctl32's standard images, a check button and a drop-down */
     make( TOOLBARCLASSNAMEW, NULL, TBSTYLE_FLAT | TBSTYLE_TOOLTIPS | CCS_NOPARENTALIGN | CCS_NORESIZE | CCS_NODIVIDER,
-          724, 500, 360, 28, ID_TOOLBAR );
+          724, 500, 180, 28, ID_TOOLBAR );
     {
         TBBUTTON b[5];
         memset( b, 0, sizeof(b) );
@@ -381,7 +381,7 @@ static void create_controls2(void)
         SendMessageW( ctl[ID_TOOLBAR], TB_ADDBUTTONSW, 5, (LPARAM)b );
     }
     /* a ComboBoxEx, as wordpad's font list */
-    make( WC_COMBOBOXEXW, NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 724, 540, 200, 150, ID_CBEX );
+    make( WC_COMBOBOXEXW, NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 916, 500, 180, 150, ID_CBEX );
     {
         static const WCHAR *fonts[] = { L"Arial", L"Courier New", L"Times New Roman" };
         COMBOBOXEXITEMW item;
@@ -1754,6 +1754,7 @@ static int selftest(void)
     inject( ctl[ID_TAB], "{\"t\":\"select\",\"v\":1}" );
     pump( 200 );
     check( SendMessageW( ctl[ID_TAB], TCM_GETCURSEL, 0, 0 ) == 1 && got_tabchange > 0, "native tab -> TCN_SELCHANGE" );
+    check( query_int( ctl[ID_TAB], "tabBarWidth" ) >= 120, "the tab bar has room for its three tabs (not one squeezed segment)" );
 
     selftest2();
 
@@ -1841,8 +1842,8 @@ static int selftest(void)
             RECT tab_rc, page_rc;
             GetWindowRect( tab, &tab_rc );
             GetWindowRect( page, &page_rc );
-            check( page_rc.left - tab_rc.left == 10 && page_rc.top - tab_rc.top == 33 && tab_rc.bottom - page_rc.bottom == 13,
-                   "wine puts the page in the NSTabView's box (TCM_ADJUSTRECT)" );
+            check( page_rc.left - tab_rc.left == 3 && page_rc.top - tab_rc.top == 23 && tab_rc.bottom - page_rc.bottom == 7,
+                   "wine puts the page in the tab view's box (TCM_ADJUSTRECT)" );
         }
         DestroyWindow( sheet );
         pump( 200 );

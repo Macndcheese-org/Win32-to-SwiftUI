@@ -569,6 +569,15 @@ enum Debug {
             W2S.lock.unlock()
             if let v = snap.rows { out["rowCount"] = v.count }
             if let v = snap.columns { out["columns"] = v.filter { ($0.width ?? 1) > 0 }.map { $0.title } }
+            if host.entry == "tab", let hosting = host.hosting {
+                // the tab bar's width as AppKit laid it out (a squeezed bar is one segment wide)
+                func bar(_ v: NSView) -> NSSegmentedControl? {
+                    if let s = v as? NSSegmentedControl { return s }
+                    for sub in v.subviews { if let s = bar(sub) { return s } }
+                    return nil
+                }
+                if let s = bar(hosting) { out["tabBarWidth"] = Int(s.frame.width) }
+            }
             if host.entry == "tab", let attach = host.owned as? WindowSidebarAttach {
                 out["windowSidebar"] = attach.controller != nil
                 out["sidebarCollapsed"] = attach.collapsed() ?? false

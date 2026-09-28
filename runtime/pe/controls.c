@@ -1593,10 +1593,11 @@ static BOOL tab_answer( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM
     }
     if (!data->window)
     {
-        /* a real NSTabView: the page goes in its box, below (or above, TCS_BOTTOM)
-         * the tabs straddling its edge. Its insets as AppKit lays them out; being
-         * a few points off only moves the page under the translucent box. */
-        static const RECT insets = { 10, 33, 10, 13 };
+        /* SwiftUI's TabView (an NSTabView): the page goes in its box, below (or
+         * above, TCS_BOTTOM) the tabs straddling its edge. The box fills the
+         * control; these are its content's insets as SwiftUI lays it out. Being a
+         * few points off only moves the page under the translucent box. */
+        static const RECT insets = { 3, 23, 3, 7 };
         BOOL bottom = (GetWindowLongW( ctl->hwnd, GWL_STYLE ) & TCS_BOTTOM) != 0;
         int top = bottom ? insets.bottom : insets.top, low = bottom ? insets.top : insets.bottom;
 
