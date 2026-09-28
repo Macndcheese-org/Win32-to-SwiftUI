@@ -577,7 +577,41 @@ struct EditField: View {
             if now { model.emit(["t": "focus"]) }
         }
         .onChange(of: model.focusRequest) { _ in focused = true }
+        // a balloon tip: a popover on the field, gone once the user types, as the balloon
+        .popover(isPresented: $balloonShown, arrowEdge: .bottom) { BalloonTip(balloon: shownBalloon) }
+        .onChange(of: model.snap.balloon) { balloon in
+            if let balloon = balloon { shownBalloon = balloon }
+            balloonShown = balloon != nil
+        }
+        .onChange(of: model.snap.text) { _ in balloonShown = false }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @State private var balloonShown = false
+    @State private var shownBalloon = Snapshot.Balloon(title: "", text: "", icon: "none", serial: 0)
+}
+
+/// EM_SHOWBALLOONTIP's content: its icon as the SF Symbol with that meaning,
+/// the title in bold, the text.
+struct BalloonTip: View {
+    let balloon: Snapshot.Balloon
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            switch balloon.icon {
+            case "info": Image(systemName: "info.circle.fill").foregroundColor(.blue)
+            case "warning": Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.yellow)
+            case "error": Image(systemName: "xmark.octagon.fill").foregroundColor(.red)
+            default: EmptyView()
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                if !balloon.title.isEmpty { Text(balloon.title).bold() }
+                if !balloon.text.isEmpty { Text(balloon.text).fixedSize(horizontal: false, vertical: true) }
+            }
+        }
+        .font(.callout)
+        .padding(10)
+        .frame(maxWidth: 280, alignment: .leading)
     }
 }
 

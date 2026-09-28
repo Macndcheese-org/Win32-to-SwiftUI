@@ -657,6 +657,12 @@ enum Debug {
                 out["sliderValue"] = slider.doubleValue
                 out["sliderTicks"] = slider.numberOfTickMarks
             }
+            if host.entry.hasPrefix("edit.") {
+                // a balloon tip's popover on screen
+                out["popoverShown"] = NSApp.windows.contains {
+                    String(describing: type(of: $0)).contains("Popover") && $0.isVisible
+                }
+            }
             if host.entry == "syslink" {
                 // the runs the native text shows as links, in order
                 let text = LinkText.attributed(snap.text ?? "")

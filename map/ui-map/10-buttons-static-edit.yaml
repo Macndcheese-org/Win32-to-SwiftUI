@@ -280,6 +280,7 @@ entries:
         code: "TextField(title, text: $text, prompt: Text(note)).textFieldStyle(.roundedBorder).labelsHidden()"
     glass: automatic
     state_in: [WM_SETTEXT, EM_SETSEL, EM_REPLACESEL, EM_SETREADONLY, EM_SETLIMITTEXT, EM_SETCUEBANNER, EM_SETPASSWORDCHAR, EM_UNDO]
+    answers: [EM_SHOWBALLOONTIP, EM_HIDEBALLOONTIP]
     events_out: {edit: WM_COMMAND/EN_UPDATE then EN_CHANGE, focus: EN_SETFOCUS/EN_KILLFOCUS, limit: EN_MAXTEXT}
     notes: >-
       The cue banner (EM_SETCUEBANNER) is the prompt. The Win32 edit stays authoritative:
@@ -296,6 +297,7 @@ entries:
         code: "SecureField(title, text: $text, prompt: Text(note)).textFieldStyle(.roundedBorder).labelsHidden()"
     glass: automatic
     state_in: [WM_SETTEXT, EM_SETPASSWORDCHAR]
+    answers: [EM_SHOWBALLOONTIP, EM_HIDEBALLOONTIP]
     events_out: {edit: WM_COMMAND/EN_CHANGE}
 
   - id: edit.number
@@ -308,6 +310,7 @@ entries:
         code: "TextField(title, value: $intValue, format: .number.grouping(.never)).textFieldStyle(.roundedBorder).labelsHidden()"
     glass: automatic
     state_in: [WM_SETTEXT]
+    answers: [EM_SHOWBALLOONTIP, EM_HIDEBALLOONTIP]
     events_out: {edit: WM_COMMAND/EN_CHANGE}
     notes: ES_NUMBER accepts digits only (no sign, no grouping), hence .grouping(.never).
 
@@ -376,10 +379,13 @@ entries:
             VStack(alignment: .leading) { Text(title).font(.headline); Text(note) }.padding()
           }
     glass: automatic
-    state_in: [EM_SHOWBALLOONTIP, EM_HIDEBALLOONTIP]
     notes: >-
       Balloon tips (for example "Caps Lock is on") are popovers anchored to the field. On
-      macOS 26 popovers are Liquid Glass automatically.
+      macOS 26 popovers are Liquid Glass automatically. wine's edit control has no balloon
+      tips at all; the single-line edits (edit.single, .password, .number) answer
+      EM_SHOWBALLOONTIP and EM_HIDEBALLOONTIP themselves. The icon is an SF Symbol (info,
+      warning, error); the popover closes when the user types or clicks elsewhere, as the
+      balloon does.
 
 flags:
   # Button

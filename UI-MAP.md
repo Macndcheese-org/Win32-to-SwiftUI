@@ -475,7 +475,6 @@ Apps query the caret, selection and line layout synchronously (EM_GETSEL, EM_LIN
 <a id="editballoon"></a>`edit.balloon` · SwiftUI · Liquid Glass: automatic on 26+
 
 - Windows: `Edit`
-- Windows → view: EM_SHOWBALLOONTIP, EM_HIDEBALLOONTIP
 
 **SwiftUI, macOS 12+**
 
@@ -485,7 +484,7 @@ TextField(title, text: $text).popover(isPresented: $isPresented) {
 }
 ```
 
-Balloon tips (for example "Caps Lock is on") are popovers anchored to the field. On macOS 26 popovers are Liquid Glass automatically.
+Balloon tips (for example "Caps Lock is on") are popovers anchored to the field. On macOS 26 popovers are Liquid Glass automatically. wine's edit control has no balloon tips at all; the single-line edits (edit.single, .password, .number) answer EM_SHOWBALLOONTIP and EM_HIDEBALLOONTIP themselves. The icon is an SF Symbol (info, warning, error); the popover closes when the user types or clicks elsewhere, as the balloon does.
 
 ### List box (single selection)
 <a id="listboxsingle"></a>`listbox.single` · SwiftUI · Liquid Glass: automatic on 26+

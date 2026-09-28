@@ -424,9 +424,64 @@ static void edit_apply( struct w2s_control *ctl, const struct w2s_event *ev )
     if (!strcmp( ev->type, "text" ) && ev->string) replace_text( ctl->hwnd, ev->string );
 }
 
-static const struct w2s_kind kind_edit_single = { "edit.single", edit_snapshot, edit_apply };
-static const struct w2s_kind kind_edit_password = { "edit.password", edit_snapshot, edit_apply };
-static const struct w2s_kind kind_edit_number = { "edit.number", edit_snapshot, edit_apply };
+/* EM_SHOWBALLOONTIP (map: edit.balloon): wine's edit has none; the native
+ * field shows it as a popover. ctl->data holds it while it shows. */
+struct edit_balloon
+{
+    WCHAR title[100];
+    WCHAR text[1024];
+    INT icon;
+    UINT serial;            /* each EM_SHOWBALLOONTIP shows it again */
+};
+
+static BOOL edit_answer( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM lparam, LRESULT *ret )
+{
+    static UINT serial;
+    const EDITBALLOONTIP *tip = (const EDITBALLOONTIP *)lparam;
+    struct edit_balloon *b;
+
+    if (msg == EM_HIDEBALLOONTIP)
+    {
+        HeapFree( GetProcessHeap(), 0, ctl->data );
+        ctl->data = NULL;
+        w2s_push( ctl, TRUE );
+        *ret = TRUE;
+        return TRUE;
+    }
+    if (msg != EM_SHOWBALLOONTIP) return FALSE;
+    *ret = FALSE;
+    if (!tip || tip->cbStruct < sizeof(*tip)) return TRUE;
+    if (!ctl->data) ctl->data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*b) );
+    if (!(b = ctl->data)) return TRUE;
+    lstrcpynW( b->title, tip->pszTitle ? tip->pszTitle : L"", ARRAYSIZE(b->title) );
+    lstrcpynW( b->text, tip->pszText ? tip->pszText : L"", ARRAYSIZE(b->text) );
+    b->icon = tip->ttiIcon;
+    b->serial = ++serial;
+    w2s_push( ctl, TRUE );
+    *ret = TRUE;
+    return TRUE;
+}
+
+static void edit_field_snapshot( struct w2s_control *ctl, struct json *j )
+{
+    struct edit_balloon *b = ctl->data;
+
+    edit_snapshot( ctl, j );
+    if (!b) return;
+    json_key_obj_begin( j, "balloon" );
+    json_str( j, "title", b->title );
+    json_str( j, "text", b->text );
+    /* TTI_INFO, TTI_WARNING, TTI_ERROR and their _LARGE forms */
+    json_str_a( j, "icon", b->icon == TTI_INFO || b->icon == TTI_INFO_LARGE ? "info"
+                         : b->icon == TTI_WARNING || b->icon == TTI_WARNING_LARGE ? "warning"
+                         : b->icon == TTI_ERROR || b->icon == TTI_ERROR_LARGE ? "error" : "none" );
+    json_int( j, "serial", b->serial );
+    json_obj_end( j );
+}
+
+static const struct w2s_kind kind_edit_single = { "edit.single", edit_field_snapshot, edit_apply, edit_answer };
+static const struct w2s_kind kind_edit_password = { "edit.password", edit_field_snapshot, edit_apply, edit_answer };
+static const struct w2s_kind kind_edit_number = { "edit.number", edit_field_snapshot, edit_apply, edit_answer };
 static const struct w2s_kind kind_edit_readonly = { "edit.readonly", edit_snapshot, nothing_apply };
 
 /* ---------- multi-line Edit ---------- */

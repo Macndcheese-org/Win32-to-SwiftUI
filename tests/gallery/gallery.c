@@ -1727,6 +1727,24 @@ static void selftest2(void)
         check( !wcscmp( text, L"Consolas" ) && query_has( cbex, "\"text\":\"Consolas\"" ), "native typing goes into its edit" );
     }
 
+    /* EM_SHOWBALLOONTIP (wine's edit has none): a popover on the native field */
+    {
+        EDITBALLOONTIP tip = { sizeof(tip), L"Caps Lock is on", L"Having Caps Lock on may cause you to enter your "
+                               L"password incorrectly.", TTI_WARNING };
+        LRESULT shown = SendMessageW( ctl[ID_PASSWORD], EM_SHOWBALLOONTIP, 0, (LPARAM)&tip );
+
+        pump( 300 );
+        check( shown && query_has( ctl[ID_PASSWORD], "\"title\":\"Caps Lock is on\"" ) &&
+               query_has( ctl[ID_PASSWORD], "\"icon\":\"warning\"" ) &&
+               query_has( ctl[ID_PASSWORD], "\"popoverShown\":true" ),
+               "EM_SHOWBALLOONTIP -> TRUE and a popover on the native field" );
+        shown = SendMessageW( ctl[ID_PASSWORD], EM_HIDEBALLOONTIP, 0, 0 );
+        pump( 400 );
+        check( shown && query_lacks( ctl[ID_PASSWORD], "\"balloon\"" ) &&
+               query_has( ctl[ID_PASSWORD], "\"popoverShown\":false" ),
+               "EM_HIDEBALLOONTIP -> the popover goes" );
+    }
+
     /* vertical trackbar: a vertical NSSlider, mirrored (Win32's minimum is at the top) */
     check( pIsTranslated( ctl[ID_VTRACK] ) && query_has( ctl[ID_VTRACK], "\"sliderVertical\":true" ) &&
            query_has( ctl[ID_VTRACK], "\"sliderValue\":8" ) && query_has( ctl[ID_VTRACK], "\"sliderTicks\":11" ),

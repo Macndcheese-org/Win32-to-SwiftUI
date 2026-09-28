@@ -48,6 +48,14 @@ struct Snapshot: Codable, Equatable {
     var imageBGRA: String?
     var imageSymbol: String?    // a stock icon: the macOS image's spec (Icons.swift) instead of imageBGRA
     var titleAbove: Bool?       // group box: room for its title above the box
+    // single-line edit: EM_SHOWBALLOONTIP while it shows (map: edit.balloon)
+    struct Balloon: Codable, Equatable {
+        var title: String
+        var text: String
+        var icon: String        // none, info, warning, error
+        var serial: Int         // each EM_SHOWBALLOONTIP shows it again
+    }
+    var balloon: Balloon?
     // toolbar
     struct ToolbarButton: Codable, Equatable {
         var i: Int
