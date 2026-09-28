@@ -1247,6 +1247,19 @@ static BOOL dock_has( const char *needle )
     return ok;
 }
 
+/* FlashWindowEx: a Dock bounce (winemac). Nothing to read back: this only goes
+ * through the calls (WINEDEBUG=trace+macdrv shows them arrive) */
+static void selftest_flash(void)
+{
+    FLASHWINFO info = { sizeof(info), main_window, FLASHW_ALL | FLASHW_TIMERNOFG, 0, 0 };
+
+    FlashWindowEx( &info );
+    info.dwFlags = FLASHW_STOP;
+    FlashWindowEx( &info );
+    FlashWindow( main_window, TRUE );
+    printf( "      FlashWindowEx / FlashWindow called (a Dock bounce, not readable here)\n" );
+}
+
 static void selftest_taskbar(void)
 {
     ITaskbarList3 *list;
@@ -2125,6 +2138,7 @@ static int selftest(void)
     selftest_pickers();
     selftest_about();
     selftest_taskbar();
+    selftest_flash();
     selftest_look();
 
     printf( "%d passed, %d failed\n", passes, failures );

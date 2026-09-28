@@ -1763,7 +1763,7 @@ let request = NSApp.requestUserAttention(.informationalRequest)
 NSApp.cancelUserAttentionRequest(request)
 ```
 
-New: winemac has no FlashWindowEx today. A flash becomes a Dock bounce; with FLASHW_TIMER it bounces until the app is activated (criticalRequest).
+winemac's FlashWindowEx (MNC; wine's had none): a flash of the taskbar button (FLASHW_TRAY) bounces the Dock icon once (informationalRequest); FLASHW_TIMER and FLASHW_TIMERNOFG keep it bouncing until the app is activated (criticalRequest); FLASHW_STOP cancels. A caption-only flash has no Mac equivalent. macOS ignores the request while the app is active.
 
 ### Message beep
 <a id="beep"></a>`beep` · AppKit · Liquid Glass: —
