@@ -1307,6 +1307,33 @@ static void selftest_find(void)
     check( got_find_term == 1 && q && strstr( q, "no open request" ),
            "the app destroying its dialog closes the panel, without FR_DIALOGTERM" );
     pFree( q );
+
+    /* an ANSI app: its strings in its code page, both ways */
+    {
+        static char what_a[64] = "caf\xe9";      /* café in 1252 */
+        static FINDREPLACEA fra;
+
+        if (GetACP() != 1252) printf( "      code page %u: the ANSI text checks only see the calls\n", GetACP() );
+
+        memset( &fra, 0, sizeof(fra) );
+        fra.lStructSize = sizeof(fra);
+        fra.hwndOwner = main_window;
+        fra.lpstrFindWhat = what_a;
+        fra.wFindWhatLen = sizeof(what_a);
+        fra.Flags = FR_DOWN;
+        dlg = FindTextA( &fra );
+        pump( 400 );
+        check( dlg && (GetACP() != 1252 || query_has( NULL, "\"find\":\"caf\u00e9\"" ) ||
+                       query_has( NULL, "\"find\":\"caf\xc3\xa9\"" )),
+               "FindTextA -> the Find panel with the app's ANSI text" );
+        inject( NULL, "{\"t\":\"press\",\"v\":2,\"find\":\"na\u00efve\"}" );
+        pump( 300 );
+        check( got_find_next == 2 && (fra.Flags & FR_DOWN) &&
+               (GetACP() != 1252 || !strcmp( what_a, "na\xefve" )),
+               "Next from an ANSI app's panel -> FR_FINDNEXT and the text in its code page" );
+        DestroyWindow( dlg );
+        pump( 300 );
+    }
 }
 
 /* PageSetupDlg as the macOS Page Setup sheet */

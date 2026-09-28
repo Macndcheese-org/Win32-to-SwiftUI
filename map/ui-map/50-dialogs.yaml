@@ -293,7 +293,8 @@ entries:
       the dialog, ReplaceText has no direction. AppKit enables the buttons for a text view in
       the main window, so their state is set again after each of the panel's updates.
       FindText still returns a window, hidden, that apps keep and destroy (closing the
-      panel); showing it brings the panel forward. FindTextA/ReplaceTextA keep wine's dialog.
+      panel); showing it brings the panel forward. FindTextA/ReplaceTextA too, the strings
+      in the app's code page.
 
   - id: shellabout
     kind: dialog

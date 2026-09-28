@@ -485,7 +485,8 @@ BOOL WINAPI W2SShellAbout( HWND owner, const WCHAR *app, const WCHAR *other, HIC
  * open and sends the app FINDMSGSTRING as the dialog did. */
 struct find_dialog
 {
-    FINDREPLACEW *fr;
+    FINDREPLACEW *fr;       /* the app's, or its FINDREPLACEA (same layout, char strings) */
+    BOOL ansi;
     UINT64 id;              /* the panel's request while it is open */
     UINT msg;               /* FINDMSGSTRING */
     BOOL replace;           /* ReplaceText */
@@ -495,13 +496,33 @@ struct find_dialog
 
 #define FIND_TIMER 1
 
+/* a string into the app's buffer of len characters, as it is (A or W) */
+static void find_copy( BOOL ansi, void *buffer, WORD len, const WCHAR *s )
+{
+    if (!buffer || !len || !s) return;
+    if (!ansi) lstrcpynW( buffer, s, len );
+    else if (!WideCharToMultiByte( CP_ACP, 0, s, -1, buffer, len, NULL, NULL ))
+        ((char *)buffer)[len - 1] = 0;      /* cut short */
+}
+
+static WCHAR *find_string( BOOL ansi, const void *s )
+{
+    int len;
+    WCHAR *w;
+
+    if (!s) return strdupW( L"" );
+    if (!ansi) return strdupW( s );
+    len = MultiByteToWideChar( CP_ACP, 0, s, -1, NULL, 0 );
+    if ((w = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) ))) MultiByteToWideChar( CP_ACP, 0, s, -1, w, len );
+    return w;
+}
+
 static void find_send( struct find_dialog *fd, DWORD flags )
 {
     FINDREPLACEW *fr = fd->fr;
 
-    if (fd->find && fr->lpstrFindWhat && fr->wFindWhatLen) lstrcpynW( fr->lpstrFindWhat, fd->find, fr->wFindWhatLen );
-    if (fd->replace && fd->with && fr->lpstrReplaceWith && fr->wReplaceWithLen)
-        lstrcpynW( fr->lpstrReplaceWith, fd->with, fr->wReplaceWithLen );
+    if (fd->find) find_copy( fd->ansi, fr->lpstrFindWhat, fr->wFindWhatLen, fd->find );
+    if (fd->replace && fd->with) find_copy( fd->ansi, fr->lpstrReplaceWith, fr->wReplaceWithLen, fd->with );
     fr->Flags &= ~(FR_DOWN | FR_WHOLEWORD | FR_MATCHCASE | FR_FINDNEXT | FR_REPLACE | FR_REPLACEALL | FR_DIALOGTERM);
     fr->Flags |= flags;
     if (fd->replace) fr->Flags |= FR_DOWN;     /* as in wine's dialog: replacing always goes down */
@@ -602,14 +623,7 @@ static LRESULT CALLBACK find_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
     return DefWindowProcW( hwnd, msg, wparam, lparam );
 }
 
-/***********************************************************************
- *      W2SFindReplace  (win32swiftui.@)
- *
- * FindTextW (replace FALSE) and ReplaceTextW as AppKit's Find panel, after
- * comdlg32 has checked the structure. NULL: wine's dialog (hooks, templates,
- * or no panel).
- */
-HWND WINAPI W2SFindReplace( FINDREPLACEW *fr, BOOL replace )
+static HWND find_replace( FINDREPLACEW *fr, BOOL replace, BOOL ansi )
 {
     static const WCHAR class_name[] = L"W2SFindDialog";
     struct w2s_request_start_params start;
@@ -621,14 +635,22 @@ HWND WINAPI W2SFindReplace( FINDREPLACEW *fr, BOOL replace )
     BOOL shown = FALSE, done = FALSE;
     UINT32 len;
     HWND hwnd;
+    WCHAR *s;
     char *text;
 
     if (!fr || (fr->Flags & (FR_ENABLEHOOK | FR_ENABLETEMPLATE | FR_ENABLETEMPLATEHANDLE))) return NULL;
 
     json_init( &j );
     json_obj_begin( &j );
-    json_str( &j, "find", fr->lpstrFindWhat ? fr->lpstrFindWhat : L"" );
-    if (replace) json_str( &j, "replace", fr->lpstrReplaceWith ? fr->lpstrReplaceWith : L"" );
+    s = find_string( ansi, fr->lpstrFindWhat );
+    json_str( &j, "find", s ? s : L"" );
+    HeapFree( GetProcessHeap(), 0, s );
+    if (replace)
+    {
+        s = find_string( ansi, fr->lpstrReplaceWith );
+        json_str( &j, "replace", s ? s : L"" );
+        HeapFree( GetProcessHeap(), 0, s );
+    }
     json_bool( &j, "replaceMode", replace );
     json_bool( &j, "matchCase", (fr->Flags & FR_MATCHCASE) != 0 );
     json_bool( &j, "wholeWord", (fr->Flags & FR_WHOLEWORD) != 0 );
@@ -667,7 +689,7 @@ HWND WINAPI W2SFindReplace( FINDREPLACEW *fr, BOOL replace )
     }
 
     GetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                        (const WCHAR *)W2SFindReplace, &module );
+                        (const WCHAR *)find_replace, &module );
     wc.lpfnWndProc = find_proc;
     wc.hInstance = module;
     wc.lpszClassName = class_name;
@@ -680,6 +702,7 @@ HWND WINAPI W2SFindReplace( FINDREPLACEW *fr, BOOL replace )
         return NULL;
     }
     fd->fr = fr;
+    fd->ansi = ansi;
     fd->id = start.id;
     fd->replace = replace;
     fd->msg = RegisterWindowMessageW( FINDMSGSTRINGW );
@@ -687,6 +710,28 @@ HWND WINAPI W2SFindReplace( FINDREPLACEW *fr, BOOL replace )
     SetTimer( hwnd, FIND_TIMER, 50, NULL );
     TRACE( "%s panel for %p: %p\n", replace ? "replace" : "find", fr->hwndOwner, hwnd );
     return hwnd;
+}
+
+/***********************************************************************
+ *      W2SFindReplace  (win32swiftui.@)
+ *
+ * FindTextW (replace FALSE) and ReplaceTextW as AppKit's Find panel, after
+ * comdlg32 has checked the structure. NULL: wine's dialog (hooks, templates,
+ * or no panel).
+ */
+HWND WINAPI W2SFindReplace( FINDREPLACEW *fr, BOOL replace )
+{
+    return find_replace( fr, replace, FALSE );
+}
+
+/***********************************************************************
+ *      W2SFindReplaceA  (win32swiftui.@)
+ *
+ * FindTextA and ReplaceTextA: the same, the app's strings in its code page.
+ */
+HWND WINAPI W2SFindReplaceA( FINDREPLACEA *fr, BOOL replace )
+{
+    return find_replace( (FINDREPLACEW *)fr, replace, TRUE );
 }
 
 /* ---------- GetOpenFileName / GetSaveFileName ---------- */
