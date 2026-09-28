@@ -733,6 +733,10 @@ enum Debug {
                 bar.debugInject(event)
                 return "{\"ok\":true}"
             }
+            if event["t"] as? String == "dock" {
+                // tests: the Dock tile's progress ({"t":"dock","s":<png path>} also draws it)
+                return W2S.json(DockProgress.debug(capture: event["s"] as? String))
+            }
             if handle == 0 || ["alertButton", "choose", "cancel", "press", "look", "popupChoose"].contains(event["t"] as? String ?? "") {
                 guard let request = Requests.latestOpen() else { return "{\"error\":\"no open request\"}" }
                 if event["t"] as? String == "capture" { return Requests.capture(request.window, to: event["s"] as? String) }

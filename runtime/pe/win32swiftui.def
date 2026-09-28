@@ -16,3 +16,4 @@ EXPORTS
     W2SPrintDlg
     W2SPrintDlgEx
     W2SShellAbout
+    W2STaskbarProgress

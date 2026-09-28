@@ -1749,7 +1749,7 @@ tile.contentView = NSHostingView(rootView:
 tile.display()
 ```
 
-The Dock icon shows the progress bar, as Safari does for downloads. The overlay icon becomes the Dock badge (badgeLabel), limited to text on macOS.
+The Dock icon shows the progress bar, as Safari does for downloads: the Dock tile's content view is the program's icon (winemac's, else the generic application icon) with an NSProgressIndicator along its bottom, redrawn when the value changes visibly. A Mac app has one Dock icon, so it shows the window that set a progress last. Paused and error bars look like normal ones (an NSProgressIndicator has no colours). The overlay icon (the Dock badge, badgeLabel, text only) isn't done.
 
 ### Flash window (attention request)
 <a id="attention"></a>`attention` · AppKit · Liquid Glass: —

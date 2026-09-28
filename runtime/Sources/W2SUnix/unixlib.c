@@ -102,6 +102,13 @@ static NTSTATUS w2s_system_colors(void *args)
     return 0;
 }
 
+static NTSTATUS w2s_app_state(void *args)
+{
+    struct w2s_app_state_params *params = args;
+    w2s_swift_app_state(W2S_UNPTR(params->json), params->json_len);
+    return 0;
+}
+
 __attribute__((visibility("default"))) const unixlib_entry_t __wine_unix_call_funcs[] =
 {
     w2s_init,
@@ -116,6 +123,7 @@ __attribute__((visibility("default"))) const unixlib_entry_t __wine_unix_call_fu
     w2s_control_state,
     w2s_request_update,
     w2s_system_colors,
+    w2s_app_state,
 };
 
 _Static_assert(sizeof(__wine_unix_call_funcs) / sizeof(__wine_unix_call_funcs[0]) == unix_w2s_func_count,
@@ -136,6 +144,7 @@ __attribute__((visibility("default"))) const unixlib_entry_t __wine_unix_call_wo
     w2s_control_state,
     w2s_request_update,
     w2s_system_colors,
+    w2s_app_state,
 };
 
 _Static_assert(sizeof(__wine_unix_call_wow64_funcs) / sizeof(__wine_unix_call_wow64_funcs[0]) == unix_w2s_func_count,

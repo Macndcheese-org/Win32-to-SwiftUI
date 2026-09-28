@@ -371,7 +371,7 @@ final class Request {
 }
 
 enum W2S {
-    static let protocolVersion: UInt32 = 3     // w2s_protocol.h
+    static let protocolVersion: UInt32 = 4     // w2s_protocol.h
 
     /// The running macOS; an app linked against an SDK older than 26 is told
     /// 16 for 26 (the version compatibility shim), so 16 means 26.

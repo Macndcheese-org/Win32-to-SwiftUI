@@ -24,7 +24,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define W2S_PROTOCOL_VERSION 3
+#define W2S_PROTOCOL_VERSION 4
 
 /* a pointer in a parameter block, and back */
 #define W2S_PTR(p)      ((uint64_t)(uintptr_t)(p))
@@ -64,6 +64,7 @@ enum w2s_unix_func
     unix_w2s_control_state,
     unix_w2s_request_update,
     unix_w2s_system_colors,
+    unix_w2s_app_state,
     unix_w2s_func_count,
 };
 
@@ -174,6 +175,15 @@ struct w2s_system_colors_params
     uint32_t dark;              /* out: the appearance is a dark one */
 };
 
+/* the app's own state on macOS, not a window's (the Dock tile's progress):
+ * JSON {"t":<what>,...}, nothing back */
+struct w2s_app_state_params
+{
+    uint64_t json;              /* const char * */
+    uint32_t json_len;
+    uint32_t pad;
+};
+
 /* test hooks for tests/gallery: {"op":"query"} or {"op":"inject","event":{...}} */
 struct w2s_debug_params
 {
@@ -205,5 +215,6 @@ W2S_CHECK_OFFSET(w2s_request_update_params, json_len, 16);
 W2S_CHECK_OFFSET(w2s_debug_params, buffer, 16);
 W2S_CHECK_OFFSET(w2s_debug_params, len, 32);
 W2S_CHECK_OFFSET(w2s_system_colors_params, count, 136);
+W2S_CHECK_OFFSET(w2s_app_state_params, json_len, 8);
 
 #endif /* W2S_PROTOCOL_H */

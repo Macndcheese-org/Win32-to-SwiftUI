@@ -1237,6 +1237,44 @@ static void selftest_look(void)
     check( query_has( ctl[ID_WHITECHECK], "\"checked\":0" ), "BM_SETCHECK -> the white page's native check box" );
 }
 
+/* ITaskbarList3 progress on the Dock icon */
+static BOOL dock_has( const char *needle )
+{
+    char *r = pInject( NULL, "{\"t\":\"dock\"}" );
+    BOOL ok = r && strstr( r, needle );
+    if (!ok) printf( "      dock: %s\n", r ? r : "(null)" );
+    pFree( r );
+    return ok;
+}
+
+static void selftest_taskbar(void)
+{
+    ITaskbarList3 *list;
+
+    CoInitialize( NULL );
+    if (FAILED( CoCreateInstance( &CLSID_TaskbarList, NULL, CLSCTX_INPROC_SERVER, &IID_ITaskbarList3, (void **)&list ) ))
+    {
+        check( FALSE, "ITaskbarList3 can be made" );
+        return;
+    }
+    ITaskbarList3_HrInit( list );
+    ITaskbarList3_SetProgressValue( list, main_window, 30, 100 );
+    pump( 200 );
+    check( dock_has( "\"barPercent\":30" ) && dock_has( "\"shown\":true" ) && dock_has( "\"hasIcon\":true" ),
+           "SetProgressValue -> a progress bar on the Dock icon" );
+    ITaskbarList3_SetProgressState( list, main_window, TBPF_INDETERMINATE );
+    pump( 200 );
+    check( dock_has( "\"indeterminate\":true" ), "TBPF_INDETERMINATE -> an indeterminate bar on the Dock icon" );
+    ITaskbarList3_SetProgressValue( list, main_window, 3, 4 );
+    pump( 200 );
+    check( dock_has( "\"indeterminate\":false" ) && dock_has( "\"barPercent\":75" ),
+           "a value after TBPF_INDETERMINATE -> a normal bar again, as on Windows" );
+    ITaskbarList3_SetProgressState( list, main_window, TBPF_NOPROGRESS );
+    pump( 200 );
+    check( dock_has( "\"shown\":false" ), "TBPF_NOPROGRESS -> the Dock icon as it was" );
+    ITaskbarList3_Release( list );
+}
+
 /* ShellAbout as the standard About panel */
 static BOOL about_native_ok;
 
@@ -2086,6 +2124,7 @@ static int selftest(void)
 
     selftest_pickers();
     selftest_about();
+    selftest_taskbar();
     selftest_look();
 
     printf( "%d passed, %d failed\n", passes, failures );
@@ -2145,6 +2184,24 @@ static int capture( const WCHAR *args )
     pump( 1500 );
     capture_window( (HWND)SendMessageW( sheet, PSM_GETTABCONTROL, 0, 0 ), dir, "wizard" );
     DestroyWindow( sheet );
+    {
+        ITaskbarList3 *list;
+        char event[600];
+
+        CoInitialize( NULL );
+        if (SUCCEEDED( CoCreateInstance( &CLSID_TaskbarList, NULL, CLSCTX_INPROC_SERVER, &IID_ITaskbarList3,
+                                         (void **)&list ) ))
+        {
+            ITaskbarList3_HrInit( list );
+            ITaskbarList3_SetProgressValue( list, main_window, 40, 100 );
+            pump( 300 );
+            snprintf( event, sizeof(event), "{\"t\":\"dock\",\"s\":\"%s/dock.png\"}", dir );
+            pFree( pInject( NULL, event ) );
+            printf( "captured %s/dock.png\n", dir );
+            ITaskbarList3_SetProgressState( list, main_window, TBPF_NOPROGRESS );
+            ITaskbarList3_Release( list );
+        }
+    }
     about_dir = dir;
     about_name = "about";
     SetTimer( main_window, 31, 1500, about_capture );
