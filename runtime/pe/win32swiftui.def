@@ -18,3 +18,4 @@ EXPORTS
     W2SShellAbout
     W2STaskbarProgress
     W2SPageSetupDlg
+    W2SFindReplace

@@ -477,6 +477,218 @@ BOOL WINAPI W2SShellAbout( HWND owner, const WCHAR *app, const WCHAR *other, HIC
     return TRUE;
 }
 
+/* ---------- FindText / ReplaceText ---------- */
+
+/* The dialog is AppKit's Find panel (FindPanel.swift). FindText returns a
+ * window all the same: apps keep it, pass it to IsDialogMessage, destroy it.
+ * It is a hidden window owned by the app's, which polls the panel while it is
+ * open and sends the app FINDMSGSTRING as the dialog did. */
+struct find_dialog
+{
+    FINDREPLACEW *fr;
+    UINT64 id;              /* the panel's request while it is open */
+    UINT msg;               /* FINDMSGSTRING */
+    BOOL replace;           /* ReplaceText */
+    BOOL busy;              /* the app is handling a message from here */
+    WCHAR *find, *with;     /* the panel's strings for the next action */
+};
+
+#define FIND_TIMER 1
+
+static void find_send( struct find_dialog *fd, DWORD flags )
+{
+    FINDREPLACEW *fr = fd->fr;
+
+    if (fd->find && fr->lpstrFindWhat && fr->wFindWhatLen) lstrcpynW( fr->lpstrFindWhat, fd->find, fr->wFindWhatLen );
+    if (fd->replace && fd->with && fr->lpstrReplaceWith && fr->wReplaceWithLen)
+        lstrcpynW( fr->lpstrReplaceWith, fd->with, fr->wReplaceWithLen );
+    fr->Flags &= ~(FR_DOWN | FR_WHOLEWORD | FR_MATCHCASE | FR_FINDNEXT | FR_REPLACE | FR_REPLACEALL | FR_DIALOGTERM);
+    fr->Flags |= flags;
+    if (fd->replace) fr->Flags |= FR_DOWN;     /* as in wine's dialog: replacing always goes down */
+    SendMessageW( fr->hwndOwner, fd->msg, 0, (LPARAM)fr );
+}
+
+static void find_poll( HWND hwnd, struct find_dialog *fd )
+{
+    struct w2s_event *events;
+    UINT32 len;
+    BOOL done;
+    char *text;
+    int count, i;
+
+    if (fd->busy || !fd->id) return;
+    text = poll_request( fd->id, &done, &len );
+    fd->busy = TRUE;
+    if (!done && len && (count = json_parse_events( text, &events )) > 0)
+    {
+        for (i = 0; i < count; i++)
+        {
+            const struct w2s_event *ev = &events[i];
+            DWORD options = 0;
+
+            if (ev->has_value) options = ((int)ev->value & 1 ? FR_MATCHCASE : 0) | ((int)ev->value & 2 ? FR_WHOLEWORD : 0);
+            if (!strcmp( ev->type, "findWhat" ))
+            {
+                HeapFree( GetProcessHeap(), 0, fd->find );
+                fd->find = strdupW( ev->string ? ev->string : L"" );
+            }
+            else if (!strcmp( ev->type, "replaceWith" ))
+            {
+                HeapFree( GetProcessHeap(), 0, fd->with );
+                fd->with = strdupW( ev->string ? ev->string : L"" );
+            }
+            else if (!strcmp( ev->type, "next" )) find_send( fd, FR_FINDNEXT | FR_DOWN | options );
+            else if (!strcmp( ev->type, "previous" )) find_send( fd, FR_FINDNEXT | options );
+            else if (!strcmp( ev->type, "replace" )) find_send( fd, FR_REPLACE | options );
+            else if (!strcmp( ev->type, "replaceAll" )) find_send( fd, FR_REPLACEALL | options );
+        }
+        json_free_events( events, count );
+    }
+    HeapFree( GetProcessHeap(), 0, text );
+    fd->busy = FALSE;
+    if (done && fd->id)
+    {
+        /* the user closed the panel: as the dialog's Cancel */
+        fd->id = 0;
+        KillTimer( hwnd, FIND_TIMER );
+        find_send( fd, FR_DIALOGTERM | (fd->fr->Flags & (FR_DOWN | FR_WHOLEWORD | FR_MATCHCASE)) );
+        DestroyWindow( hwnd );
+    }
+}
+
+static LRESULT CALLBACK find_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    struct find_dialog *fd = (struct find_dialog *)GetWindowLongPtrW( hwnd, GWLP_USERDATA );
+
+    switch (msg)
+    {
+    case WM_TIMER:
+        if (fd && wparam == FIND_TIMER) find_poll( hwnd, fd );
+        return 0;
+    case WM_WINDOWPOSCHANGING:
+        /* the app shows its dialog: the window stays hidden, the panel comes forward */
+        if (((WINDOWPOS *)lparam)->flags & SWP_SHOWWINDOW)
+        {
+            ((WINDOWPOS *)lparam)->flags &= ~SWP_SHOWWINDOW;
+            if (fd && fd->id) w2s_request_update( fd->id, "{\"front\":true}" );
+        }
+        return 0;
+    case WM_SETFOCUS:
+        if (fd && fd->id) w2s_request_update( fd->id, "{\"front\":true}" );
+        return 0;
+    case WM_DESTROY:
+        if (!fd) break;
+        KillTimer( hwnd, FIND_TIMER );
+        if (fd->id)
+        {
+            /* the app destroyed its dialog: the panel closes, no FR_DIALOGTERM (as on Windows) */
+            DWORD end = GetTickCount() + 1000;
+            BOOL done = FALSE;
+            UINT32 len;
+
+            w2s_request_update( fd->id, "{\"close\":true}" );
+            while (!done && (int)(GetTickCount() - end) < 0)
+            {
+                HeapFree( GetProcessHeap(), 0, poll_request( fd->id, &done, &len ) );
+                if (!done) Sleep( 10 );
+            }
+        }
+        SetWindowLongPtrW( hwnd, GWLP_USERDATA, 0 );
+        HeapFree( GetProcessHeap(), 0, fd->find );
+        HeapFree( GetProcessHeap(), 0, fd->with );
+        HeapFree( GetProcessHeap(), 0, fd );
+        break;
+    }
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
+}
+
+/***********************************************************************
+ *      W2SFindReplace  (win32swiftui.@)
+ *
+ * FindTextW (replace FALSE) and ReplaceTextW as AppKit's Find panel, after
+ * comdlg32 has checked the structure. NULL: wine's dialog (hooks, templates,
+ * or no panel).
+ */
+HWND WINAPI W2SFindReplace( FINDREPLACEW *fr, BOOL replace )
+{
+    static const WCHAR class_name[] = L"W2SFindDialog";
+    struct w2s_request_start_params start;
+    struct find_dialog *fd;
+    WNDCLASSW wc = { 0 };
+    HMODULE module;
+    struct json j;
+    DWORD end;
+    BOOL shown = FALSE, done = FALSE;
+    UINT32 len;
+    HWND hwnd;
+    char *text;
+
+    if (!fr || (fr->Flags & (FR_ENABLEHOOK | FR_ENABLETEMPLATE | FR_ENABLETEMPLATEHANDLE))) return NULL;
+
+    json_init( &j );
+    json_obj_begin( &j );
+    json_str( &j, "find", fr->lpstrFindWhat ? fr->lpstrFindWhat : L"" );
+    if (replace) json_str( &j, "replace", fr->lpstrReplaceWith ? fr->lpstrReplaceWith : L"" );
+    json_bool( &j, "replaceMode", replace );
+    json_bool( &j, "matchCase", (fr->Flags & FR_MATCHCASE) != 0 );
+    json_bool( &j, "wholeWord", (fr->Flags & FR_WHOLEWORD) != 0 );
+    json_bool( &j, "hideMatchCase", (fr->Flags & FR_HIDEMATCHCASE) != 0 );
+    json_bool( &j, "noMatchCase", (fr->Flags & FR_NOMATCHCASE) != 0 );
+    json_bool( &j, "hideWholeWord", (fr->Flags & FR_HIDEWHOLEWORD) != 0 );
+    json_bool( &j, "noWholeWord", (fr->Flags & FR_NOWHOLEWORD) != 0 );
+    json_bool( &j, "noUpDown", (fr->Flags & (FR_HIDEUPDOWN | FR_NOUPDOWN)) != 0 );
+    json_obj_end( &j );
+    /* a panel of its own, not a sheet: the owner stays usable */
+    start.kind = W2S_PTR( "findreplace" );
+    start.window = 0;
+    start.json = W2S_PTR( j.buf );
+    start.json_len = strlen( j.buf );
+    start.id = 0;
+    if (w2s_call( unix_w2s_request_start, &start ) || !start.id)
+    {
+        json_free( &j );
+        return NULL;
+    }
+    json_free( &j );
+
+    /* the panel says it is up, or declines (wine's dialog then) */
+    end = GetTickCount() + 3000;
+    while (!shown && !done && (int)(GetTickCount() - end) < 0)
+    {
+        text = poll_request( start.id, &done, &len );
+        if (!done && len && strstr( text, "\"shown\"" )) shown = TRUE;
+        HeapFree( GetProcessHeap(), 0, text );
+        if (!shown && !done) Sleep( 10 );
+    }
+    if (!shown)
+    {
+        if (!done) w2s_request_update( start.id, "{\"close\":true}" );
+        return NULL;
+    }
+
+    GetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                        (const WCHAR *)W2SFindReplace, &module );
+    wc.lpfnWndProc = find_proc;
+    wc.hInstance = module;
+    wc.lpszClassName = class_name;
+    RegisterClassW( &wc );      /* fails harmlessly once it exists */
+    if (!(fd = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*fd) )) ||
+        !(hwnd = CreateWindowExW( 0, class_name, L"", WS_POPUP, 0, 0, 0, 0, fr->hwndOwner, NULL, module, NULL )))
+    {
+        HeapFree( GetProcessHeap(), 0, fd );
+        w2s_request_update( start.id, "{\"close\":true}" );
+        return NULL;
+    }
+    fd->fr = fr;
+    fd->id = start.id;
+    fd->replace = replace;
+    fd->msg = RegisterWindowMessageW( FINDMSGSTRINGW );
+    SetWindowLongPtrW( hwnd, GWLP_USERDATA, (LONG_PTR)fd );
+    SetTimer( hwnd, FIND_TIMER, 50, NULL );
+    TRACE( "%s panel for %p: %p\n", replace ? "replace" : "find", fr->hwndOwner, hwnd );
+    return hwnd;
+}
+
 /* ---------- GetOpenFileName / GetSaveFileName ---------- */
 
 static void json_unix_path( struct json *j, const char *key, const WCHAR *path )

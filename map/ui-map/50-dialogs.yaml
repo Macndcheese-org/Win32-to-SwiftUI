@@ -268,32 +268,32 @@ entries:
     kind: dialog
     title: Find / Replace
     win32: {apis: [FindText, ReplaceText], styles: [FR_DOWN]}
-    runtime: swiftui
-    swiftui:
+    runtime: appkit
+    appkit:
       - since: 12
         code: |-
-          VStack(alignment: .leading, spacing: 8) {
-            TextField("Find", text: $text).textFieldStyle(.roundedBorder)
-            TextField("Replace", text: $text).textFieldStyle(.roundedBorder)
-            HStack {
-              Toggle("Match Case", isOn: $isOn).toggleStyle(.checkbox)
-              Toggle("Whole Words", isOn: $isOn).toggleStyle(.checkbox)
-            }
-            HStack {
-              Spacer()
-              Button("Replace All", action: action)
-              Button("Previous", action: action)
-              Button("Next", action: action).keyboardShortcut(.defaultAction)
-            }
-          }.padding().frame(width: 420)
+          let proxy = NSTextView()
+          proxy.usesFindPanel = true
+          let show = NSMenuItem()
+          show.tag = Int(NSFindPanelAction.showFindPanel.rawValue)
+          proxy.performFindPanelAction(show)
     glass: automatic
-    improvised: true
     events_out: {find: 'the app''s registered FINDMSGSTRING message with FR_FINDNEXT / FR_REPLACE / FR_REPLACEALL / FR_DIALOGTERM'}
     not_translated_when: [FR_ENABLEHOOK, FR_ENABLETEMPLATE, FR_ENABLETEMPLATEHANDLE]
     notes: >-
-      A floating utility panel (NSPanel), like TextEdit's classic Find panel. Apple's inline
-      find bar (NSTextFinder) needs to own the text view, which the app does. The direction
-      radio (Up/Down) becomes Previous/Next buttons.
+      AppKit's own Find panel (the one TextEdit shows with "Use Find Panel"), not a copy. It
+      only opens through a text view and its buttons search that view; here the app
+      searches, so it opens through a text view in no window and its buttons (found by
+      action and tag, never by their localized titles) are pointed at the Win32 side, which
+      sends FINDMSGSTRING as the dialog did: Next and Previous are FR_FINDNEXT down and up,
+      Replace and Replace & Find are FR_REPLACE (Windows' Replace finds the next one too),
+      Replace All is FR_REPLACEALL, closing the panel is FR_DIALOGTERM. Ignore case is
+      FR_MATCHCASE reversed, "Full Word" FR_WHOLEWORD; "Starts With" and "Wrap around" have
+      no Windows meaning and are disabled and hidden. FindText's Replace row is disabled; as
+      the dialog, ReplaceText has no direction. AppKit enables the buttons for a text view in
+      the main window, so their state is set again after each of the panel's updates.
+      FindText still returns a window, hidden, that apps keep and destroy (closing the
+      panel); showing it brings the panel forward. FindTextA/ReplaceTextA keep wine's dialog.
 
   - id: shellabout
     kind: dialog

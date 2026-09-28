@@ -787,8 +787,23 @@ static LRESULT CALLBACK white_panel_proc( HWND hwnd, UINT msg, WPARAM wparam, LP
     return DefWindowProcW( hwnd, msg, wparam, lparam );
 }
 
+/* FINDMSGSTRING from FindText / ReplaceText */
+static UINT find_msg;
+static int got_find_next, got_find_replace, got_find_all, got_find_term;
+static DWORD got_find_flags;
+
 static LRESULT CALLBACK wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
+    if (find_msg && msg == find_msg)
+    {
+        FINDREPLACEW *fr = (FINDREPLACEW *)lparam;
+        got_find_flags = fr->Flags;
+        if (fr->Flags & FR_DIALOGTERM) got_find_term++;
+        else if (fr->Flags & FR_FINDNEXT) got_find_next++;
+        else if (fr->Flags & FR_REPLACE) got_find_replace++;
+        else if (fr->Flags & FR_REPLACEALL) got_find_all++;
+        return 0;
+    }
     switch (msg)
     {
     case WM_COMMAND:
@@ -1235,6 +1250,63 @@ static void selftest_look(void)
     SendMessageW( ctl[ID_WHITECHECK], BM_SETCHECK, BST_UNCHECKED, 0 );
     pump( 200 );
     check( query_has( ctl[ID_WHITECHECK], "\"checked\":0" ), "BM_SETCHECK -> the white page's native check box" );
+}
+
+/* FindText and ReplaceText as AppKit's Find panel */
+static void selftest_find(void)
+{
+    static WCHAR what[64], with[64];
+    static FINDREPLACEW fr;     /* the app's, alive while the dialog is */
+    HWND dlg;
+    char *q;
+
+    find_msg = RegisterWindowMessageW( FINDMSGSTRINGW );
+    wcscpy( what, L"needle" );
+    memset( &fr, 0, sizeof(fr) );
+    fr.lStructSize = sizeof(fr);
+    fr.hwndOwner = main_window;
+    fr.lpstrFindWhat = what;
+    fr.wFindWhatLen = ARRAYSIZE(what);
+    fr.Flags = FR_DOWN | FR_MATCHCASE;
+    dlg = FindTextW( &fr );
+    pump( 400 );
+    check( dlg && IsWindow( dlg ) && !IsWindowVisible( dlg ) && query_has( NULL, "\"visible\":true" ) &&
+           query_has( NULL, "\"find\":\"needle\"" ) && query_has( NULL, "\"matchCase\":true" ) &&
+           query_has( NULL, "\"replaceEnabled\":false" ) && query_has( NULL, "\"previousEnabled\":true" ),
+           "FindText -> AppKit's Find panel with the app's text and options, and a window standing for the dialog" );
+    inject( NULL, "{\"t\":\"press\",\"v\":3,\"find\":\"hay\",\"matchCase\":false,\"wholeWord\":true}" );
+    pump( 300 );
+    check( got_find_next == 1 && !wcscmp( what, L"hay" ) && !(got_find_flags & (FR_DOWN | FR_MATCHCASE)) &&
+           (got_find_flags & FR_WHOLEWORD),
+           "Previous in the Find panel -> FINDMSGSTRING: FR_FINDNEXT upward, the text and options" );
+    ShowWindow( dlg, SW_SHOW );
+    check( !IsWindowVisible( dlg ), "showing the dialog window brings the panel forward, the window stays hidden" );
+    inject( NULL, "{\"t\":\"close\"}" );
+    pump( 300 );
+    check( got_find_term == 1 && !IsWindow( dlg ), "closing the Find panel -> FR_DIALOGTERM, the dialog window goes" );
+
+    wcscpy( with, L"pin" );
+    fr.lpstrReplaceWith = with;
+    fr.wReplaceWithLen = ARRAYSIZE(with);
+    fr.Flags = 0;
+    dlg = ReplaceTextW( &fr );
+    pump( 400 );
+    check( dlg && query_has( NULL, "\"replaceEnabled\":true" ) && query_has( NULL, "\"replace\":\"pin\"" ) &&
+           query_has( NULL, "\"previousEnabled\":false" ),
+           "ReplaceText -> the Find panel with Replace (and no direction, as the dialog)" );
+    inject( NULL, "{\"t\":\"press\",\"v\":4,\"find\":\"a\",\"replace\":\"b\"}" );
+    pump( 300 );
+    check( got_find_all == 1 && (got_find_flags & FR_DOWN) && !wcscmp( what, L"a" ) && !wcscmp( with, L"b" ),
+           "Replace All -> FR_REPLACEALL with both strings" );
+    inject( NULL, "{\"t\":\"press\",\"v\":6}" );
+    pump( 300 );
+    check( got_find_replace == 1, "Replace & Find -> FR_REPLACE" );
+    DestroyWindow( dlg );
+    pump( 300 );
+    q = pQuery( NULL );
+    check( got_find_term == 1 && q && strstr( q, "no open request" ),
+           "the app destroying its dialog closes the panel, without FR_DIALOGTERM" );
+    pFree( q );
 }
 
 /* PageSetupDlg as the macOS Page Setup sheet */
@@ -2182,6 +2254,7 @@ static int selftest(void)
 
     selftest_pickers();
     selftest_pagesetup();
+    selftest_find();
     selftest_about();
     selftest_taskbar();
     selftest_flash();
@@ -2260,6 +2333,28 @@ static int capture( const WCHAR *args )
             printf( "captured %s/dock.png\n", dir );
             ITaskbarList3_SetProgressState( list, main_window, TBPF_NOPROGRESS );
             ITaskbarList3_Release( list );
+        }
+    }
+    {
+        /* AppKit's Find panel for ReplaceText */
+        static WCHAR what[64] = L"needle", with[64] = L"pin";
+        static FINDREPLACEW fr;
+        char event[600];
+        HWND dlg;
+
+        fr.lStructSize = sizeof(fr);
+        fr.hwndOwner = main_window;
+        fr.lpstrFindWhat = what;
+        fr.wFindWhatLen = ARRAYSIZE(what);
+        fr.lpstrReplaceWith = with;
+        fr.wReplaceWithLen = ARRAYSIZE(with);
+        if ((dlg = ReplaceTextW( &fr )))
+        {
+            pump( 800 );
+            snprintf( event, sizeof(event), "{\"t\":\"capture\",\"s\":\"%s/find.png\"}", dir );
+            pFree( pInject( NULL, event ) );
+            printf( "captured %s/find.png\n", dir );
+            DestroyWindow( dlg );
         }
     }
     about_dir = dir;
