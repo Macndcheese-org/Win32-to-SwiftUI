@@ -57,6 +57,7 @@ struct Snapshot: Codable, Equatable {
     }
     var balloon: Balloon?
     var document: Bool?         // multi-line edit: a document window's text, drawn without a border
+    var inFrame: Bool?          // toolbar: its buttons are the window frame's toolbar (WindowToolbar)
     // toolbar
     struct ToolbarButton: Codable, Equatable {
         var i: Int
@@ -317,7 +318,7 @@ final class ControlHost {
 /// per page, text only (Win32 pages have no icons, none is made up), the shown
 /// pane selected, the window titled after it. Choosing one emits the same
 /// "select" the tab strip emits. The toolbar lives as long as the tab control.
-final class WindowPanes: NSObject, NSToolbarDelegate {
+final class WindowPanes: NSObject, NSToolbarDelegate, WindowChrome {
     weak var host: ControlHost?
     private(set) var toolbar: NSToolbar?
     private var titles: [String] = []

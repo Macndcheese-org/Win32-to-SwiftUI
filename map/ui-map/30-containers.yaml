@@ -168,7 +168,7 @@ entries:
           tb.displayMode = .iconOnly
           window.toolbar = tb
     glass: explicit
-    state_in: [TB_ADDBUTTONS, TB_INSERTBUTTON, TB_DELETEBUTTON, TB_SETSTATE, TB_CHECKBUTTON, TB_ENABLEBUTTON, TB_HIDEBUTTON, TB_PRESSBUTTON, TB_SETIMAGELIST, TB_ADDBITMAP, TB_LOADIMAGES, TB_CHANGEBITMAP, TB_SETBUTTONINFO, TB_SETCMDID, TB_SETSTYLE, TB_SETEXTENDEDSTYLE, TB_SETBUTTONSIZE, TB_SETBITMAPSIZE, TB_AUTOSIZE, WM_LBUTTONUP, WM_SIZE, WM_PARENTNOTIFY]
+    state_in: [TB_ADDBUTTONS, TB_INSERTBUTTON, TB_DELETEBUTTON, TB_SETSTATE, TB_CHECKBUTTON, TB_ENABLEBUTTON, TB_HIDEBUTTON, TB_PRESSBUTTON, TB_SETIMAGELIST, TB_ADDBITMAP, TB_LOADIMAGES, TB_CHANGEBITMAP, TB_SETBUTTONINFO, TB_SETCMDID, TB_SETSTYLE, TB_SETEXTENDEDSTYLE, TB_SETBUTTONSIZE, TB_SETBITMAPSIZE, TB_AUTOSIZE, WM_LBUTTONUP, WM_SIZE, WM_PARENTNOTIFY, WM_WINDOWPOSCHANGED]
     events_out: {activate: WM_COMMAND with the button id, dropdown: WM_NOTIFY/TBN_DROPDOWN, tooltip: TBN_GETINFOTIP}
     notes: >-
       The buttons are native in place, in the toolbar's own strip, as TextEdit's format bar
@@ -183,6 +183,10 @@ entries:
       by watching TB_ADDBITMAP and TB_LOADIMAGES); others are the app's pixels. Moving the
       toolbar into the window's unified title bar (NSToolbar, the appkit item) is the more
       Mac-like option; it changes the client area the app laid out, so it waits.
+      A toolbar across the top of an app's main window (not a dialog's, not in a rebar, no
+      windows of its own) goes in the window's frame, where a Mac app's toolbar is (HIG,
+      Toolbars): its buttons are the window's unified NSToolbar, the Win32 toolbar kept at no
+      height so the app lays its content out without it. Check buttons are toggles there.
 
   - id: rebar
     kind: control

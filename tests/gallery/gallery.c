@@ -1252,6 +1252,90 @@ static void selftest_look(void)
     check( query_has( ctl[ID_WHITECHECK], "\"checked\":0" ), "BM_SETCHECK -> the white page's native check box" );
 }
 
+/* a toolbar across the top of a main window is the frame's toolbar (HIG) */
+static int got_frame_command;
+
+static LRESULT CALLBACK tbwin_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    switch (msg)
+    {
+    case WM_SIZE:
+    {
+        HWND tb = GetDlgItem( hwnd, 1 ), edit = GetDlgItem( hwnd, 2 );
+        RECT rc;
+        int top = 0;
+
+        /* as apps lay out: the toolbar sizes itself, the rest goes below it */
+        if (tb)
+        {
+            SendMessageW( tb, TB_AUTOSIZE, 0, 0 );
+            GetWindowRect( tb, &rc );
+            if (IsWindowVisible( tb )) top = rc.bottom - rc.top;
+        }
+        if (edit) MoveWindow( edit, 0, top, LOWORD( lparam ), HIWORD( lparam ) - top, TRUE );
+        return 0;
+    }
+    case WM_COMMAND:
+        if (LOWORD( wparam ) >= 100 && LOWORD( wparam ) < 110) got_frame_command = LOWORD( wparam );
+        return 0;
+    }
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
+}
+
+static void selftest_frame_toolbar(void)
+{
+    TBBUTTON buttons[4] =
+    {
+        { STD_FILENEW, 100, TBSTATE_ENABLED, BTNS_BUTTON },
+        { STD_FILEOPEN, 101, 0, BTNS_BUTTON },
+        { 0, 0, 0, BTNS_SEP },
+        { STD_FIND, 102, TBSTATE_ENABLED, BTNS_CHECK },
+    };
+    TBADDBITMAP bitmap = { HINST_COMMCTRL, IDB_STD_SMALL_COLOR };
+    WNDCLASSW wc = { 0 };
+    HWND win, tb, edit;
+    RECT rc, erc;
+
+    wc.lpfnWndProc = tbwin_proc;
+    wc.hInstance = GetModuleHandleW( NULL );
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpszClassName = L"W2SToolbarWindow";
+    RegisterClassW( &wc );
+    win = CreateWindowExW( 0, L"W2SToolbarWindow", L"Toolbar window", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                           150, 150, 480, 300, NULL, NULL, GetModuleHandleW( NULL ), NULL );
+    tb = CreateWindowExW( 0, TOOLBARCLASSNAMEW, NULL, WS_CHILD | WS_VISIBLE | TBSTYLE_TOOLTIPS, 0, 0, 0, 0, win,
+                          (HMENU)1, GetModuleHandleW( NULL ), NULL );
+    SendMessageW( tb, TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0 );
+    SendMessageW( tb, TB_ADDBITMAP, 0, (LPARAM)&bitmap );
+    SendMessageW( tb, TB_ADDBUTTONSW, ARRAYSIZE(buttons), (LPARAM)buttons );
+    edit = CreateWindowExW( 0, L"Edit", L"", WS_CHILD | WS_VISIBLE | ES_MULTILINE, 0, 0, 0, 0, win, (HMENU)2,
+                            GetModuleHandleW( NULL ), NULL );
+    GetClientRect( win, &rc );
+    SendMessageW( win, WM_SIZE, SIZE_RESTORED, MAKELPARAM( rc.right, rc.bottom ) );
+    pump( 800 );
+    check( pIsTranslated( tb ) && query_has( tb, "\"inFrame\":true" ) && query_has( tb, "\"frameToolbar\":true" ) &&
+           query_has( tb, "\"toolbarStyle\":\"unified\"" ) && query_int( tb, "frameItems" ) == 4,
+           "a toolbar across the top of a main window is the frame's toolbar: one item per button, a space per separator" );
+    GetWindowRect( tb, &rc );
+    GetWindowRect( edit, &erc );
+    MapWindowPoints( NULL, win, (POINT *)&erc, 2 );
+    check( rc.bottom - rc.top == 0 && erc.top == 0,
+           "the Win32 toolbar takes no room: the app lays its content out from the window's top" );
+    check( query_has( tb, "\"frameEnabled\":[true,false,true]" ), "a disabled button is a disabled item" );
+    inject( tb, "{\"t\":\"frameClick\",\"v\":0}" );
+    pump( 300 );
+    check( got_frame_command == 100, "a click on a frame toolbar item -> the button's WM_COMMAND" );
+    inject( tb, "{\"t\":\"frameClick\",\"v\":3}" );
+    pump( 300 );
+    check( got_frame_command == 102 && SendMessageW( tb, TB_ISBUTTONCHECKED, 102, 0 ) && query_has( tb, "\"frameChecked\":[3]" ),
+           "a check button is a toggle in the frame toolbar" );
+    ShowWindow( tb, SW_HIDE );
+    pump( 400 );
+    check( query_has( tb, "\"frameToolbar\":false" ), "hiding the Win32 toolbar takes it out of the frame" );
+    DestroyWindow( win );
+    pump( 200 );
+}
+
 /* a document window's multi-line edit (notepad's) has no border, as TextEdit's */
 static void selftest_document(void)
 {
@@ -2330,6 +2414,7 @@ static int selftest(void)
     selftest_pagesetup();
     selftest_find();
     selftest_document();
+    selftest_frame_toolbar();
     selftest_about();
     selftest_taskbar();
     selftest_flash();

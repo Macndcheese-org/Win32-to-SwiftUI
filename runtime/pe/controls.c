@@ -2175,7 +2175,36 @@ struct tb_data
     int total;                      /* the image list's size when last seen */
     int strips;
     struct tb_strip strip[MAX_TB_STRIPS];
+    BOOL frame;                     /* the window frame's toolbar (toolbar_frame) */
 };
+
+/* the window whose frame has a toolbar: which toolbar is in it */
+static const WCHAR frame_toolbar_prop[] = L"W2SFrameToolbar";
+
+/* A toolbar across the top of an app's main window goes in the window's
+ * frame, where a Mac app's toolbar is (HIG, Toolbars): the window's NSToolbar
+ * shows its buttons, and the Win32 toolbar is kept at no height, so the app
+ * lays its content out without it. One per window; not in a dialog, a rebar
+ * or at another edge, and not one holding windows of its own (a format bar's
+ * combo boxes), which need their place in the window. */
+static BOOL toolbar_frame( struct w2s_control *ctl )
+{
+    HWND parent = GetParent( ctl->hwnd ), owner;
+    DWORD style = GetWindowLongW( ctl->hwnd, GWL_STYLE );
+    WCHAR cls[16] = { 0 };
+    RECT rc;
+
+    if (!parent || (GetWindowLongW( parent, GWL_STYLE ) & WS_CHILD)) return FALSE;
+    GetClassNameW( parent, cls, ARRAYSIZE(cls) );
+    if (!wcscmp( cls, L"#32770" )) return FALSE;
+    if (!(style & WS_VISIBLE) || (style & (CCS_VERT | CCS_NOPARENTALIGN)) || (style & CCS_BOTTOM) == CCS_BOTTOM)
+        return FALSE;
+    if (GetWindow( ctl->hwnd, GW_CHILD ) || SendMessageW( ctl->hwnd, TB_BUTTONCOUNT, 0, 0 ) <= 0) return FALSE;
+    if ((owner = GetPropW( parent, frame_toolbar_prop )) && owner != ctl->hwnd && IsWindow( owner )) return FALSE;
+    GetWindowRect( ctl->hwnd, &rc );
+    MapWindowPoints( NULL, parent, (POINT *)&rc, 2 );
+    return rc.top <= 4;     /* comctl32 leaves 2 pixels above for its divider line */
+}
 
 static struct tb_data *toolbar_data( struct w2s_control *ctl )
 {
@@ -2209,6 +2238,13 @@ static void toolbar_observe( struct w2s_control *ctl, UINT msg, WPARAM wparam, L
     UINT bitmap;
     int total, first;
 
+    if (msg == WM_WINDOWPOSCHANGING)
+    {
+        /* the frame's toolbar takes no room in the window (as it sizes itself, TB_AUTOSIZE) */
+        WINDOWPOS *pos = (WINDOWPOS *)lparam;
+        if ((data = ctl->data) && data->frame && !(pos->flags & SWP_NOSIZE)) pos->cy = 0;
+        return;
+    }
     if (msg != TB_ADDBITMAP && msg != TB_LOADIMAGES && msg != TB_SETIMAGELIST) return;
     data = toolbar_data( ctl );
     himl = (HIMAGELIST)SendMessageW( ctl->hwnd, TB_GETIMAGELIST, 0, 0 );
@@ -2350,6 +2386,20 @@ static void toolbar_snapshot( struct w2s_control *ctl, struct json *j )
     WCHAR text[256];
     HRGN rgn;
 
+    if (!data->frame && toolbar_frame( ctl ))
+    {
+        RECT client;
+        HWND parent = GetParent( ctl->hwnd );
+
+        /* it goes in the frame: no height here, and the app lays its window out again */
+        data->frame = TRUE;
+        SetPropW( parent, frame_toolbar_prop, ctl->hwnd );
+        GetClientRect( parent, &client );
+        PostMessageW( ctl->hwnd, TB_AUTOSIZE, 0, 0 );
+        PostMessageW( parent, WM_SIZE, SIZE_RESTORED, MAKELPARAM( client.right, client.bottom ) );
+        TRACE( "%p: toolbar in the frame of %p\n", ctl->hwnd, parent );
+    }
+    json_bool( j, "inFrame", data->frame && (style & WS_VISIBLE) );
     json_bool( j, "list", (style & TBSTYLE_LIST) != 0 );
     json_bool( j, "mixed", (ex & TBSTYLE_EX_MIXEDBUTTONS) != 0 );
     json_arr_begin( j, "buttons" );
@@ -2438,9 +2488,19 @@ static void toolbar_apply( struct w2s_control *ctl, const struct w2s_event *ev )
     if (IsWindow( ctl->hwnd )) SendMessageW( ctl->hwnd, WM_LBUTTONUP, 0, MAKELPARAM( pt.x, pt.y ) );
 }
 
+static void toolbar_release( struct w2s_control *ctl )
+{
+    struct tb_data *data = ctl->data;
+    HWND parent = GetParent( ctl->hwnd );
+
+    if (data && data->frame && parent && GetPropW( parent, frame_toolbar_prop ) == ctl->hwnd)
+        RemovePropW( parent, frame_toolbar_prop );
+    HeapFree( GetProcessHeap(), 0, data );
+}
+
 static const struct w2s_kind kind_toolbar =
 {
-    "toolbar", toolbar_snapshot, toolbar_apply, NULL, NULL, container_region, toolbar_observe
+    "toolbar", toolbar_snapshot, toolbar_apply, NULL, NULL, container_region, toolbar_observe, toolbar_release
 };
 
 /* A rebar draws nothing of its own on macOS (no grippers, no etched lines): its

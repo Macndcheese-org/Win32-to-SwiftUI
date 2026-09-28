@@ -690,6 +690,18 @@ enum Debug {
                 }
                 if let s = bar(hosting) { out["tabBarWidth"] = Int(s.frame.width) }
             }
+            if host.entry == "toolbar", let frame = host.owned as? WindowToolbar {
+                let window = host.hosting?.window
+                out["frameToolbar"] = frame.toolbar != nil && window?.toolbar === frame.toolbar
+                if let toolbar = frame.toolbar {
+                    let buttons = toolbar.items.filter { $0.itemIdentifier != .space }
+                    out["frameItems"] = toolbar.items.count
+                    out["frameEnabled"] = buttons.map { ($0.view as? NSButton)?.isEnabled ?? $0.isEnabled }
+                    out["frameChecked"] = buttons.compactMap { ($0.view as? NSButton)?.state == .on ? $0.tag : nil }
+                    out["frameLabels"] = buttons.map { $0.label }
+                    out["toolbarStyle"] = window?.toolbarStyle == .unified ? "unified" : "other"
+                }
+            }
             if host.entry == "tab", let panes = host.owned as? WindowPanes {
                 out["windowPanes"] = panes.toolbar != nil
                 if let toolbar = panes.toolbar, let window = host.hosting?.window {
@@ -749,6 +761,16 @@ enum Debug {
             }
             guard let host = W2S.control(handle) else { return "{\"error\":\"no control\"}" }
             if event["t"] as? String == "capture" { return Requests.capture(host.hosting?.window, to: event["s"] as? String) }
+            if event["t"] as? String == "frameClick" {
+                // tests: a click on frame toolbar item v (spaces count), through its own target and action
+                guard let frame = host.owned as? WindowToolbar, let toolbar = frame.toolbar,
+                      let index = event["v"] as? Int, toolbar.items.indices.contains(index)
+                else { return "{\"error\":\"no item\"}" }
+                let item = toolbar.items[index]
+                if let button = item.view as? NSButton { button.performClick(nil) }
+                else if let action = item.action { NSApp.sendAction(action, to: item.target, from: item) }
+                return "{\"ok\":true}"
+            }
             if event["t"] as? String == "paneClick" {
                 // tests: a click on toolbar pane v, through the item's own target and action
                 guard let panes = host.owned as? WindowPanes, let toolbar = panes.toolbar,

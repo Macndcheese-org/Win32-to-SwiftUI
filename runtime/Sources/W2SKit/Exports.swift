@@ -100,11 +100,15 @@ public func w2s_swift_control_create(_ hostView: UInt64, _ window: UInt64, _ pos
         container.addSubview(hosting)
         host.hosting = hosting
         if entryID == "button.groupbox" { GroupBoxTitle.apply(host) }
+        // what a control puts in its window's frame lives exactly as long as the control
         if entryID == "tab" {
-            // a settings window's panes live exactly as long as its tab control
             let panes = WindowPanes(host: host)
             host.owned = panes
             panes.update()
+        } else if entryID == "toolbar" {
+            let toolbar = WindowToolbar(host: host)
+            host.owned = toolbar
+            toolbar.update()
         }
     }
     return handle
@@ -138,7 +142,7 @@ public func w2s_swift_control_update(_ handle: UInt64, _ json: UnsafePointer<CCh
         // taken before the PE side saw the user's latest events: showing it
         // would undo what the user just did; a fresh one follows once they're applied
         if (snap.ack ?? 0) < host.emittedSeq {
-            (host.owned as? WindowPanes)?.update()
+            (host.owned as? WindowChrome)?.update()
             return
         }
         if host.model.snap != snap {
@@ -147,7 +151,7 @@ public func w2s_swift_control_update(_ handle: UInt64, _ json: UnsafePointer<CCh
             if titleMoved && host.entry == "button.groupbox" { GroupBoxTitle.apply(host) }
         }
         // a window sidebar attaches once the host view sits in a window
-        (host.owned as? WindowPanes)?.update()
+        (host.owned as? WindowChrome)?.update()
     }
 }
 
@@ -158,7 +162,7 @@ public func w2s_swift_control_destroy(_ handle: UInt64) {
     W2S.lock.unlock()
     guard let host = host else { return }
     DispatchQueue.main.async {
-        (host.owned as? WindowPanes)?.detach()  // before the hosting view leaves
+        (host.owned as? WindowChrome)?.detach()  // before the hosting view leaves
         host.hosting?.removeFromSuperview()
         host.hosting = nil
         (host.owned as? MenuBar)?.remove()     // its items leave the menu bar with it
