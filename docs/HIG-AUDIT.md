@@ -11,8 +11,8 @@ The rule of the project: a real macOS component, never a copy of one.
 | Push buttons | push button, default button, ellipsis when more input follows | NSButton / SwiftUI Button; BS_DEFPUSHBUTTON is the default button; "..." shows as "…" |
 | Checkboxes, radio buttons | checkboxes and radio buttons in the window body, never switches in place of checkboxes | checkboxes stay checkboxes, radios stay radios |
 | Group boxes | "By default, macOS displays a box's title above it" | NSBox, title above when there is room |
-| Tab views | at most six tabs; no pop-up to switch tabs | NSTabView up to 5 pages; more become a window sidebar |
-| Sidebars | system sidebar, toggle in the toolbar, full height | NSSplitViewController sidebar item, toolbar toggle, full-size content view |
+| Tab views | at most six tabs; no pop-up to switch tabs | NSTabView up to 6 pages |
+| Settings windows | a toolbar of panes, the title following the pane | property sheets over 6 pages: a preference-style NSToolbar in the frame, one text pane per page |
 | Pop-up buttons | flat list of exclusive options | drop-down lists are NSPopUpButton |
 | Combo boxes | text input paired with a list | editable combos are NSComboBox |
 | Segmented controls | switching views in the window body is a tab view's job | TCS_BUTTONS tabs only become segmented controls |
@@ -35,6 +35,8 @@ The rule of the project: a real macOS component, never a copy of one.
 - Titles ending in "..." show macOS's ellipsis character ("Font…").
 - Steppers: Shift-click steps by 10.
 - A document window's text view (notepad's) has no border.
+- Settings windows (property sheets over six pages, winecfg) switch panes with a
+  toolbar in the window's frame instead of a sidebar; the title follows the pane.
 
 ## Left open (need a decision or a screen)
 
@@ -43,17 +45,12 @@ The rule of the project: a real macOS component, never a copy of one.
    app puts them (native buttons, no bezels). Moving them into the window's
    NSToolbar changes the app's layout (its client area grows by the toolbar's
    height), so it needs checking live.
-2. **Settings windows.** HIG: an app's settings window has a toolbar of panes
-   (Safari, Mail), not a sidebar; System Settings is the exception. Property
-   sheets with more than five pages use a sidebar, as asked. A toolbar of
-   panes would follow the HIG for settings-like sheets (winecfg); it is a
-   choice to make.
-3. **Scroll bars of plain windows.** Windows that scroll themselves
+2. **Scroll bars of plain windows.** Windows that scroll themselves
    (WS_VSCROLL/WS_HSCROLL on an owner-drawn list, a RichEdit) keep wine's
    Windows scroll bars. NSScroller over the non-client area is the fix; it is
    big and needs a screen to verify.
-4. **Alert button titles.** HIG: avoid "OK" as the default unless the alert
+3. **Alert button titles.** HIG: avoid "OK" as the default unless the alert
    only informs. MessageBox's buttons are the app's choice (MB_OKCANCEL...);
    the titles stay as Windows gives them.
-5. **Status bars.** HIG: avoid critical information in a bottom bar. Status
+4. **Status bars.** HIG: avoid critical information in a bottom bar. Status
    bars are the app's; they show as a macOS bottom bar. Nothing to change.

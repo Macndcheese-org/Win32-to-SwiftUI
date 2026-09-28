@@ -128,8 +128,8 @@ struct Snapshot: Codable, Equatable {
     // tree view
     var nodes: [TreeNode]?
     var sidebar: Bool?
-    var mode: String?           // tab: "strip", "window" (a property sheet's real window sidebar) or "wizard"
-    var sidebarPx: Double?
+    var mode: String?           // tab: "strip", "panes" (a settings window's toolbar of panes) or "wizard"
+    var sidebarPx: Double?      // wizard: the steps' width
     // wizard: the active page's header, drawn above the page from headerPx (x, page top)
     var heading: String?
     var subheading: String?
@@ -242,8 +242,8 @@ final class PassThroughHostingView<Content: View>: NSHostingView<Content> {
             return { [weak model] point, size in
                 guard let snap = model?.snap else { return false }
                 switch snap.mode {
-                case "wizard", "sidebar", "window":
-                    return false        // the steps, header and sidebar can't be clicked here
+                case "wizard", "panes":
+                    return false        // the steps and header can't be clicked; the panes are in the toolbar
                 default:
                     // the tabs, straddling the box's top (or bottom) edge (flipped)
                     return (snap.bottom ?? false) ? point.y > size.height - 34 : point.y < 34
@@ -311,53 +311,133 @@ final class ControlHost {
     }
 }
 
-/// A tab control in mode "window": its WindowSidebar, hosted as the native
-/// sidebar of the window's split view (winemac's w2sAttachSidebar:). Kept in
-/// the host's `owned`, so it lives exactly as long as the control. Main thread.
-final class WindowSidebarAttach {
+/// A tab control in mode "panes": a property sheet with more pages than a
+/// tab view should have (HIG: six) is a settings window, and a Mac settings
+/// window switches panes with a toolbar in its frame (HIG, Settings): one item
+/// per page, text only (Win32 pages have no icons, none is made up), the shown
+/// pane selected, the window titled after it. Choosing one emits the same
+/// "select" the tab strip emits. The toolbar lives as long as the tab control.
+final class WindowPanes: NSObject, NSToolbarDelegate {
     weak var host: ControlHost?
-    var controller: NSHostingController<WindowSidebar>?
+    private(set) var toolbar: NSToolbar?
+    private var titles: [String] = []
     private var retries = 0
+    private var widenings = 0
+    private var titleWatch: NSKeyValueObservation?
 
     init(host: ControlHost) { self.host = host }
 
-    /// Attach once the host view sits in a window; before that (or after a
-    /// snapshot that still says "window") retry briefly on the main thread.
+    private func id(_ i: Int) -> NSToolbarItem.Identifier { .init("w2s.pane.\(i)") }
+
+    /// the shown pane's name, which the window's title follows
+    private var paneTitle: String? {
+        guard let selection = host?.model.snap.selection, titles.indices.contains(selection) else { return nil }
+        return titles[selection]
+    }
+
+    /// Attach once the host view sits in a window (retry briefly before that);
+    /// afterwards follow the pages and the selection.
     func update() {
-        guard let host = host, controller == nil, host.model.snap.mode == "window" else { return }
+        guard let host = host, host.model.snap.mode == "panes" else { return }
         guard let window = host.hosting?.window else {
             guard W2S.control(host.handle) != nil, host.hosting != nil, retries < 100 else { return }
             retries += 1
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.update() }
             return
         }
-        let vc = NSHostingController(rootView: WindowSidebar(model: host.model))
-        controller = vc
-        window.perform(NSSelectorFromString("w2sAttachSidebar:widthNumber:"),
-                       with: vc, with: NSNumber(value: host.model.snap.sidebarPx ?? 240))
+        let titles = (host.model.snap.items ?? []).map { stripMnemonic($0) }
+        if toolbar == nil {
+            self.titles = titles
+            // an identifier of its own: toolbars sharing one keep their items in sync
+            let toolbar = NSToolbar(identifier: "org.winehq.w2s.panes.\(host.handle)")
+            toolbar.delegate = self
+            toolbar.displayMode = .labelOnly
+            toolbar.allowsUserCustomization = false
+            self.toolbar = toolbar
+            window.perform(NSSelectorFromString("w2sAttachToolbar:"), with: [
+                "toolbar": toolbar,
+                "style": NSNumber(value: NSWindow.ToolbarStyle.preference.rawValue),
+                "extraWidth": NSNumber(value: Double(extraWidth(window, titles: titles))),
+            ] as NSDictionary)
+            DispatchQueue.main.async { [weak self] in self?.fit() }
+            // the sheet sets its caption as it starts (and may again): the title follows the pane
+            titleWatch = window.observe(\.title, options: [.new]) { [weak self] window, _ in
+                DispatchQueue.main.async {
+                    guard let title = self?.paneTitle, self?.toolbar != nil, window.title != title else { return }
+                    window.title = title
+                }
+            }
+        } else if titles != self.titles, let toolbar = toolbar {
+            self.titles = titles
+            while !toolbar.items.isEmpty { toolbar.removeItem(at: 0) }
+            for i in titles.indices { toolbar.insertItem(withItemIdentifier: id(i), at: i) }
+            window.perform(NSSelectorFromString("w2sSetExtraWidth:"),
+                           with: NSNumber(value: Double(extraWidth(window, titles: titles))))
+            widenings = 0
+            DispatchQueue.main.async { [weak self] in self?.fit() }
+        }
+        let selection = host.model.snap.selection ?? 0
+        if titles.indices.contains(selection) {
+            if toolbar?.selectedItemIdentifier != id(selection) { toolbar?.selectedItemIdentifier = id(selection) }
+            if window.title != titles[selection] { window.title = titles[selection] }   // the title follows the pane
+        }
     }
 
-    /// The control is going (or stopped being a window sidebar): the split
-    /// view, toolbar and wine view go back to plain. Without a window there
-    /// is nothing to undo (a closed window drops them with itself).
+    /// wine's content (a fixed-size dialog) may be narrower than the panes: the
+    /// window is widened around it so every pane shows, never an overflow menu
+    private func extraWidth(_ window: NSWindow, titles: [String]) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        // a label-only item is its text and a little padding; fit() widens more if that's short
+        let needed = titles.reduce(CGFloat(40)) { total, title in
+            total + (title as NSString).size(withAttributes: [.font: font]).width + 14
+        }
+        return max(0, ceil(needed - wineWidth(window)))
+    }
+
+    private func wineWidth(_ window: NSWindow) -> CGFloat {
+        let view = window.perform(NSSelectorFromString("wineContentView"))?.takeUnretainedValue() as? NSView
+        return view?.frame.width ?? window.contentView?.frame.width ?? 0
+    }
+
+    /// the estimate fell short (the toolbar hid items in its overflow menu): wider
+    private func fit() {
+        guard let toolbar = toolbar, let window = host?.hosting?.window, widenings < 12,
+              let visible = toolbar.visibleItems, visible.count < titles.count else { return }
+        widenings += 1
+        let now = window.frame.width - wineWidth(window)
+        window.perform(NSSelectorFromString("w2sSetExtraWidth:"), with: NSNumber(value: Double(now + 30)))
+        DispatchQueue.main.async { [weak self] in self?.fit() }
+    }
+
+    /// The control is going (or stopped being panes): the window goes back to
+    /// plain. Without a window there is nothing to undo.
     func detach() {
-        guard controller != nil else { return }
-        controller = nil
-        host?.hosting?.window?.perform(NSSelectorFromString("w2sDetachSidebar"))
+        guard toolbar != nil else { return }
+        titleWatch = nil
+        toolbar = nil
+        host?.hosting?.window?.perform(NSSelectorFromString("w2sDetachToolbar"))
     }
 
-    /// Collapse state for the tests' queries (nil without a window).
-    func collapsed() -> Bool? {
-        guard let window = host?.hosting?.window else { return nil }
-        let sel = NSSelectorFromString("w2sSidebarCollapsed")
-        guard window.responds(to: sel) else { return nil }
-        typealias GetBool = @convention(c) (AnyObject, Selector) -> Bool
-        return unsafeBitCast(window.method(for: sel), to: GetBool.self)(window, sel)
+    @objc func chosen(_ item: NSToolbarItem) {
+        guard let host = host, item.tag != host.model.snap.selection else { return }
+        host.model.snap.selection = item.tag
+        host.model.emit(["t": "select", "v": item.tag])
     }
 
-    func setCollapsed(_ collapsed: Bool) {
-        host?.hosting?.window?.perform(NSSelectorFromString("w2sSetSidebarCollapsed:"),
-                                       with: NSNumber(value: collapsed))
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { titles.indices.map(id) }
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { titles.indices.map(id) }
+    func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { titles.indices.map(id) }
+
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier,
+                 willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        guard let i = titles.indices.first(where: { id($0) == identifier }) else { return nil }
+        let item = NSToolbarItem(itemIdentifier: identifier)
+        item.label = titles[i]
+        item.paletteLabel = titles[i]
+        item.tag = i
+        item.target = self
+        item.action = #selector(chosen(_:))
+        return item
     }
 }
 

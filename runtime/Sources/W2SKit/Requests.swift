@@ -690,30 +690,22 @@ enum Debug {
                 }
                 if let s = bar(hosting) { out["tabBarWidth"] = Int(s.frame.width) }
             }
-            if host.entry == "tab", let attach = host.owned as? WindowSidebarAttach {
-                out["windowSidebar"] = attach.controller != nil
-                out["sidebarCollapsed"] = attach.collapsed() ?? false
-                if let view = attach.controller?.view {
-                    // the list's rows as AppKit lays them out (a List is an NSTableView)
-                    func table(_ v: NSView) -> NSTableView? {
-                        if let t = v as? NSTableView { return t }
-                        for sub in v.subviews { if let t = table(sub) { return t } }
-                        return nil
-                    }
-                    if let t = table(view), let window = view.window, t.numberOfRows > 0 {
-                        let row = t.convert(t.rect(ofRow: 0), to: nil)
-                        out["sidebarRows"] = t.numberOfRows
-                        out["firstRowTop"] = Int(window.frame.height - row.maxY)   // from the window's top
-                        out["firstRowVisible"] = !t.visibleRect.intersection(t.rect(ofRow: 0)).isEmpty
-                    }
-                    out["sidebarSafeTop"] = Int(view.safeAreaInsets.top)
-                    out["sidebarFrame"] = [Int(view.frame.minX), Int(view.frame.minY), Int(view.frame.width), Int(view.frame.height)]
+            if host.entry == "tab", let panes = host.owned as? WindowPanes {
+                out["windowPanes"] = panes.toolbar != nil
+                if let toolbar = panes.toolbar, let window = host.hosting?.window {
+                    out["paneItems"] = toolbar.items.map { $0.label }
+                    out["paneVisible"] = toolbar.visibleItems?.count ?? 0
+                    out["selectedPane"] = toolbar.selectedItemIdentifier?.rawValue ?? ""
+                    out["windowTitle"] = window.title
+                    out["toolbarStyle"] = window.toolbarStyle == .preference ? "preference" : "other"
+                    out["toolbarInWindow"] = window.toolbar === toolbar
                 }
-                // where wine's content sits in the window: after the sidebar, below the toolbar
+                // where wine's content sits in the window: below the toolbar, centred
                 if let window = host.hosting?.window,
                    let wineView = window.perform(NSSelectorFromString("wineContentView"))?.takeUnretainedValue() as? NSView {
                     let r = wineView.convert(wineView.bounds, to: nil)
                     out["wineViewX"] = Int(r.minX)
+                    out["wineViewTop"] = Int(window.frame.height - r.maxY)
                     out["windowWidth"] = Int(window.frame.width)
                     out["wineViewWidth"] = Int(r.width)
                 }
@@ -757,11 +749,14 @@ enum Debug {
             }
             guard let host = W2S.control(handle) else { return "{\"error\":\"no control\"}" }
             if event["t"] as? String == "capture" { return Requests.capture(host.hosting?.window, to: event["s"] as? String) }
-            if event["t"] as? String == "sidebarCollapse" {
-                // tests: collapse or expand the window sidebar (window chrome only,
-                // wine's content doesn't move, so nothing is reported to Win32)
-                (host.owned as? WindowSidebarAttach)?
-                    .setCollapsed((event["v"] as? NSNumber)?.boolValue ?? false)
+            if event["t"] as? String == "paneClick" {
+                // tests: a click on toolbar pane v, through the item's own target and action
+                guard let panes = host.owned as? WindowPanes, let toolbar = panes.toolbar,
+                      let index = event["v"] as? Int, toolbar.items.indices.contains(index),
+                      let action = toolbar.items[index].action
+                else { return "{\"error\":\"no pane\"}" }
+                let item = toolbar.items[index]
+                NSApp.sendAction(action, to: item.target, from: item)
                 return "{\"ok\":true}"
             }
             if event["t"] as? String == "realClick" {

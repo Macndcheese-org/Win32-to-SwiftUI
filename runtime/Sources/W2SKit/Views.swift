@@ -11,7 +11,7 @@ enum ControlViews {
     // map: progress trackbar tab static.frame statusbar edit.multiline combobox.editable treeview
     // map: updown datetime monthcal tooltip (as .help on every control: HelpText)
     // map: listview.checkboxes listview.icon
-    // map: propsheet propsheet.wizard (modes of the sheet's tab control: WindowSidebar, WizardSteps)
+    // map: propsheet propsheet.wizard (modes of the sheet's tab control: WindowPanes, WizardSteps)
     // map: toolbar rebar comboboxex syslink trackbar.vertical
     static let entries: Set<String> = [
         "button.push", "button.default", "button.checkbox", "button.pushlike", "button.radio", "button.groupbox",
@@ -1924,9 +1924,9 @@ struct TabStrip: View {
     @ObservedObject var model: ControlModel
 
     var body: some View {
-        if model.snap.mode == "sidebar" || model.snap.mode == "window" {
-            // the sidebar is a real window sidebar, outside wine's content:
-            // nothing is drawn here
+        if model.snap.mode == "panes" {
+            // the panes are a toolbar in the window's frame, outside wine's
+            // content: nothing is drawn here
             EmptyView()
         } else if model.snap.mode == "wizard" {
             WizardSteps(model: model)
@@ -1945,8 +1945,8 @@ struct TabStrip: View {
 /// windows the app shows and hides, is drawn by wine inside the box, whose fill
 /// is translucent. The tab items are empty: the tab control answers
 /// TCM_ADJUSTRECT with this box's insets, so wine puts the page in it. Too many
-/// tabs for the width are clipped, as NSTabView does; a property sheet with that
-/// many pages gets the window's sidebar instead.
+/// tabs for the width are clipped, as NSTabView does; a property sheet with more
+/// pages than a tab view should have gets a toolbar of panes instead (WindowPanes).
 struct TabBox: View {
     @ObservedObject var model: ControlModel
     @State private var placed = false
@@ -1969,34 +1969,6 @@ struct TabBox: View {
         // and when the tabs change.
         .id("\(placed)|\(items.joined(separator: "|"))")
         .onAppear { DispatchQueue.main.async { placed = true } }
-    }
-}
-
-/// map: propsheet (more than 5 pages, macOS 13+): the window's native sidebar.
-/// This is not drawn in the tab control's in-window view (EmptyView above):
-/// it is hosted as the sidebar of the window's split view (WindowSidebarAttach),
-/// a real List in the sidebar style (native row height, rounded selection,
-/// accent colour, keyboard) on the system sidebar material. Plain rows, no
-/// icons: Win32 pages have none. Selecting a row emits the same "select" event
-/// the tab strip emits.
-struct WindowSidebar: View {
-    @ObservedObject var model: ControlModel
-
-    var body: some View {
-        let items = model.snap.items ?? []
-        let selection = Binding<Int?>(
-            get: { model.snap.selection.flatMap { $0 >= 0 ? $0 : nil } },
-            set: { i in
-                guard let i = i, i != model.snap.selection else { return }
-                model.snap.selection = i
-                model.emit(["t": "select", "v": i])
-            })
-        List(selection: selection) {
-            ForEach(items.indices, id: \.self) { i in
-                Text(stripMnemonic(items[i])).tag(Optional(i))
-            }
-        }
-        .listStyle(.sidebar)
     }
 }
 

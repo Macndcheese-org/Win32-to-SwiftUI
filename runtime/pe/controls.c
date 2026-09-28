@@ -1643,28 +1643,28 @@ static const struct w2s_kind kind_monthcal = { "monthcal", monthcal_snapshot, mo
 
 /* ---------- Tab ---------- */
 
-/* A top-level property sheet with more than 5 pages gets a real window sidebar
- * from macOS 13 (the map's propsheet entry): an NSSplitViewController whose
- * sidebar lists the pages, outside wine's content. The sheet's tab control
- * carries it: in this mode TCM_ADJUSTRECT is answered with no change (the
- * page area is the tab control's whole rectangle: the tabs are in the
- * window's sidebar, outside wine's content). The tab control's own in-window
- * view draws nothing and passes clicks through. */
+/* A top-level property sheet with more than 6 pages is a settings window
+ * (the map's propsheet entry): its pages are a toolbar of panes in the
+ * window's frame, outside wine's content. The sheet's tab control carries
+ * it: in this mode TCM_ADJUSTRECT is answered with no change (the page area
+ * is the tab control's whole rectangle: the tabs are in the toolbar). The
+ * tab control's own in-window view draws nothing and passes clicks through. */
 #define IDC_PROPSHEET_TAB 12320     /* comctl32's IDC_TABCONTROL */
 
 struct tab_data
 {
     BOOL decided;
-    BOOL window;                      /* a real window sidebar, not a strip */
-    int width;                        /* sidebar width, points */
+    BOOL panes;                       /* a settings window's toolbar of panes, not a strip */
 };
 
 /* decided at the first layout query (TCM_ADJUSTRECT), when the sheet has all
- * its pages: the tabs arrive one by one before that */
+ * its pages: the tabs arrive one by one before that. A property sheet with
+ * more pages than a tab view should have (HIG: six) is a settings window,
+ * whose panes a Mac app switches with a toolbar in the window's frame. */
 static struct tab_data *tab_layout( struct w2s_control *ctl, BOOL decide )
 {
     struct tab_data *data = ctl->data;
-    int i, count = (int)SendMessageW( ctl->hwnd, TCM_GETITEMCOUNT, 0, 0 );
+    int count = (int)SendMessageW( ctl->hwnd, TCM_GETITEMCOUNT, 0, 0 );
     WCHAR parent_class[16] = {0};
     HWND parent = GetParent( ctl->hwnd );
     DWORD style;
@@ -1675,34 +1675,9 @@ static struct tab_data *tab_layout( struct w2s_control *ctl, BOOL decide )
     data->decided = TRUE;
     GetClassNameW( parent, parent_class, ARRAYSIZE(parent_class) );
     style = GetWindowLongW( parent, GWL_STYLE );
-    data->window = count > 5 && w2s_os_major >= 13 && !wcscmp( parent_class, L"#32770" ) &&
-                   GetDlgCtrlID( ctl->hwnd ) == IDC_PROPSHEET_TAB &&
-                   (style & WS_CAPTION) && !(style & WS_CHILD);
-    if (data->window)
-    {
-        HFONT font = (HFONT)SendMessageW( ctl->hwnd, WM_GETFONT, 0, 0 );
-        HDC hdc = GetDC( ctl->hwnd );
-        HGDIOBJ old = SelectObject( hdc, font ? font : GetStockObject( DEFAULT_GUI_FONT ) );
-        int widest = 0;
-        WCHAR text[256];
-        SIZE size;
-
-        for (i = 0; i < count; i++)
-        {
-            TCITEMW item = { TCIF_TEXT };
-            text[0] = 0;
-            item.pszText = text;
-            item.cchTextMax = ARRAYSIZE(text);
-            SendMessageW( ctl->hwnd, TCM_GETITEMW, i, (LPARAM)&item );
-            if (GetTextExtentPoint32W( hdc, text, wcslen( text ), &size )) widest = max( widest, size.cx );
-        }
-        SelectObject( hdc, old );
-        ReleaseDC( ctl->hwnd, hdc );
-        /* plain rows, no icons: the widest title larger than the dialog font
-         * (13 pt vs 11 px), with room for the list's insets */
-        data->width = min( max( widest * 4 / 3 + 60, 180 ), 320 );
-        TRACE( "%p: property sheet with %d pages gets a %d pt window sidebar\n", ctl->hwnd, count, data->width );
-    }
+    data->panes = count > 6 && !wcscmp( parent_class, L"#32770" ) && GetDlgCtrlID( ctl->hwnd ) == IDC_PROPSHEET_TAB &&
+                  (style & WS_CAPTION) && !(style & WS_CHILD);
+    if (data->panes) TRACE( "%p: property sheet with %d pages gets a toolbar of panes\n", ctl->hwnd, count );
     return data;
 }
 
@@ -1715,9 +1690,9 @@ static BOOL tab_answer( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM
     if (!(data = ctl->data) || !data->decided)
     {
         data = tab_layout( ctl, TRUE );
-        if (data->window) w2s_push( ctl, FALSE );
+        if (data->panes) w2s_push( ctl, FALSE );
     }
-    if (!data->window)
+    if (!data->panes)
     {
         /* SwiftUI's TabView (an NSTabView): the page goes in its box, below (or
          * above, TCS_BOTTOM) the tabs straddling its edge. The box fills the
@@ -1744,7 +1719,7 @@ static BOOL tab_answer( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM
         *ret = 0;
         return TRUE;
     }
-    /* a window sidebar: the page area is the tab control's whole rectangle */
+    /* panes: the page area is the tab control's whole rectangle (its tabs are in the toolbar) */
     *ret = 0;
     return TRUE;
 }
@@ -1772,9 +1747,8 @@ static void tab_snapshot( struct w2s_control *ctl, struct json *j )
 {
     struct tab_data *data = tab_layout( ctl, FALSE );
 
-    json_str_a( j, "mode", data->window ? "window" : "strip" );
+    json_str_a( j, "mode", data->panes ? "panes" : "strip" );
     json_bool( j, "bottom", (GetWindowLongW( ctl->hwnd, GWL_STYLE ) & TCS_BOTTOM) != 0 );
-    if (data->window) json_int( j, "sidebarPx", data->width );
     tab_items( ctl, j );
 }
 

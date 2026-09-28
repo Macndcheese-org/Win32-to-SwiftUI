@@ -2117,47 +2117,41 @@ static int selftest(void)
         }
     }
 
-    /* property sheets: more than 5 pages get the window's native sidebar (an
-     * NSSplitViewController, macOS 13+) outside wine's content; fewer keep the strip */
+    /* property sheets: more than 6 pages are a settings window, whose panes are a
+     * toolbar in the window's frame (HIG); fewer keep the tab view */
     {
         HWND sheet = property_sheet( 7, TRUE ), tab, page;
-        RECT tab_rc, page_rc, sheet_rc, rc;
-        int x;
+        RECT tab_rc, page_rc;
+        int x, extra;
 
         pump( 800 );
         tab = (HWND)SendMessageW( sheet, PSM_GETTABCONTROL, 0, 0 );
-        check( pIsTranslated( tab ) && query_has( tab, "\"mode\":\"window\"" ) &&
-               query_has( tab, "\"windowSidebar\":true" ),
-               "a 7-page property sheet gets the window's native sidebar (split view)" );
-        check( query_int( tab, "sidebarRows" ) == 7 && query_int( tab, "firstRowTop" ) >= 28 &&
-               query_int( tab, "firstRowTop" ) >= query_int( tab, "sidebarSafeTop" ) &&
-               query_has( tab, "\"firstRowVisible\":true" ),
-               "the sidebar lists the pages, starting below the titlebar and toolbar" );
+        check( pIsTranslated( tab ) && query_has( tab, "\"mode\":\"panes\"" ) &&
+               query_has( tab, "\"windowPanes\":true" ) && query_has( tab, "\"toolbarInWindow\":true" ) &&
+               query_has( tab, "\"toolbarStyle\":\"preference\"" ),
+               "a 7-page property sheet is a settings window: a toolbar of panes in the window's frame" );
+        check( query_has( tab, "\"paneItems\":[\"General\",\"Appearance\"" ) && query_int( tab, "paneVisible" ) == 7 &&
+               query_has( tab, "\"selectedPane\":\"w2s.pane.0\"" ) && query_has( tab, "\"windowTitle\":\"General\"" ),
+               "one text pane per page, all visible, the shown one selected, the window titled after it" );
         x = query_int( tab, "wineViewX" );
-        check( x >= 150 && query_int( tab, "windowWidth" ) - query_int( tab, "wineViewWidth" ) == x,
-               "wine's content sits right of the sidebar, which is outside it" );
+        extra = query_int( tab, "windowWidth" ) - query_int( tab, "wineViewWidth" );
+        check( x >= 0 && (extra - 2 * x == 0 || extra - 2 * x == 1) && query_int( tab, "wineViewTop" ) >= 50,
+               "wine's content sits below the toolbar, centred when the panes need a wider window" );
         page = (HWND)SendMessageW( sheet, PSM_GETCURRENTPAGEHWND, 0, 0 );
         GetWindowRect( tab, &tab_rc );
         GetWindowRect( page, &page_rc );
-        check( page_rc.left - tab_rc.left < 8, "the pages fill the tab control's area (its tabs are in the sidebar)" );
-        inject( tab, "{\"t\":\"select\",\"v\":3}" );
-        pump( 300 );
+        check( page_rc.left - tab_rc.left < 8, "the pages fill the tab control's area (its tabs are in the toolbar)" );
+        inject( tab, "{\"t\":\"paneClick\",\"v\":3}" );
+        pump( 400 );
         page = (HWND)SendMessageW( sheet, PSM_GETCURRENTPAGEHWND, 0, 0 );
         check( page && page == (HWND)SendMessageW( sheet, PSM_INDEXTOHWND, 3, 0 ) && IsWindowVisible( page ) &&
-               query_has( tab, "\"selection\":3" ),
-               "a native sidebar choice switches the page" );
-        /* the sidebar's toggle: the window grows and shrinks around wine's content */
-        GetWindowRect( sheet, &sheet_rc );
-        inject( tab, "{\"t\":\"sidebarCollapse\",\"v\":1}" );
-        pump( 800 );
-        GetWindowRect( sheet, &rc );
-        check( query_has( tab, "\"sidebarCollapsed\":true" ) && query_int( tab, "wineViewX" ) == 0 && EqualRect( &rc, &sheet_rc ),
-               "hiding the sidebar shrinks the window, wine's content and rect stay" );
-        inject( tab, "{\"t\":\"sidebarCollapse\",\"v\":0}" );
-        pump( 800 );
-        GetWindowRect( sheet, &rc );
-        check( query_has( tab, "\"sidebarCollapsed\":false" ) && query_int( tab, "wineViewX" ) == x && EqualRect( &rc, &sheet_rc ),
-               "showing it again grows the window back" );
+               query_has( tab, "\"selection\":3" ) && query_has( tab, "\"selectedPane\":\"w2s.pane.3\"" ) &&
+               query_has( tab, "\"windowTitle\":\"Displays\"" ),
+               "a click on a pane switches the page; the pane stays selected, the title follows" );
+        SendMessageW( sheet, PSM_SETCURSEL, 1, 0 );
+        pump( 400 );
+        check( query_has( tab, "\"selectedPane\":\"w2s.pane.1\"" ) && query_has( tab, "\"windowTitle\":\"Appearance\"" ),
+               "PSM_SETCURSEL moves the selected pane and the title" );
         DestroyWindow( sheet );
         pump( 200 );
 
