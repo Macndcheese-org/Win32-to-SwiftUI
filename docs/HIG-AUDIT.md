@@ -1,0 +1,59 @@
+# HIG audit of the conversions
+
+Each conversion in the map checked against Apple's Human Interface Guidelines
+(macOS sections; local copy `~/Downloads/hig/apple-hig-markdown`), 2026-09-28.
+The rule of the project: a real macOS component, never a copy of one.
+
+## Conforms
+
+| Area | HIG | What the runtime does |
+|---|---|---|
+| Push buttons | push button, default button, ellipsis when more input follows | NSButton / SwiftUI Button; BS_DEFPUSHBUTTON is the default button; "..." shows as "…" |
+| Checkboxes, radio buttons | checkboxes and radio buttons in the window body, never switches in place of checkboxes | checkboxes stay checkboxes, radios stay radios |
+| Group boxes | "By default, macOS displays a box's title above it" | NSBox, title above when there is room |
+| Tab views | at most six tabs; no pop-up to switch tabs | NSTabView up to 5 pages; more become a window sidebar |
+| Sidebars | system sidebar, toggle in the toolbar, full height | NSSplitViewController sidebar item, toolbar toggle, full-size content view |
+| Pop-up buttons | flat list of exclusive options | drop-down lists are NSPopUpButton |
+| Combo boxes | text input paired with a list | editable combos are NSComboBox |
+| Segmented controls | switching views in the window body is a tab view's job | TCS_BUTTONS tabs only become segmented controls |
+| Sliders | tick marks where the app has them; vertical only when needed | NSSlider with the trackbar's ticks, vertical NSSlider for TBS_VERT |
+| Steppers | Shift-click for large ranges | Shift-click steps by 10 |
+| Progress | determinate when possible; bar or spinner | NSProgressIndicator; marquee is indeterminate |
+| Tables | sortable headings, resizable columns, alternating rows | SwiftUI Table; a heading click is LVN_COLUMNCLICK (the app sorts) |
+| Outline views | hierarchy in the first column, keep expansion | tree views are outlines with the app's expansion state |
+| Text fields | hints, secure fields | EM_SETCUEBANNER is the placeholder; ES_PASSWORD is a SecureField |
+| Text views | a document's text fills its window | a document window's multi-line edit has no border, as TextEdit's |
+| Popovers | small, transient information near its source | edit balloon tips are popovers on the field |
+| Alerts | NSAlert, button order, Escape cancels | MessageBox is NSAlert (sheet on its owner) |
+| Panels | prefer the standard panels | Open/Save, Colours, Fonts, Print, Page Setup, Find are AppKit's own |
+| Menus | the menu bar, key equivalents, check marks, ellipsis | the window's menu is the Mac menu bar; Ctrl becomes Command; "..." shows as "…" |
+| About | the standard About panel | ShellAbout is AppKit's About panel |
+| Dock | progress and attention on the Dock icon | taskbar progress is on the Dock tile; FlashWindowEx bounces the icon |
+
+## Fixed in this audit
+
+- Titles ending in "..." show macOS's ellipsis character ("Font…").
+- Steppers: Shift-click steps by 10.
+- A document window's text view (notepad's) has no border.
+
+## Left open (need a decision or a screen)
+
+1. **Toolbars belong in the window frame.** HIG: "In a macOS app, the toolbar
+   resides in the frame at the top of a window". Win32 toolbars stay where the
+   app puts them (native buttons, no bezels). Moving them into the window's
+   NSToolbar changes the app's layout (its client area grows by the toolbar's
+   height), so it needs checking live.
+2. **Settings windows.** HIG: an app's settings window has a toolbar of panes
+   (Safari, Mail), not a sidebar; System Settings is the exception. Property
+   sheets with more than five pages use a sidebar, as asked. A toolbar of
+   panes would follow the HIG for settings-like sheets (winecfg); it is a
+   choice to make.
+3. **Scroll bars of plain windows.** Windows that scroll themselves
+   (WS_VSCROLL/WS_HSCROLL on an owner-drawn list, a RichEdit) keep wine's
+   Windows scroll bars. NSScroller over the non-client area is the fix; it is
+   big and needs a screen to verify.
+4. **Alert button titles.** HIG: avoid "OK" as the default unless the alert
+   only informs. MessageBox's buttons are the app's choice (MB_OKCANCEL...);
+   the titles stay as Windows gives them.
+5. **Status bars.** HIG: avoid critical information in a bottom bar. Status
+   bars are the app's; they show as a macOS bottom bar. Nothing to change.
