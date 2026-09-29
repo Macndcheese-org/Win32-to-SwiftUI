@@ -1133,6 +1133,18 @@ static void CALLBACK task_dialog_first( HWND hwnd, UINT msg, UINT_PTR id, DWORD 
     SetTimer( hwnd, 4, 500, task_dialog_second );
 }
 
+/* /pick: while the panel is up, how the process is; then cancel it */
+static void CALLBACK pick_cancel( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    char *q = pQuery ? pQuery( NULL ) : NULL;
+
+    KillTimer( hwnd, id );
+    printf( "pick panel: %s\n", q ? q : "(null)" );
+    fflush( stdout );
+    if (q) pFree( q );
+    if (pInject) inject( NULL, "{\"t\":\"cancel\"}" );
+}
+
 /* an owner that can't have a sheet (another process's window; here a hidden one):
  * the panel comes over it, and doesn't hide when its app isn't the active one */
 static BOOL detached_ok;
@@ -3023,6 +3035,32 @@ int WINAPI wWinMain( HINSTANCE inst, HINSTANCE prev, WCHAR *cmdline, int show )
     wc.hbrBackground = NULL;
     wc.lpszClassName = L"W2SWhitePanel";
     RegisterClassW( &wc );
+    if (wcsstr( cmdline, L"/pick" ))
+    {
+        /* a process with no window of its own that opens a panel (steam.exe's "Add a drive") */
+        OPENFILENAMEW ofn = { sizeof(ofn) };
+        WCHAR file[MAX_PATH] = L"";
+
+        /* hidden windows of its own, as steam.exe has (the native UI loads with the first) */
+        HMODULE w2s;
+
+        CreateWindowExW( 0, L"Static", L"hidden", WS_OVERLAPPEDWINDOW, 0, 0, 10, 10, NULL, NULL, NULL, NULL );
+        if ((w2s = GetModuleHandleW( L"win32swiftui.dll" )))
+        {
+            pQuery = (void *)GetProcAddress( w2s, "W2SDebugQuery" );
+            pInject = (void *)GetProcAddress( w2s, "W2SDebugInject" );
+            pFree = (void *)GetProcAddress( w2s, "W2SDebugFree" );
+        }
+        /* /pick: the panel is cancelled after 4 s (tests); /pickstay: it stays */
+        if (!wcsstr( cmdline, L"/pickstay" )) SetTimer( NULL, 0, 4000, pick_cancel );
+        ofn.lpstrFile = file;
+        ofn.nMaxFile = MAX_PATH;
+        ofn.Flags = OFN_EXPLORER;
+        printf( "pick: %d %ls\n", GetOpenFileNameW( &ofn ), file );
+        fflush( stdout );
+        Sleep( 3000 );  /* the app as the panel left it */
+        return 0;
+    }
     main_window = CreateWindowExW( 0, L"W2SGallery", L"Win32-to-SwiftUI gallery", WS_OVERLAPPEDWINDOW,
                                    CW_USEDEFAULT, CW_USEDEFAULT, 1150, 720, NULL, NULL, inst, NULL );
     {

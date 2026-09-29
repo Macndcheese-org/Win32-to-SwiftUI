@@ -177,9 +177,10 @@ enum Requests {
         alert.layout()
         let window = alert.window
         window.center()
+        Detached.prepare(window)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-        if params["ownerRect"] != nil { Detached.show(window, params) }
+        Detached.show(window, params)
         if params["floating"] as? Bool == true { window.level = .floating }
     }
 
@@ -193,13 +194,16 @@ enum Requests {
         }
         alert.layout()
         let window = alert.window
-        if floating { window.level = .floating }
         window.center()
+        Detached.prepare(window)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        Detached.show(window, [:])
+        if floating { window.level = .floating }
     }
 
     static func dismiss(_ alert: NSAlert) {
+        Detached.forget(alert.window)
         if let parent = alert.window.sheetParent { parent.endSheet(alert.window) } else { alert.window.orderOut(nil) }
         retained.removeValue(forKey: ObjectIdentifier(alert))
     }
@@ -454,11 +458,13 @@ enum Requests {
              "multi": (panel as? NSOpenPanel)?.allowsMultipleSelection ?? false,
              "okEnabled": delegate.okEnabled, "sheet": panel.sheetParent != nil,
              "hidesOnDeactivate": panel.hidesOnDeactivate,
+             "policy": ["regular", "accessory", "prohibited"][NSApp.activationPolicy().rawValue],
              "overOwner": Detached.ownerFrame(params).map { $0.contains(NSPoint(x: panel.frame.midX, y: panel.frame.midY)) } ?? false]
         }
         if let owner = owner {
             panel.beginSheetModal(for: owner, completionHandler: complete)
         } else {
+            Detached.prepare(panel)
             NSApp.activate(ignoringOtherApps: true)
             panel.begin { response in
                 Detached.forget(panel)
@@ -854,6 +860,29 @@ enum Debug {
 /// behind another app it's an ordinary window.
 enum Detached {
     private static var observers: [ObjectIdentifier: NSObjectProtocol] = [:]
+    private static var lifted: [ObjectIdentifier: NSApplication.ActivationPolicy] = [:]
+
+    /// Before it shows. A process wine never showed a window for is one macOS won't
+    /// let become active ("prohibited": steam.exe, which only has hidden windows): a
+    /// click on its panel can't make it the active app, and the panel vanishes. Wine
+    /// makes a process a regular app when it shows a window; the panel does the same
+    /// once it is up (before, an open panel doesn't come up; and the process is put
+    /// back once as the panel first shows), until it goes.
+    static func prepare(_ window: NSWindow) {
+        window.hidesOnDeactivate = false
+        let policy = NSApp.activationPolicy()
+        if policy != .regular { lifted[ObjectIdentifier(window)] = policy }
+    }
+
+    /// once the panel is up: a regular app, and the active one
+    private static func settle(_ window: NSWindow, _ tries: Int) {
+        guard lifted[ObjectIdentifier(window)] != nil else { return }
+        if NSApp.activationPolicy() != .regular {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        if tries > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { settle(window, tries - 1) } }
+    }
 
     static func show(_ window: NSWindow, _ params: [String: Any]) {
         window.hidesOnDeactivate = false
@@ -872,7 +901,10 @@ enum Detached {
             window.level = app?.localizedName == NSRunningApplication.current.localizedName ? .floating : .normal
         }
         apply(NSWorkspace.shared.frontmostApplication)
-        forget(window)
+        if let token = observers.removeValue(forKey: ObjectIdentifier(window)) {
+            NSWorkspace.shared.notificationCenter.removeObserver(token)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { settle(window, 6) }
         observers[ObjectIdentifier(window)] = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { note in
             apply(note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)
@@ -880,8 +912,20 @@ enum Detached {
     }
 
     static func forget(_ window: NSWindow) {
-        guard let token = observers.removeValue(forKey: ObjectIdentifier(window)) else { return }
-        NSWorkspace.shared.notificationCenter.removeObserver(token)
+        if let token = observers.removeValue(forKey: ObjectIdentifier(window)) {
+            NSWorkspace.shared.notificationCenter.removeObserver(token)
+        }
+        // back as it was when the last such panel goes, unless wine has shown a
+        // window of its own meanwhile (it keeps its Dock icon then)
+        if let before = lifted.removeValue(forKey: ObjectIdentifier(window)), lifted.isEmpty {
+            // a regular app can't go straight back to prohibited: as an accessory one
+            // (no Dock icon) it is back there in a moment
+            if !showsWineWindow() { NSApp.setActivationPolicy(before == .prohibited ? .accessory : before) }
+        }
+    }
+
+    private static func showsWineWindow() -> Bool {
+        NSApp.windows.contains { $0.isVisible && NSStringFromClass(type(of: $0)).hasPrefix("Wine") }
     }
 
     /// The owner's frame in AppKit's coordinates, from its Win32 rectangle
