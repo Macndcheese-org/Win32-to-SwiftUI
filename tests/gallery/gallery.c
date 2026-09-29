@@ -1312,6 +1312,88 @@ static void selftest_look(void)
     check( query_has( ctl[ID_WHITECHECK], "\"checked\":0" ), "BM_SETCHECK -> the white page's native check box" );
 }
 
+/* wine's strips in an app's image list (as cryptui, aclui, hhctrl and ieframe make
+ * theirs) are known by their pixels and show as SF Symbols */
+static HIMAGELIST strip_list( const WCHAR *dll, UINT id, int size, UINT flags, COLORREF mask )
+{
+    HMODULE module = LoadLibraryW( dll );
+    HIMAGELIST himl;
+    HBITMAP bmp;
+
+    if (!module) return NULL;
+    if (mask == CLR_DEFAULT)    /* ieframe: the whole strip at once */
+        return ImageList_LoadImageW( module, MAKEINTRESOURCEW( id ), size, 0, CLR_NONE, IMAGE_BITMAP, LR_CREATEDIBSECTION );
+    himl = ImageList_Create( size, size, flags, 0, 4 );
+    bmp = LoadBitmapW( module, MAKEINTRESOURCEW( id ) );
+    if (mask == CLR_NONE) ImageList_Add( himl, bmp, NULL );
+    else ImageList_AddMasked( himl, bmp, mask );
+    DeleteObject( bmp );
+    return himl;
+}
+
+static void selftest_strips(void)
+{
+    static const struct
+    {
+        const WCHAR *dll;
+        UINT id;
+        int size;
+        UINT flags;
+        COLORREF mask;
+        const char *want[2];
+        const char *what;
+    } cases[] =
+    {
+        { L"cryptui.dll", 200, 16, ILC_COLOR4 | ILC_MASK, RGB(255, 0, 255),
+          { "\"0\":\"uttype:public.x509-certificate\"", "\"1\":\"sf:xmark.seal.fill;" },
+          "cryptui's certificates (a 4-bit masked list) show as the certificate file icon and a symbol" },
+        { L"aclui.dll", 2000, 18, ILC_COLOR32 | ILC_MASK, RGB(255, 0, 255),
+          { "\"0\":\"sf:person.2.fill\"", "\"1\":\"sf:person.fill\"" },
+          "aclui's group and user (a masked 32-bit list) show as person symbols" },
+        { L"hhctrl.ocx", 1000, 24, ILC_COLOR32, CLR_NONE,
+          { "\"0\":\"sf:xmark\"", "\"2\":\"sf:house\"" },
+          "the help viewer's toolbar strip (an unmasked 32-bit list) shows as symbols" },
+        { L"ieframe.dll", 1400, 32, 0, CLR_DEFAULT,
+          { "\"0\":\"sf:chevron.backward\"", "\"4\":\"sf:house\"" },
+          "Internet Explorer's toolbar strip (ImageList_LoadImage) shows as Safari's symbols" },
+    };
+    LVCOLUMNW col = { LVCF_WIDTH | LVCF_TEXT, 0, 120, (WCHAR *)L"Name" };
+    HWND win, lv, icon;
+    HICON folder;
+    unsigned int i, k;
+
+    win = CreateWindowExW( 0, L"W2SScrollHost", L"Strips", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 190, 190, 400, 300,
+                           NULL, NULL, GetModuleHandleW( NULL ), NULL );
+    lv = CreateWindowExW( 0, WC_LISTVIEWW, NULL, WS_CHILD | WS_VISIBLE | LVS_REPORT, 10, 10, 300, 200, win, NULL,
+                          GetModuleHandleW( NULL ), NULL );
+    SendMessageW( lv, LVM_INSERTCOLUMNW, 0, (LPARAM)&col );
+    for (k = 0; k < 5; k++)
+    {
+        LVITEMW item = { LVIF_TEXT | LVIF_IMAGE, (int)k, 0, 0, 0, (WCHAR *)L"Item", 0, (int)k };
+        SendMessageW( lv, LVM_INSERTITEMW, 0, (LPARAM)&item );
+    }
+    for (i = 0; i < ARRAYSIZE(cases); i++)
+    {
+        HIMAGELIST himl = strip_list( cases[i].dll, cases[i].id, cases[i].size, cases[i].flags, cases[i].mask );
+        HIMAGELIST old = (HIMAGELIST)SendMessageW( lv, LVM_SETIMAGELIST, LVSIL_SMALL, (LPARAM)himl );
+
+        if (old) ImageList_Destroy( old );
+        InvalidateRect( lv, NULL, TRUE );
+        pump( 500 );
+        check( himl && query_has( lv, cases[i].want[0] ) && query_has( lv, cases[i].want[1] ), cases[i].what );
+    }
+    /* comdlg32's named icons ("FOLDER") are known by their name */
+    folder = LoadImageW( LoadLibraryW( L"comdlg32.dll" ), L"FOLDER", IMAGE_ICON, 16, 16, LR_SHARED );
+    icon = CreateWindowExW( 0, L"Static", NULL, WS_CHILD | WS_VISIBLE | SS_ICON, 320, 10, 32, 32, win, NULL,
+                            GetModuleHandleW( NULL ), NULL );
+    SendMessageW( icon, STM_SETICON, (WPARAM)folder, 0 );
+    pump( 300 );
+    check( folder && query_has( icon, "\"imageSymbol\":\"uttype:public.folder\"" ),
+           "a string-named stock icon (comdlg32's FOLDER) shows as the Finder's folder" );
+    DestroyWindow( win );
+    pump( 200 );
+}
+
 /* scroll bars: a view of the app's own that scrolls itself, and a ScrollBar control */
 static int got_vscroll_code = -1, got_vscroll_pos = -1, got_bar_code = -1;
 static HWND got_bar_from;
@@ -2719,6 +2801,7 @@ static int selftest(void)
     selftest_document();
     selftest_frame_toolbar();
     selftest_scrollbars();
+    selftest_strips();
     selftest_about();
     selftest_taskbar();
     selftest_flash();

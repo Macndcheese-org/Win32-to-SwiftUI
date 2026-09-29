@@ -2,8 +2,12 @@
 #
 # Keys are <module>/<resource name>: the icon resources of wine's user32 (OIC_*, what
 # LoadIcon(NULL, IDI_*) loads), shell32 (IDI_SHELL_*, what the shell's file lists and
-# SHGetStockIconInfo use) and wine's own programs (regedit's keys and values). tools/gen_runtime_tables.py resolves each name to its id in the
-# wine headers and writes the runtime's table.
+# SHGetStockIconInfo use), comctl32 (balloon tips), comdlg32 (named resources: "FOLDER")
+# and wine's own programs (regedit's keys and values, taskmgr's windows). Every icon wine
+# has is here but the programs' own app icons (their identity, as a Mac app's is), the
+# empty BLANK* ones and the overlays drawn over another icon (SHORTCUT, DOWNLOAD_EMBLEM).
+# tools/gen_runtime_tables.py resolves each name to its id in the wine headers (tools/
+# maplib.py: ICON_MODULES) and writes the runtime's table.
 #
 # The runtime knows an icon by where it came from (GetIconInfoExW: module and resource id).
 # An icon copied into an image list has lost that, so the runtime also puts each stock icon
@@ -96,6 +100,149 @@ icons:
   shell32/IDI_SHELL_TRUETYPE_FONT: {uttype: public.truetype-ttf-font}
   shell32/IDI_SHELL_POSTSCRIPT_FONT: {uttype: com.adobe.postscript-font}
   shell32/IDI_SHELL_BACKUP: {sf: externaldrive.badge.timemachine}
+  # the rest of shell32's artwork (BLANK1-4 are empty, and the SHORTCUT and DOWNLOAD_EMBLEM
+  # overlays go over another icon: they stay as they are)
+  shell32/IDI_SHELL_APP_FOLDER_SMALL: {file: /Applications}
+  shell32/IDI_SHELL_CHECKLIST_FOLDER: {uttype: public.folder}
+  shell32/IDI_SHELL_DEFAULT_FOLDER: {uttype: public.folder}
+  shell32/IDI_SHELL_MODEM_FOLDER: {uttype: public.folder}
+  shell32/IDI_SHELL_NETWORK_FOLDER: {uttype: public.folder}
+  shell32/IDI_SHELL_REMOTE_FOLDER: {uttype: public.folder}
+  shell32/IDI_SHELL_TO_FOLDER: {uttype: public.folder}
+  shell32/IDI_SHELL_ONE_CLICK_OPEN: {uttype: public.folder}
+  shell32/IDI_SHELL_TWO_CLICK_OPEN: {uttype: public.folder}
+  shell32/IDI_SHELL_FOLDER_OVERWRITE: {uttype: public.folder, note: the folder being replaced}
+  shell32/IDI_SHELL_SHARED_FOLDER: {sf: folder.badge.person.crop}
+  shell32/IDI_SHELL_NEW_FOLDER: {sf: folder.badge.plus}
+  shell32/IDI_SHELL_NEW_NETWORK_FOLDER: {sf: folder.badge.plus}
+  shell32/IDI_SHELL_NEW_WEB_FOLDER: {sf: folder.badge.plus}
+  shell32/IDI_SHELL_DOCUMENTS: {file: ~/Documents}
+  shell32/IDI_SHELL_MY_DOCUMENTS: {file: ~/Documents}
+  shell32/IDI_SHELL_MY_MUSIC: {file: ~/Music}
+  shell32/IDI_SHELL_MY_PICTURES: {file: ~/Pictures}
+  shell32/IDI_SHELL_MY_VIDEOS: {file: ~/Movies}
+  shell32/IDI_SHELL_DOWNLOAD: {file: ~/Downloads}
+  shell32/IDI_SHELL_AUDIO_FILE: {uttype: public.audio}
+  shell32/IDI_SHELL_IMAGE_FILE: {uttype: public.image}
+  shell32/IDI_SHELL_VIDEO_FILE: {uttype: public.movie}
+  shell32/IDI_SHELL_MULTIMEDIA_FILE: {uttype: public.movie}
+  shell32/IDI_SHELL_HELP_FILE: {uttype: public.html, note: a help file is pages}
+  shell32/IDI_SHELL_NEW_WEB_PAGE: {uttype: public.html}
+  shell32/IDI_SHELL_FILE_OVERWRITE: {uttype: public.data, note: the file being replaced}
+  shell32/IDI_SHELL_INSTALL_XP: {uttype: com.apple.installer-package-archive}
+  shell32/IDI_SHELL_REMOVABLE_DISK: {sf: externaldrive}
+  shell32/IDI_SHELL_JAZ_DRIVE: {sf: externaldrive}
+  shell32/IDI_SHELL_ZIP_DRIVE: {sf: externaldrive}
+  shell32/IDI_SHELL_ZIP_DRIVE2: {sf: externaldrive}
+  shell32/IDI_SHELL_BAD_REMOVABLE_DISK: {sf: externaldrive.badge.xmark}
+  shell32/IDI_SHELL_CARD_READER: {sf: sdcard}
+  shell32/IDI_SHELL_DVD_DRIVE: {sf: opticaldiscdrive}
+  shell32/IDI_SHELL_CD_ROM: {sf: opticaldisc}
+  shell32/IDI_SHELL_CD_R: {sf: opticaldisc}
+  shell32/IDI_SHELL_CD_RW: {sf: opticaldisc}
+  shell32/IDI_SHELL_DVD: {sf: opticaldisc}
+  shell32/IDI_SHELL_DVD_R: {sf: opticaldisc}
+  shell32/IDI_SHELL_DVD_RAM: {sf: opticaldisc}
+  shell32/IDI_SHELL_DVD_ROM: {sf: opticaldisc}
+  shell32/IDI_SHELL_DVD_RW: {sf: opticaldisc}
+  shell32/IDI_SHELL_HYBRID_CD: {sf: opticaldisc}
+  shell32/IDI_SHELL_MUSIC_CD_95: {sf: opticaldisc}
+  shell32/IDI_SHELL_OPTICAL_DISC: {sf: opticaldisc}
+  shell32/IDI_SHELL_UNKNOWN_DISC: {sf: opticaldisc}
+  shell32/IDI_SHELL_BURN_DISC: {sf: opticaldisc}
+  shell32/IDI_SHELL_BURN_DISC2: {sf: opticaldisc}
+  shell32/IDI_SHELL_WRITE_DISC: {sf: opticaldisc}
+  shell32/IDI_SHELL_ERASE_DISC: {sf: opticaldisc}
+  shell32/IDI_SHELL_EJECT_SMALL: {sf: eject}
+  shell32/IDI_SHELL_DEFRAGMENT: {app: com.apple.DiskUtility}
+  shell32/IDI_SHELL_DISK_CHECK: {app: com.apple.DiskUtility}
+  shell32/IDI_SHELL_COMPUTER_OFF: {sf: desktopcomputer}
+  shell32/IDI_SHELL_DESKTOP_ON_MONITOR: {sf: desktopcomputer}
+  shell32/IDI_SHELL_WINDOW_ON_MONITOR: {sf: macwindow.on.rectangle}
+  shell32/IDI_SHELL_FLOATING_WINDOWS: {sf: macwindow.on.rectangle}
+  shell32/IDI_SHELL_MAXIMIZED_WINDOW: {sf: macwindow}
+  shell32/IDI_SHELL_WINDOW_WITHOUT_SIDEBAR: {sf: macwindow}
+  shell32/IDI_SHELL_WINDOW_WITH_SIDEBAR: {sf: sidebar.left}
+  shell32/IDI_SHELL_TREE: {sf: list.bullet.indent}
+  shell32/IDI_SHELL_TREEVIEW: {sf: list.bullet.indent}
+  shell32/IDI_SHELL_CONTROL_PANEL_SMALL: {app: com.apple.systempreferences}
+  shell32/IDI_SHELL_CONTROL_PANEL_XP2: {app: com.apple.systempreferences}
+  shell32/IDI_SHELL_VISUAL_SETTINGS: {app: com.apple.systempreferences}
+  shell32/IDI_SHELL_ADD_PRINTER: {sf: printer.fill}
+  shell32/IDI_SHELL_INTERNET_PRINTER: {sf: printer.fill}
+  shell32/IDI_SHELL_MULTIFUNCTION_PRINTER: {sf: printer.fill}
+  shell32/IDI_SHELL_PRINT: {sf: printer.fill}
+  shell32/IDI_SHELL_PRINT_PHOTO: {sf: printer.fill}
+  shell32/IDI_SHELL_FAX: {sf: faxmachine}
+  shell32/IDI_SHELL_DEFAULT_FAX: {sf: faxmachine}
+  shell32/IDI_SHELL_NETWORK_FAX: {sf: faxmachine}
+  shell32/IDI_SHELL_DEFAULT_NETWORK_FAX: {sf: faxmachine}
+  shell32/IDI_SHELL_EMPTY_RECYCLE_BIN2: {nsimage: NSTrashEmpty}
+  shell32/IDI_SHELL_EMPTY_RECYCLE_BIN_95: {nsimage: NSTrashEmpty}
+  shell32/IDI_SHELL_FULL_RECYCLE_BIN_95: {nsimage: NSTrashFull}
+  shell32/IDI_SHELL_CONFIRM_DELETE: {sf: trash}
+  shell32/IDI_SHELL_DELETE: {sf: trash}
+  shell32/IDI_SHELL_DELETE_FILE: {sf: trash}
+  shell32/IDI_SHELL_COPY: {sf: doc.on.doc}
+  shell32/IDI_SHELL_MOVE: {sf: arrow.right}
+  shell32/IDI_SHELL_RENAME: {sf: pencil}
+  shell32/IDI_SHELL_FOLDER_RENAME: {sf: pencil}
+  shell32/IDI_SHELL_FAVORITES_FOLDER: {sf: star}
+  shell32/IDI_SHELL_FAVORITES_SMALL: {sf: star}
+  shell32/IDI_SHELL_RECENT_SMALL: {sf: clock}
+  shell32/IDI_SHELL_SEARCH_DIRECTORY: {sf: magnifyingglass}
+  shell32/IDI_SHELL_SEARCH_SMALL: {sf: magnifyingglass}
+  shell32/IDI_SHELL_SEARCH_WINDOW: {sf: magnifyingglass}
+  shell32/IDI_SHELL_HELP2: {sf: questionmark.circle}
+  shell32/IDI_SHELL_HELP_SMALL: {sf: questionmark.circle}
+  shell32/IDI_SHELL_INFO: {sf: info.circle.fill, palette: [white, systemBlue]}
+  shell32/IDI_SHELL_SHIELD: {sf: lock.shield.fill, palette: [white, systemBlue]}
+  shell32/IDI_SHELL_RESTRICTED: {sf: minus.circle.fill, palette: [white, systemRed]}
+  shell32/IDI_SHELL_RESTRICTED2: {sf: minus.circle.fill, palette: [white, systemRed]}
+  shell32/IDI_SHELL_PASSWORDS: {sf: key}
+  shell32/IDI_SHELL_USERS: {sf: person.2.fill}
+  shell32/IDI_SHELL_USERS_XP: {sf: person.2.fill}
+  shell32/IDI_SHELL_USERS_XP2: {sf: person.2.fill}
+  shell32/IDI_SHELL_RUN_SMALL: {sf: terminal}
+  shell32/IDI_SHELL_LOG_OFF_SMALL: {sf: rectangle.portrait.and.arrow.right}
+  shell32/IDI_SHELL_POWER_OFF: {sf: power}
+  shell32/IDI_SHELL_POWER_OFF_SMALL: {sf: power}
+  shell32/IDI_SHELL_PLAY: {sf: play.fill}
+  shell32/IDI_SHELL_INTERNET: {sf: globe}
+  shell32/IDI_SHELL_MSN: {sf: globe}
+  shell32/IDI_SHELL_WEB_FOLDERS: {sf: globe}
+  shell32/IDI_SHELL_WEB_BROWSER: {sf: safari}
+  shell32/IDI_SHELL_WEB_CALENDAR: {sf: calendar}
+  shell32/IDI_SHELL_INTERNET_RADIO: {sf: radio}
+  shell32/IDI_SHELL_REMOTE_CONNECTION: {sf: network}
+  shell32/IDI_SHELL_NET_CONNECTIONS: {nsimage: NSNetwork}
+  shell32/IDI_SHELL_UPLOAD: {sf: arrow.up.circle}
+  shell32/IDI_SHELL_UPLOAD_PHOTO: {sf: photo}
+
+  # comctl32: balloon tooltips' icons (TTI_*), as the alerts' ones above
+  comctl32/IDI_TT_INFO_SM: {sf: info.circle.fill, palette: [white, systemBlue]}
+  comctl32/IDI_TT_INFO_MD: {sf: info.circle.fill, palette: [white, systemBlue]}
+  comctl32/IDI_TT_WARN_SM: {nsimage: NSCaution}
+  comctl32/IDI_TT_WARN_MD: {nsimage: NSCaution}
+  comctl32/IDI_TT_ERROR_SM: {sf: xmark.octagon.fill, multicolor: true}
+  comctl32/IDI_TT_ERROR_MD: {sf: xmark.octagon.fill, multicolor: true}
+  comctl32/IDI_DRAGARROW: {sf: arrowtriangle.right.fill, note: the drag list's insertion mark}
+
+  # comdlg32: the drives and folders of its Windows 3.1 file dialog (named resources)
+  comdlg32/FOLDER: {uttype: public.folder}
+  comdlg32/FOLDER2: {uttype: public.folder}
+  comdlg32/FLOPPY: {sf: externaldrive}
+  comdlg32/HDISK: {file: /}
+  comdlg32/CDROM: {sf: opticaldiscdrive}
+  comdlg32/NETWORK: {nsimage: NSNetwork}
+  comdlg32/PD32_PORTRAIT: {sf: doc.text}
+  comdlg32/PD32_LANDSCAPE: {sf: doc.text.fill, note: no landscape page symbol at the floor; the print panel is AppKit's anyway}
+  comdlg32/PD32_COLLATE: {sf: doc.on.doc}
+  comdlg32/PD32_NOCOLLATE: {sf: doc.on.doc.fill}
+
+  # taskmgr: a window that has no icon of its own
+  taskmgr/IDI_WINDOW: {sf: macwindow}
+  taskmgr/IDI_WINDOWSM: {sf: macwindow}
 
   # regedit (wine's own program: its tree and list icons are wine's artwork too)
   regedit/IDI_CLOSED_FILE: {uttype: public.folder}
@@ -106,8 +253,13 @@ icons:
 
 # Toolbar images: the images of an image strip a toolbar adds (TB_ADDBITMAP, TB_LOADIMAGES),
 # by strip and index. comctl32/<STD_*|VIEW_*|HIST_*> are the standard strips
-# (IDB_STD_*, IDB_VIEW_*, IDB_HIST_*, small or large); <program>/<bitmap>/<index> are the
-# strips of wine's own programs. Same image kinds as the icons above.
+# (IDB_STD_*, IDB_VIEW_*, IDB_HIST_*, small or large); <module>/<bitmap>/<index> are the
+# strips of wine's own programs and dlls (a bitmap by name or id). A strip an app puts in
+# an image list of its own (ImageList_LoadImage, ImageList_Add: Internet Explorer's
+# toolbar, cryptui's and aclui's lists) is known by its pixels, whatever mask colour or
+# colour depth the list has. Same image kinds as the icons above. Not here: msi's feature
+# tree states, the cards, winemine's faces and the theme's parts, which are pictures of
+# their own and not symbols.
 toolbar_images:
   comctl32/STD_CUT: {sf: scissors}
   comctl32/STD_COPY: {sf: doc.on.doc}
@@ -152,6 +304,88 @@ toolbar_images:
   wordpad/IDB_FORMATBAR/5: {sf: text.aligncenter}
   wordpad/IDB_FORMATBAR/6: {sf: text.alignright}
   wordpad/IDB_FORMATBAR/7: {sf: list.bullet}
+  # oleview: bind to a file, type library, registry, create and release an instance, view
+  oleview/IDB_TOOLBAR/0: {sf: folder}
+  oleview/IDB_TOOLBAR/1: {sf: books.vertical}
+  oleview/IDB_TOOLBAR/2: {sf: cylinder.split.1x2}
+  oleview/IDB_TOOLBAR/3: {sf: plus.square.on.square}
+  oleview/IDB_TOOLBAR/4: {sf: minus.square}
+  oleview/IDB_TOOLBAR/5: {sf: eye}
+  # hhctrl: the help viewer's toolbar (HHTB_*). Its contents' images (IDB_HHTREEVIEW) are
+  # shell32's document and folder pixels, which show as Finder's already (icons above).
+  hhctrl/IDB_HHTOOLBAR/0: {sf: xmark}
+  hhctrl/IDB_HHTOOLBAR/1: {sf: arrow.clockwise}
+  hhctrl/IDB_HHTOOLBAR/2: {sf: house}
+  hhctrl/IDB_HHTOOLBAR/3: {sf: arrow.triangle.2.circlepath}
+  hhctrl/IDB_HHTOOLBAR/4: {sf: sidebar.left}
+  hhctrl/IDB_HHTOOLBAR/5: {sf: sidebar.left}
+  # ieframe: Internet Explorer's toolbar (Safari's symbols)
+  ieframe/IDB_IETOOLBAR/0: {sf: chevron.backward}
+  ieframe/IDB_IETOOLBAR/1: {sf: chevron.forward}
+  ieframe/IDB_IETOOLBAR/2: {sf: xmark}
+  ieframe/IDB_IETOOLBAR/3: {sf: arrow.clockwise}
+  ieframe/IDB_IETOOLBAR/4: {sf: house}
+  ieframe/IDB_IETOOLBAR/5: {sf: printer}
+  # shell32: the browser toolbar strips (204/205 large, 206/207 small: the same images)
+  shell32/206/0: {sf: chevron.backward}
+  shell32/206/1: {sf: chevron.forward}
+  shell32/206/2: {sf: xmark}
+  shell32/206/3: {sf: arrow.clockwise}
+  shell32/206/4: {sf: house}
+  shell32/206/5: {sf: magnifyingglass}
+  shell32/206/6: {sf: star}
+  shell32/206/7: {sf: printer}
+  shell32/206/8: {sf: textformat.size}
+  shell32/206/9: {sf: square.and.pencil}
+  shell32/206/10: {sf: wrench.and.screwdriver}
+  shell32/206/12: {sf: clock}
+  shell32/206/13: {sf: envelope}
+  shell32/206/14: {sf: arrow.up.left.and.arrow.down.right}
+  shell32/206/15: {sf: macwindow.badge.plus}
+  # and the shell's standard toolbar strip (IDB_TB_*: comctl32's STD and VIEW images again;
+  # the ones whose meaning isn't sure stay as they are)
+  shell32/IDB_TB_SMALL_LIGHT/0: {sf: chevron.backward}
+  shell32/IDB_TB_SMALL_LIGHT/1: {sf: chevron.forward}
+  shell32/IDB_TB_SMALL_LIGHT/5: {sf: scissors}
+  shell32/IDB_TB_SMALL_LIGHT/6: {sf: doc.on.doc}
+  shell32/IDB_TB_SMALL_LIGHT/7: {sf: doc.on.clipboard}
+  shell32/IDB_TB_SMALL_LIGHT/8: {sf: arrow.uturn.backward}
+  shell32/IDB_TB_SMALL_LIGHT/9: {sf: arrow.uturn.forward}
+  shell32/IDB_TB_SMALL_LIGHT/10: {sf: trash}
+  shell32/IDB_TB_SMALL_LIGHT/11: {sf: doc.badge.plus}
+  shell32/IDB_TB_SMALL_LIGHT/12: {sf: folder}
+  shell32/IDB_TB_SMALL_LIGHT/13: {sf: square.and.arrow.down}
+  shell32/IDB_TB_SMALL_LIGHT/14: {sf: doc.text.magnifyingglass}
+  shell32/IDB_TB_SMALL_LIGHT/15: {sf: info.circle}
+  shell32/IDB_TB_SMALL_LIGHT/16: {sf: questionmark.circle}
+  shell32/IDB_TB_SMALL_LIGHT/17: {sf: magnifyingglass}
+  shell32/IDB_TB_SMALL_LIGHT/18: {sf: arrow.left.arrow.right}
+  shell32/IDB_TB_SMALL_LIGHT/19: {sf: printer}
+  shell32/IDB_TB_SMALL_LIGHT/23: {sf: list.bullet.rectangle}
+  shell32/IDB_TB_SMALL_LIGHT/24: {sf: textformat}
+  shell32/IDB_TB_SMALL_LIGHT/25: {sf: arrow.up.arrow.down}
+  shell32/IDB_TB_SMALL_LIGHT/26: {sf: calendar}
+  shell32/IDB_TB_SMALL_LIGHT/27: {sf: doc}
+  shell32/IDB_TB_SMALL_LIGHT/28: {sf: arrow.turn.left.up}
+  shell32/IDB_TB_SMALL_LIGHT/29: {sf: network}
+  shell32/IDB_TB_SMALL_LIGHT/30: {sf: xmark.circle}
+  shell32/IDB_TB_SMALL_LIGHT/31: {sf: folder.badge.plus}
+  shell32/IDB_TB_SMALL_LIGHT/40: {sf: list.bullet.rectangle}
+  # cryptui: certificates in its lists (fine, not valid, not trusted)
+  cryptui/IDB_SMALL_ICONS/0: {uttype: public.x509-certificate}
+  cryptui/IDB_SMALL_ICONS/1: {sf: xmark.seal.fill, palette: [white, systemRed]}
+  cryptui/IDB_SMALL_ICONS/2: {sf: exclamationmark.triangle.fill, multicolor: true}
+  # aclui: a group and a user in the permissions list
+  aclui/IDB_USER_ICONS/0: {sf: person.2.fill}
+  aclui/IDB_USER_ICONS/1: {sf: person.fill}
+  # winefile: its file tree's images (a file, a document, folders, the parent folder)
+  winefile/IDB_IMAGES/0: {uttype: public.data}
+  winefile/IDB_IMAGES/1: {uttype: public.plain-text}
+  winefile/IDB_IMAGES/3: {uttype: public.folder}
+  winefile/IDB_IMAGES/4: {uttype: public.folder}
+  winefile/IDB_IMAGES/5: {uttype: public.folder}
+  winefile/IDB_IMAGES/7: {uttype: public.folder}
+  winefile/IDB_IMAGES/8: {sf: arrow.turn.left.up}
   # winefile: its window buttons, and the drive bar (the kinds of drive Finder shows)
   winefile/IDB_TOOLBAR/0: {sf: macwindow.badge.plus}
   winefile/IDB_TOOLBAR/1: {sf: square.stack}

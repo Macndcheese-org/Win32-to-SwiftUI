@@ -13,6 +13,13 @@
  * the same image list (same colour depth, mask and background) at the same
  * size, and an image whose pixels match one of those exactly is that icon.
  * The app's own icons match nothing and keep their artwork.
+ *
+ * An image list made from one of wine's toolbar strips (ImageList_LoadImage, or
+ * LoadBitmap and ImageList_Add: Internet Explorer's toolbar, the help viewer's
+ * contents, cryptui's certificates) doesn't say so either, and the colour the
+ * app masked out isn't known. The strip goes through the same duplicate, and an
+ * image is the strip's when each pixel it shows is the strip's there and each it
+ * leaves out is one colour (the mask) or clear.
  */
 #include "w2s_pe.h"
 #include "w2s_map_tables.h"
@@ -45,12 +52,15 @@ static int spec_from_origin( HICON icon, const char **spec )
     if (info.hbmColor) DeleteObject( info.hbmColor );
     if (info.hbmMask) DeleteObject( info.hbmMask );
     if (!info.szModName[0]) return -1;
-    if (!info.wResID) return 0;
+    if (!info.wResID && !info.szResName[0]) return 0;
     module = basename_w( info.szModName );
     for (i = 0; i < ARRAYSIZE(w2s_icon_entries); i++)
     {
-        if (w2s_icon_entries[i].id != info.wResID || _wcsicmp( w2s_icon_entries[i].module, module )) continue;
-        *spec = w2s_icon_entries[i].spec;
+        const struct w2s_icon_entry *e = &w2s_icon_entries[i];
+
+        if (info.wResID ? e->id != info.wResID : !e->name || _wcsicmp( e->name, info.szResName )) continue;
+        if (_wcsicmp( e->module, module )) continue;
+        *spec = e->spec;
         return 1;
     }
     return 0;
@@ -66,6 +76,9 @@ struct fingerprints
     unsigned int count;
     UINT64 hash[ARRAYSIZE(w2s_icon_entries) * 3];
     const char *spec[ARRAYSIZE(w2s_icon_entries) * 3];
+    unsigned int strips;            /* strip images through the same image list */
+    BYTE *strip_bits[ARRAYSIZE(w2s_toolbar_images) * 2];
+    const char *strip_spec[ARRAYSIZE(w2s_toolbar_images) * 2];
 };
 
 #define FINGERPRINT_SETS 4
@@ -93,6 +106,94 @@ static void add_fingerprint( struct fingerprints *fp, HIMAGELIST dup, HICON icon
         HeapFree( GetProcessHeap(), 0, bits );
     }
     if (copy) DestroyIcon( copy );
+}
+
+static void free_fingerprints( struct fingerprints *fp )
+{
+    unsigned int i;
+
+    if (!fp) return;
+    for (i = 0; i < fp->strips; i++) HeapFree( GetProcessHeap(), 0, fp->strip_bits[i] );
+    HeapFree( GetProcessHeap(), 0, fp );
+}
+
+/* a strip's mapped images (those of entry first on), as the duplicate makes them */
+static void add_strip( struct fingerprints *fp, HIMAGELIST dup, unsigned int first, HBITMAP bitmap )
+{
+    const struct w2s_toolbar_image *e = &w2s_toolbar_images[first];
+    int base = ImageList_GetImageCount( dup ), added;
+    unsigned int k;
+    BITMAP bm;
+
+    if (!GetObjectW( bitmap, sizeof(bm), &bm ) || bm.bmHeight != fp->cy || bm.bmWidth < fp->cx ||
+        ImageList_Add( dup, bitmap, NULL ) < 0)
+        return;
+    added = ImageList_GetImageCount( dup ) - base;
+    for (k = first; k < ARRAYSIZE(w2s_toolbar_images) && fp->strips < ARRAYSIZE(fp->strip_bits); k++)
+    {
+        const struct w2s_toolbar_image *img = &w2s_toolbar_images[k];
+        HICON icon;
+
+        if (img->bitmap != e->bitmap || _wcsicmp( img->module, e->module ) || (int)img->index >= added) continue;
+        if (!(icon = ImageList_GetIcon( dup, base + img->index, ILD_NORMAL ))) continue;
+        if ((fp->strip_bits[fp->strips] = w2s_image_bgra( icon, NULL, fp->cx, fp->cy )))
+            fp->strip_spec[fp->strips++] = img->spec;
+        DestroyIcon( icon );
+    }
+}
+
+/* wine's strips whose module the app has, at the image list's height, through it: loaded
+ * both ways apps load them (LoadBitmap's device bitmap, ImageList_LoadImage's DIB section),
+ * which a 32-bit strip's alpha goes through differently */
+static void add_strips( struct fingerprints *fp, HIMAGELIST dup )
+{
+    unsigned int i, k;
+
+    for (i = 0; i < ARRAYSIZE(w2s_toolbar_images); i++)
+    {
+        const struct w2s_toolbar_image *e = &w2s_toolbar_images[i];
+        HMODULE module;
+        HBITMAP bitmap;
+
+        /* each strip once (its images are together); comctl32's standard ones come by TB_LOADIMAGES */
+        for (k = 0; k < i; k++)
+            if (w2s_toolbar_images[k].bitmap == e->bitmap && !_wcsicmp( w2s_toolbar_images[k].module, e->module )) break;
+        if (k < i || !_wcsicmp( e->module, L"comctl32.dll" ) || !(module = GetModuleHandleW( e->module ))) continue;
+        if ((bitmap = LoadBitmapW( module, MAKEINTRESOURCEW( e->bitmap ) )))
+        {
+            add_strip( fp, dup, i, bitmap );
+            DeleteObject( bitmap );
+        }
+        if ((bitmap = LoadImageW( module, MAKEINTRESOURCEW( e->bitmap ), IMAGE_BITMAP, 0, 0, LR_CREATEDIBSECTION )))
+        {
+            add_strip( fp, dup, i, bitmap );
+            DeleteObject( bitmap );
+        }
+    }
+}
+
+/* whether an image (bits) is a strip's image (strip), as add_strips made it */
+static BOOL is_strip_image( const BYTE *bits, const BYTE *strip, int cx, int cy )
+{
+    const BYTE *key = NULL;
+    int i, c, shown = 0, n = cx * cy;
+
+    for (i = 0; i < n; i++)
+    {
+        const BYTE *p = bits + i * 4, *q = strip + i * 4;
+
+        if (!p[3])
+        {
+            /* left out: clear there too, or the one colour the app masked out */
+            if (!q[3]) continue;
+            if (!key) key = q;
+            else if (memcmp( key, q, 3 )) return FALSE;
+            continue;
+        }
+        for (c = 0; c < 4; c++) if (abs( p[c] - q[c] ) > 2) return FALSE;
+        shown++;
+    }
+    return shown >= n / 8;  /* not an empty image */
 }
 
 static struct fingerprints *make_fingerprints( HIMAGELIST himl, int cx, int cy )
@@ -123,15 +224,20 @@ static struct fingerprints *make_fingerprints( HIMAGELIST himl, int cx, int cy )
 
             for (k = 0; k < s; k++) if (sizes[k] == sizes[s]) break;
             if (k < s) continue;
-            icon = LoadImageW( module, MAKEINTRESOURCEW( w2s_icon_entries[i].id ), IMAGE_ICON,
+            icon = LoadImageW( module, w2s_icon_entries[i].name ? w2s_icon_entries[i].name :
+                               MAKEINTRESOURCEW( w2s_icon_entries[i].id ), IMAGE_ICON,
                                sizes[s], sizes[s] * cy / max( cx, 1 ), 0 );
             if (!icon) continue;
             add_fingerprint( fp, dup, icon, w2s_icon_entries[i].spec );
             DestroyIcon( icon );
         }
     }
-    if (dup) ImageList_Destroy( dup );
-    TRACE( "stock icon fingerprints for %p at %dx%d: %u\n", himl, cx, cy, fp->count );
+    if (dup)
+    {
+        add_strips( fp, dup );
+        ImageList_Destroy( dup );
+    }
+    TRACE( "stock icon fingerprints for %p at %dx%d: %u, strip images %u\n", himl, cx, cy, fp->count, fp->strips );
     return fp;
 }
 
@@ -149,7 +255,7 @@ static const char *spec_from_pixels( const BYTE *bits, int cx, int cy, HIMAGELIS
     {
         /* the oldest set goes (an image list can be destroyed and its handle reused:
          * then it only costs a set made again) */
-        HeapFree( GetProcessHeap(), 0, sets[next_set] );
+        free_fingerprints( sets[next_set] );
         sets[next_set] = fp;
         next_set = (next_set + 1) % FINGERPRINT_SETS;
     }
@@ -157,9 +263,31 @@ static const char *spec_from_pixels( const BYTE *bits, int cx, int cy, HIMAGELIS
     {
         hash = fnv1a( bits, (size_t)cx * cy * 4 );
         for (i = 0; i < fp->count && !spec; i++) if (fp->hash[i] == hash) spec = fp->spec[i];
+        for (i = 0; i < fp->strips && !spec; i++)
+            if (is_strip_image( bits, fp->strip_bits[i], cx, cy )) spec = fp->strip_spec[i];
     }
     ReleaseSRWLockExclusive( &sets_lock );
     return spec;
+}
+
+/***********************************************************************
+ *      w2s_forget_image_list
+ *
+ * A view has another image list (or the same handle for another one, which
+ * an image list destroyed and made again can get): what was made for it goes.
+ */
+void w2s_forget_image_list( HIMAGELIST himl )
+{
+    unsigned int i;
+
+    AcquireSRWLockExclusive( &sets_lock );
+    for (i = 0; i < FINGERPRINT_SETS; i++)
+    {
+        if (!sets[i] || sets[i]->himl != himl) continue;
+        free_fingerprints( sets[i] );
+        sets[i] = NULL;
+    }
+    ReleaseSRWLockExclusive( &sets_lock );
 }
 
 /***********************************************************************

@@ -1265,7 +1265,7 @@ struct ReportView: View {
                         .width(22)
                         TableColumnForEach(columns) { column in
                             TableColumn(column.title, sortUsing: ColumnClick(column: column.id)) { (row: ReportRow) in
-                                Text(column.cell(row)).lineLimit(1).frame(maxWidth: .infinity, alignment: column.alignment)
+                                ReportCell(model: model, column: column, row: row, first: column.id == columns[0].id, scale: scale)
                             }
                             .width(min: 12, ideal: column.width)
                         }
@@ -1274,7 +1274,7 @@ struct ReportView: View {
                     Table(rows, selection: selection, sortOrder: order) {
                         TableColumnForEach(columns) { column in
                             TableColumn(column.title, sortUsing: ColumnClick(column: column.id)) { (row: ReportRow) in
-                                Text(column.cell(row)).lineLimit(1).frame(maxWidth: .infinity, alignment: column.alignment)
+                                ReportCell(model: model, column: column, row: row, first: column.id == columns[0].id, scale: scale)
                             }
                             .width(min: 12, ideal: column.width)
                         }
@@ -1285,8 +1285,30 @@ struct ReportView: View {
             .modifier(DoubleClickRows(model: model))
             .id(key + (model.snap.checks == nil ? "" : "|checks"))
         } else {
-            ReportFallback(model: model, rows: rows, columns: columns, selection: selection)
+            ReportFallback(model: model, rows: rows, columns: columns, selection: selection, scale: scale)
         }
+    }
+}
+
+/// A report's cell: the first column's has the item's image (the small image
+/// list's) before its text, as Finder's list view has it.
+struct ReportCell: View {
+    @ObservedObject var model: ControlModel
+    let column: ReportColumn
+    let row: ReportRow
+    let first: Bool
+    let scale: CGFloat
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if first, let icons = model.snap.icons, row.id < icons.count, icons[row.id] >= 0,
+               let image = model.images[icons[row.id]], let size = model.snap.imageSize, size.count == 2 {
+                Image(nsImage: image).resizable().interpolation(.high)
+                    .frame(width: CGFloat(size[0]) * scale, height: CGFloat(size[1]) * scale)
+            }
+            Text(column.cell(row)).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: column.alignment)
     }
 }
 
@@ -1297,6 +1319,7 @@ struct ReportFallback: View {
     let rows: [ReportRow]
     let columns: [ReportColumn]
     let selection: Binding<Set<Int>>
+    let scale: CGFloat
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1327,7 +1350,9 @@ struct ReportFallback: View {
                             CheckCell(model: model, row: row.id, checks: checks).frame(width: 22)
                         }
                         ForEach(columns) { column in
-                            Text(column.cell(row)).lineLimit(1).padding(.horizontal, 4)
+                            ReportCell(model: model, column: column, row: row, first: column.id == columns[0].id,
+                                       scale: scale)
+                                .padding(.horizontal, 4)
                                 .frame(width: column.width, alignment: column.alignment)
                             Color.clear.frame(width: 1)     // the header's divider
                         }
@@ -1819,12 +1844,13 @@ struct ToolbarBar: View {
     @ViewBuilder
     func image(_ b: Snapshot.ToolbarButton) -> some View {
         let side = 16 * scale
-        if let sym = b.sym, sym.hasPrefix("sf:"), !sym.contains(";") {
+        let sym = b.sym ?? b.img.flatMap { model.imageSymbols[$0] }
+        if let sym = sym, sym.hasPrefix("sf:"), !sym.contains(";") {
             // a toolbar's symbols are drawn in the text colour, as macOS toolbars do
             Image(systemName: String(sym.dropFirst(3)))
                 .font(.system(size: 13 * scale))
                 .foregroundStyle(Color(nsColor: .labelColor))
-        } else if let sym = b.sym, let image = Icons.image(sym, size: NSSize(width: side, height: side)) {
+        } else if let sym = sym, let image = Icons.image(sym, size: NSSize(width: side, height: side)) {
             Image(nsImage: image)
         } else if let index = b.img, let image = model.images[index] {
             Image(nsImage: image).resizable().interpolation(.high).frame(width: side, height: side)

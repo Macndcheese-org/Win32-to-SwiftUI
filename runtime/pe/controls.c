@@ -1119,6 +1119,7 @@ static void image_list_json( struct lv_data *data, HIMAGELIST himl, const int *i
     if (himl) ImageList_GetIconSize( himl, &cx, &cy );
     if (himl != data->himl || cx != data->cx || cy != data->cy)
     {
+        if (himl) w2s_forget_image_list( himl );
         data->himl = himl;
         data->cx = cx;
         data->cy = cy;
@@ -1245,6 +1246,8 @@ static void listview_snapshot( struct w2s_control *ctl, struct json *j )
     }
     if (view == LV_VIEW_ICON || view == LV_VIEW_SMALLICON)
         listview_icons( ctl, j, view == LV_VIEW_SMALLICON, count );
+    else if (view == LV_VIEW_DETAILS && SendMessageW( ctl->hwnd, LVM_GETIMAGELIST, LVSIL_SMALL, 0 ))
+        listview_icons( ctl, j, TRUE, count );  /* before the first column's text, as Finder's list has them */
 }
 
 static void listview_select( HWND hwnd, const int *items, int count )

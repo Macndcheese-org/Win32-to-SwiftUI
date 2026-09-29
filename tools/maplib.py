@@ -55,15 +55,27 @@ def load_map():
     return merged, origin
 
 
-# the modules stock icons come from: their file, and the header naming their resources
+# the modules stock icons and toolbar strips come from: their file, and the headers naming
+# their resources. A resource whose name no header defines is named by that string
+# (comdlg32's "FOLDER"); a number is its id (shell32's 204).
 ICON_MODULES = {
-    "user32": ("user32.dll", "include/winuser.rh"),
-    "shell32": ("shell32.dll", "dlls/shell32/shresdef.h"),
-    "regedit": ("regedit.exe", "programs/regedit/resource.h"),
-    "comctl32": ("comctl32.dll", "include/commctrl.h"),
-    "wordpad": ("wordpad.exe", "programs/wordpad/wordpad.h"),
-    "winefile": ("winefile.exe", "programs/winefile/resource.h"),
+    "user32": ("user32.dll", ("include/winuser.rh",)),
+    "shell32": ("shell32.dll", ("dlls/shell32/shresdef.h",)),
+    "regedit": ("regedit.exe", ("programs/regedit/resource.h",)),
+    "comctl32": ("comctl32.dll", ("include/commctrl.h", "dlls/comctl32/comctl32.h")),
+    "comdlg32": ("comdlg32.dll", ("dlls/comdlg32/cdlg.h",)),
+    "wordpad": ("wordpad.exe", ("programs/wordpad/wordpad.h",)),
+    "winefile": ("winefile.exe", ("programs/winefile/resource.h",)),
+    "taskmgr": ("taskmgr.exe", ("programs/taskmgr/resource.h",)),
+    "oleview": ("oleview.exe", ("programs/oleview/resource.h",)),
+    "hhctrl": ("hhctrl.ocx", ("dlls/hhctrl.ocx/resource.h",)),
+    "ieframe": ("ieframe.dll", ("dlls/ieframe/resource.h",)),
+    "cryptui": ("cryptui.dll", ("dlls/cryptui/cryptuires.h",)),
+    "aclui": ("aclui.dll", ("dlls/aclui/resource.h",)),
 }
+
+# modules whose icons may be string-named resources
+STRING_NAMED = ("comdlg32",)
 
 # what a stock icon (map section `icons`) may become
 ICON_KINDS = ("sf", "uttype", "file", "nsimage", "app")

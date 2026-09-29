@@ -15,7 +15,7 @@ import os
 import re
 import sys
 
-from maplib import ICON_MODULES, ROOT, aslist, icon_spec, load_map
+from maplib import ICON_MODULES, ROOT, STRING_NAMED, aslist, icon_spec, load_map
 
 TOKEN = re.compile(r"^([A-Z][A-Z0-9]*_[A-Z0-9_]+)\b")
 
@@ -30,19 +30,31 @@ def defined_names(tree):
     return names
 
 
-def icon_rows(tree, icons):
-    """{ L"module.dll", id, "spec" } for every stock icon; names resolved in wine's headers."""
+def resource_ids(tree):
+    """module -> {name: id} from its headers"""
     values = {}
-    for module, (_, header) in ICON_MODULES.items():
-        text = open(os.path.join(tree, header), errors="replace").read()
-        values[module] = {n: int(v) for n, v in re.findall(r"#\s*define\s+(\w+)\s+(\d+)\b", text)}
+    for module, (_, headers) in ICON_MODULES.items():
+        values[module] = {}
+        for header in headers:
+            text = open(os.path.join(tree, header), errors="replace").read()
+            values[module].update({n: int(v, 16 if v.startswith("0x") else 10) for n, v in re.findall(r"#\s*define\s+(\w+)\s+(0x[0-9a-fA-F]+|\d+)\b", text)})
+    return values
+
+
+def icon_rows(tree, icons):
+    """{ L"module.dll", id, "spec", L"name" } for every stock icon; names resolved in wine's
+    headers (a string-named resource has id 0 and its name)."""
+    values = resource_ids(tree)
     rows = []
     for key, d in icons.items():
         module, name = key.split("/")
-        if name not in values[module]:
-            sys.exit(f"icons.{key}: {name} is not defined in {ICON_MODULES[module][1]}")
         spec = icon_spec(d).replace("\\", "\\\\").replace('"', '\\"')
-        rows.append(f'    {{ L"{ICON_MODULES[module][0]}", {values[module][name]}, "{spec}" }},')
+        if name in values[module]:
+            rows.append(f'    {{ L"{ICON_MODULES[module][0]}", {values[module][name]}, "{spec}" }},')
+        elif module in STRING_NAMED:
+            rows.append(f'    {{ L"{ICON_MODULES[module][0]}", 0, "{spec}", L"{name}" }},')
+        else:
+            sys.exit(f"icons.{key}: {name} is not defined in {', '.join(ICON_MODULES[module][1])}")
     return rows
 
 
@@ -54,10 +66,7 @@ STANDARD_STRIPS = {"STD": 0, "VIEW": 4, "HIST": 8}
 def toolbar_rows(tree, images):
     """{ L"module", bitmap, index, "spec" }: comctl32's standard strips (bitmap = the strip's
     IDB_*_SMALL_COLOR) and wine's programs' own strips (bitmap = the resource id)."""
-    values = {}
-    for module, (_, header) in ICON_MODULES.items():
-        text = open(os.path.join(tree, header), errors="replace").read()
-        values[module] = {n: int(v) for n, v in re.findall(r"#\s*define\s+(\w+)\s+(\d+)\b", text)}
+    values = resource_ids(tree)
     rows = []
     for key, d in images.items():
         parts = key.split("/")
@@ -65,12 +74,16 @@ def toolbar_rows(tree, images):
         if module == "comctl32":
             name = parts[1]
             if name not in values[module]:
-                sys.exit(f"toolbar_images.{key}: {name} is not defined in {ICON_MODULES[module][1]}")
+                sys.exit(f"toolbar_images.{key}: {name} is not defined in the comctl32 headers")
             bitmap, index = STANDARD_STRIPS[name.split("_")[0]], values[module][name]
         else:
-            if parts[1] not in values[module]:
-                sys.exit(f"toolbar_images.{key}: {parts[1]} is not defined in {ICON_MODULES[module][1]}")
-            bitmap, index = values[module][parts[1]], int(parts[2])
+            if parts[1].isdigit():
+                bitmap = int(parts[1])
+            elif parts[1] in values[module]:
+                bitmap = values[module][parts[1]]
+            else:
+                sys.exit(f"toolbar_images.{key}: {parts[1]} is not defined in {', '.join(ICON_MODULES[module][1])}")
+            index = int(parts[2])
         spec = icon_spec(d).replace("\\", "\\\\").replace('"', '\\"')
         rows.append(f'    {{ L"{ICON_MODULES[module][0]}", {bitmap}, {index}, "{spec}" }},')
     return rows
@@ -147,6 +160,7 @@ struct w2s_icon_entry
     const WCHAR *module;
     unsigned int id;
     const char *spec;
+    const WCHAR *name;          /* a string-named resource (id 0) */
 }};
 
 static const struct w2s_icon_entry w2s_icon_entries[] =

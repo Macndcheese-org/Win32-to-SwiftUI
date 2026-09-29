@@ -165,11 +165,13 @@ final class WindowToolbar: NSObject, WindowChrome {
     }
 
     private func image(_ b: Snapshot.ToolbarButton) -> NSImage? {
-        if let sym = b.sym, sym.hasPrefix("sf:"), !sym.contains(";") {
+        // a strip's image the app put in an image list of its own is known by its pixels
+        let sym = b.sym ?? b.img.flatMap { host?.model.imageSymbols[$0] }
+        if let sym = sym, sym.hasPrefix("sf:"), !sym.contains(";") {
             // toolbar symbols take the toolbar's own look (size, colour)
             return NSImage(systemSymbolName: String(sym.dropFirst(3)), accessibilityDescription: b.tip ?? b.text)
         }
-        if let sym = b.sym, let image = Icons.image(sym, size: NSSize(width: 18, height: 18)) { return image }
+        if let sym = sym, let image = Icons.image(sym, size: NSSize(width: 18, height: 18)) { return image }
         if let index = b.img, let image = host?.model.images[index] { return image }
         return nil
     }

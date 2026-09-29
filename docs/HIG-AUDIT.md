@@ -42,6 +42,10 @@ The rule of the project: a real macOS component, never a copy of one.
 - A toolbar across the top of an app's main window is in the window's frame; toolbars
   stacked there (winefile's drive bar and window buttons) share it, a group each, with
   the text they show (drive letters) beside their symbols.
+- Every icon and toolbar image of wine's (213 icons, 124 strip images: shell32, comctl32,
+  comdlg32, wine's programs, IE's and the help viewer's toolbars, cryptui, aclui) is an
+  SF Symbol, a Finder icon or an AppKit image with the same meaning; report lists show
+  their items' icons, as Finder's list view does.
 - Windows that scroll themselves (WS_VSCROLL/WS_HSCROLL on a view of the app's own, an
   owner-drawn list) and the ScrollBar control have NSScrollers instead of Windows
   scroll bars.

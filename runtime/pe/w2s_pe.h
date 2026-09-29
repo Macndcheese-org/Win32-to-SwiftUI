@@ -88,6 +88,7 @@ BYTE *w2s_image_bgra( HICON icon, HBITMAP bitmap, int w, int h );
 void json_base64( struct json *j, const char *key, const BYTE *data, size_t n );
 
 /* icons.c: the macOS image (a spec for Icons.swift) for a stock icon, or NULL */
+void w2s_forget_image_list( HIMAGELIST himl );
 const char *w2s_stock_icon( HICON icon, const BYTE *bits, int cx, int cy, HIMAGELIST himl );
 
 /* main.c */
