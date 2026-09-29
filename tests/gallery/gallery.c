@@ -1901,6 +1901,13 @@ static void selftest2(void)
         check( !wcscmp( text, L"Consolas" ) && query_has( cbex, "\"text\":\"Consolas\"" ), "native typing goes into its edit" );
     }
 
+    /* keyboard focus: a native field takes it when Win32 gives its edit the focus */
+    SetFocus( ctl[ID_EDIT] );
+    pump( 400 );
+    check( query_has( ctl[ID_EDIT], "\"hasFocus\":true" ), "SetFocus on an edit -> its native field has the keyboard" );
+    SetFocus( ctl[ID_CHECK] );
+    pump( 300 );
+
     /* EM_SHOWBALLOONTIP (wine's edit has none): a popover on the native field */
     {
         EDITBALLOONTIP tip = { sizeof(tip), L"Caps Lock is on", L"Having Caps Lock on may cause you to enter your "
@@ -2289,6 +2296,14 @@ static int selftest(void)
         ok = GetDlgItem( sheet, IDOK );
         check( query_has( name, "\"formHidden\":true" ) && query_has( ok, "\"formHidden\":true" ),
                "the page's controls and the sheet's buttons show in the form, not in their own views" );
+        SetFocus( name );
+        pump( 400 );
+        check( query_has( tab, "\"formHasFocus\":true" ), "focus on a page's field is the form's native field" );
+        SetFocus( GetDlgItem( (HWND)SendMessageW( sheet, PSM_GETCURRENTPAGEHWND, 0, 0 ), 1003 ) );
+        pump( 400 );
+        check( query_has( tab, "\"formHasFocus\":false" ), "focus moving on to a check box gives the keyboard back to wine" );
+        SetFocus( name );
+        pump( 300 );
         inject( name, "{\"t\":\"text\",\"s\":\"Wine Is Not an Emulator\"}" );
         pump( 200 );
         {

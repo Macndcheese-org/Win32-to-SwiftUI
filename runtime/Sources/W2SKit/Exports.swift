@@ -197,8 +197,16 @@ public func w2s_swift_control_focus(_ handle: UInt64, _ focused: UInt32) {
         return
     }
     DispatchQueue.main.async {
+        host.model.hasWin32Focus = focused != 0
         if focused != 0 {
             host.model.focusRequest += 1
+        } else if host.model.shownInForm {
+            // in a settings form: back to wine if the form's copy of this control still has the keyboard
+            if FormFocus.owner == ObjectIdentifier(host.model), let window = host.hosting?.window {
+                FormFocus.owner = nil
+                let wine = window.perform(NSSelectorFromString("wineContentView"))?.takeUnretainedValue() as? NSView
+                window.makeFirstResponder(wine ?? window.contentView)
+            }
         } else if let window = host.hosting?.window, let responder = window.firstResponder as? NSView,
                   let hosting = host.hosting, responder.isDescendant(of: hosting) {
             // wine moved focus elsewhere: give the keyboard back to wine

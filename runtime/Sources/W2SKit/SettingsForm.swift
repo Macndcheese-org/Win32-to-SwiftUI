@@ -220,6 +220,22 @@ enum FormMetrics {
     }
 }
 
+/// Views of a control that stand in a settings form (FormControl sets it).
+struct InFormKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var w2sInForm: Bool {
+        get { self[InFormKey.self] }
+        set { self[InFormKey.self] = newValue }
+    }
+}
+
+/// Which control's view in a form has the keyboard (main thread): when Win32
+/// moves focus away from it, the keyboard goes back to wine; not when the user
+/// has already clicked another field of the form.
+enum FormFocus {
+    static var owner: ObjectIdentifier?
+}
+
 /// Where each control sits in the form (tests: a real click aims there, its
 /// own view being hidden). Main thread.
 enum FormPlaces {
@@ -284,6 +300,7 @@ struct FormControl: View {
         } else if let host = item.host {
             let size = FormMetrics.size(item, scale: scale)
             ControlRoot(model: host.model, entry: host.entry, fixed: FormMetrics.metrics(scale: scale))
+                .environment(\.w2sInForm, true)
                 .frame(width: size.width, height: size.height)
                 // where its text sits, which a form lines its label up with: the middle of a
                 // one-line control, the first line of a list (the native views don't say)
@@ -505,8 +522,14 @@ final class SettingsFormController: WindowChrome {
 
         // the page's and the sheet's controls show in the form, not in their own views
         let shown = Set((snap.page ?? []).map { $0.h } + (snap.sheetButtons ?? []).map { $0.h })
-        for h in hidden.subtracting(shown) { W2S.control(h)?.hosting?.isHidden = false }
-        for h in shown { W2S.control(h)?.hosting?.isHidden = true }
+        for h in hidden.subtracting(shown) {
+            W2S.control(h)?.hosting?.isHidden = false
+            W2S.control(h)?.model.shownInForm = false
+        }
+        for h in shown {
+            W2S.control(h)?.hosting?.isHidden = true
+            if W2S.control(h)?.model.shownInForm == false { W2S.control(h)?.model.shownInForm = true }
+        }
         hidden = shown
 
         // the sheet takes the form's size (measured on its own; the tab view's
@@ -521,7 +544,10 @@ final class SettingsFormController: WindowChrome {
     }
 
     private func leave() {
-        for h in hidden { W2S.control(h)?.hosting?.isHidden = false }
+        for h in hidden {
+            W2S.control(h)?.hosting?.isHidden = false
+            W2S.control(h)?.model.shownInForm = false
+        }
         hidden = []
         askedSize = []
         guard let hostView = host?.hosting?.superview else { return }

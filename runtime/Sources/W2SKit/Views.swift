@@ -566,6 +566,7 @@ struct EditField: View {
     @ObservedObject var model: ControlModel
     let secure: Bool
     @FocusState private var focused: Bool
+    @Environment(\.w2sInForm) private var inForm
 
     var body: some View {
         let text = Binding(
@@ -590,8 +591,13 @@ struct EditField: View {
         .focused($focused)
         .onChange(of: focused) { now in
             if now { model.emit(["t": "focus"]) }
+            if now && inForm { FormFocus.owner = ObjectIdentifier(model) }
         }
-        .onChange(of: model.focusRequest) { _ in focused = true }
+        // shown in a settings form, the form's copy takes the keyboard (its own view is hidden)
+        .onChange(of: model.focusRequest) { _ in if inForm == model.shownInForm { focused = true } }
+        // a view made (or moved into a form) while its control has the focus takes it
+        .onAppear { if model.hasWin32Focus && inForm == model.shownInForm { DispatchQueue.main.async { focused = true } } }
+        .onChange(of: model.shownInForm) { shown in if model.hasWin32Focus && inForm == shown { focused = true } }
         // a balloon tip: a popover on the field, gone once the user types, as the balloon
         .popover(isPresented: $balloonShown, arrowEdge: .bottom) { BalloonTip(balloon: shownBalloon) }
         .onChange(of: model.snap.balloon) { balloon in
@@ -673,6 +679,8 @@ struct MultilineEdit: NSViewRepresentable {
         var lastCaretGen: Int?
         var lastScrollGen: Int?
         var lastFocus: Int
+        var tookFocus = false
+        var inForm = false
         var wraps: Bool?
         var publishQueued = false
 
@@ -839,7 +847,11 @@ struct MultilineEdit: NSViewRepresentable {
         tv.textContainerInset = NSSize(width: 2, height: 2)
         tv.delegate = coordinator
         tv.onReturn = { [weak coordinator] in coordinator?.returnPressed() ?? false }
-        tv.onFocus = { [weak coordinator] in coordinator?.model.emit(["t": "focus"]) }
+        tv.onFocus = { [weak coordinator] in
+            guard let coordinator = coordinator else { return }
+            coordinator.model.emit(["t": "focus"])
+            if coordinator.inForm { FormFocus.owner = ObjectIdentifier(coordinator.model) }
+        }
         tv.postsFrameChangedNotifications = true
 
         let scroll = NSScrollView()
@@ -931,9 +943,12 @@ struct MultilineEdit: NSViewRepresentable {
             }
             c.lastScrollGen = snap.scrollGen
         }
-        if c.lastFocus != model.focusRequest {
+        c.inForm = context.environment.w2sInForm
+        if c.lastFocus != model.focusRequest || (model.hasWin32Focus && !c.tookFocus && c.inForm == model.shownInForm) {
             c.lastFocus = model.focusRequest
-            if tv.window?.firstResponder !== tv { tv.window?.makeFirstResponder(tv) }
+            c.tookFocus = true
+            // shown in a settings form, the form's copy takes the keyboard (its own view is hidden)
+            if c.inForm == model.shownInForm, tv.window?.firstResponder !== tv { tv.window?.makeFirstResponder(tv) }
         }
         c.schedulePublish()
     }

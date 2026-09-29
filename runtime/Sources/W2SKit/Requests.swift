@@ -706,6 +706,11 @@ enum Debug {
                 // the settings form: what it covers, what it shows
                 out["formCover"] = [Int(hostView.frame.width), Int(hostView.frame.height)]
                 out["formFront"] = hostView.superview?.subviews.last === hostView
+                if let responder = hostView.window?.firstResponder {
+                    out["formHasFocus"] = (responder as? NSView)?.isDescendant(of: hostView) ?? false
+                    out["firstResponder"] = String(describing: type(of: responder))
+                    out["windowKey"] = hostView.window?.isKeyWindow ?? false
+                }
                 out["formHoles"] = (FormPlaces.holes[handle] ?? []).map { [Int($0.minX.rounded()), Int($0.minY.rounded()), Int($0.width), Int($0.height)] }
                 if #available(macOS 13, *) {
                     let sections = FormLayout.sections(host.model.snap.page ?? [])
@@ -719,7 +724,13 @@ enum Debug {
                     } }
                 }
             }
-            if let hosting = host.hosting { out["formHidden"] = hosting.isHidden }
+            if let hosting = host.hosting {
+                out["formHidden"] = hosting.isHidden
+                if let responder = hosting.window?.firstResponder {
+                    out["responder"] = String(describing: type(of: responder))
+                    out["hasFocus"] = (responder as? NSView)?.isDescendant(of: hosting) ?? false
+                }
+            }
             if let hosting = host.hosting {
                 out["frame"] = [hosting.frame.origin.x, hosting.frame.origin.y, hosting.frame.width, hosting.frame.height]
                 if let hostView = hosting.superview { out["hostHeight"] = Int(hostView.frame.height) }

@@ -148,6 +148,10 @@ struct Snapshot: Codable, Equatable {
 final class ControlModel: ObservableObject {
     @Published var snap: Snapshot
     @Published var focusRequest = 0
+    /// shown in a settings form: the form's copy of its view takes the keyboard, not its own
+    @Published var shownInForm = false
+    /// the Win32 control has the focus (a view made later takes the keyboard too)
+    var hasWin32Focus = false
     let emit: ([String: Any]) -> Void
     /// What the Win32 control answers its `answers` queries from (main thread).
     var publish: ([String: Any]) -> Void = { _ in }
