@@ -15,6 +15,8 @@ final class FrameSidebar: NSObject, WindowChrome {
     private weak var window: NSWindow?
     private var retries = 0
     private var dragged: CGFloat?
+    private var lastMove = Date.distantPast
+    private(set) var collapsed = false
 
     init(host: ControlHost) { self.host = host }
 
@@ -37,7 +39,7 @@ final class FrameSidebar: NSObject, WindowChrome {
         if let _ = controller {
             // the app laid itself out again (or the window resized): the sidebar follows,
             // unless the user is the one dragging it
-            if dragged == nil { window.perform(NSSelectorFromString("w2sSetSidebarWidth:"), with: width) }
+            if dragged == nil && !collapsed { window.perform(NSSelectorFromString("w2sSetSidebarWidth:"), with: width) }
             return
         }
         // the Mac's sidebar text, whatever the tree's Win32 size
@@ -49,18 +51,24 @@ final class FrameSidebar: NSObject, WindowChrome {
         hosting.isHidden = true
         window.perform(NSSelectorFromString("w2sAttachSidebar:"),
                        with: ["controller": controller, "width": width, "target": self] as NSDictionary)
+        FrameToolbar.setSidebarToggle(true, window: window)
     }
 
-    /// winemac: the user moved the divider
+    /// winemac: the user moved the divider, or hid or showed the sidebar (0: hidden)
     @objc func w2sSidebarResized(_ width: NSNumber) {
         dragged = CGFloat(width.doubleValue)
+        collapsed = width.doubleValue == 0
+        lastMove = Date()
         settle()
     }
 
+    /// once the button is up and the divider has stopped (the sidebar's animation)
     private func settle() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             guard let self = self, let width = self.dragged else { return }
-            if NSEvent.pressedMouseButtons & 1 != 0 { return self.settle() }
+            if NSEvent.pressedMouseButtons & 1 != 0 || Date().timeIntervalSince(self.lastMove) < 0.1 {
+                return self.settle()
+            }
             self.dragged = nil
             guard let host = self.host, host.scale > 0 else { return }
             host.model.emit(["t": "sidebarWidth", "v": Int((width / host.scale).rounded())])
@@ -69,6 +77,7 @@ final class FrameSidebar: NSObject, WindowChrome {
 
     func detach() {
         guard controller != nil else { return }
+        if let window = window { FrameToolbar.setSidebarToggle(false, window: window) }
         window?.perform(NSSelectorFromString("w2sDetachSidebar"))
         controller = nil
         host?.hosting?.isHidden = false

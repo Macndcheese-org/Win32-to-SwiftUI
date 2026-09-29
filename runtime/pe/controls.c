@@ -1406,15 +1406,20 @@ static void tree_move_splitter( HWND hwnd, int want )
     HWND parent = GetParent( hwnd ), root = GetAncestor( hwnd, GA_ROOT );
     POINT origin = { 0, 0 };
     RECT tree;
-    int pane, x, y;
+    int pane, x, y, to;
 
-    if (!tree_frame_sidebar( hwnd, &pane, &tree ) || pane <= tree.right || want == pane) return;
+    /* a pixel is rounding between the sidebar's points and the app's pixels */
+    if (!tree_frame_sidebar( hwnd, &pane, &tree ) || pane <= tree.right || abs( want - pane ) <= 1) return;
     MapWindowPoints( parent, root, &origin, 1 );
     x = (tree.right + pane) / 2 - origin.x;
     y = (tree.top + tree.bottom) / 2 - origin.y;
+    /* the sidebar hidden (0): the splitter at the leading edge, the pane beside
+     * it from there; never before it (a negative x is a huge one to the app) */
+    to = max( x + want - pane, (pane - tree.right) / 2 - origin.x );
+    if (to < 0) to = 0;
     SendMessageW( parent, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM( x, y ) );
-    SendMessageW( parent, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM( x + want - pane, y ) );
-    SendMessageW( parent, WM_LBUTTONUP, 0, MAKELPARAM( x + want - pane, y ) );
+    SendMessageW( parent, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM( to, y ) );
+    SendMessageW( parent, WM_LBUTTONUP, 0, MAKELPARAM( to, y ) );
     if (GetCapture() == parent) ReleaseCapture();
 }
 

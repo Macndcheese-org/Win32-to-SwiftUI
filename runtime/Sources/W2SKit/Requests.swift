@@ -714,6 +714,9 @@ enum Debug {
                    let side = split.splitViewItems.first {
                     out["sidebarWidth"] = Int(side.viewController.view.frame.width.rounded())
                     out["sidebarItem"] = side.behavior == .sidebar
+                    out["sidebarCollapsed"] = side.isCollapsed
+                    out["sidebarToggle"] = host.hosting?.window?.toolbar?.items
+                        .contains { $0.itemIdentifier == .toggleSidebar } ?? false
                 }
             }
             if host.entry == "toolbar", let frame = host.owned as? WindowToolbar {
@@ -797,6 +800,11 @@ enum Debug {
             }
             guard let host = W2S.control(handle) else { return "{\"error\":\"no control\"}" }
             if event["t"] as? String == "capture" { return Requests.capture(host.hosting?.window, to: event["s"] as? String) }
+            if event["t"] as? String == "toggleSidebar" {
+                // tests: the toolbar's sidebar button, as it acts (toggleSidebar: to the split view)
+                (host.hosting?.window?.contentViewController as? NSSplitViewController)?.toggleSidebar(nil)
+                return "{\"ok\":true}"
+            }
             if event["t"] as? String == "frameClick" {
                 // tests: a click on frame toolbar item v (spaces count), through its own target and action
                 guard let frame = host.owned as? WindowToolbar, let toolbar = frame.toolbar,

@@ -1421,6 +1421,17 @@ static void selftest_frame_sidebar(void)
     GetWindowRect( tree, &rc );
     check( split_pos == 220 && rc.right - rc.left == 217 && query_has( tree, "\"sidebarPane\":223" ),
            "dragging the sidebar's divider drags the app's splitter: the app lays itself out again" );
+    check( query_has( tree, "\"sidebarToggle\":true" ), "the window's toolbar has the sidebar button" );
+    inject( tree, "{\"t\":\"toggleSidebar\"}" );
+    pump( 1500 );
+    GetWindowRect( list, &rc );
+    MapWindowPoints( NULL, win, (POINT *)&rc, 2 );
+    check( query_has( tree, "\"sidebarCollapsed\":true" ) && split_pos <= 3 && rc.left <= 6,
+           "hiding the sidebar moves the app's splitter to the edge: its list takes the window" );
+    inject( tree, "{\"t\":\"toggleSidebar\"}" );
+    pump( 1500 );
+    check( query_has( tree, "\"sidebarCollapsed\":false" ) && abs( split_pos - 220 ) <= 2,
+           "showing it again puts the splitter back where it was" );
     DestroyWindow( win );
     pump( 300 );
     (void)list;

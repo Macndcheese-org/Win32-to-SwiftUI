@@ -19,9 +19,12 @@ final class FrameToolbar: NSObject, NSToolbarDelegate {
     private weak var window: NSWindow?
     private(set) var members: [WindowToolbar] = []
 
-    private init(window: NSWindow, first: UInt64) {
+    /// the window's sidebar button (FrameSidebar), in the sidebar's part of the toolbar
+    private(set) var sidebarToggle = false
+
+    private init(window: NSWindow) {
         // an identifier of its own: toolbars sharing one keep their items in sync
-        toolbar = NSToolbar(identifier: "org.winehq.w2s.toolbar.\(first)")
+        toolbar = NSToolbar(identifier: "org.winehq.w2s.toolbar.\(window.windowNumber)")
         self.window = window
         super.init()
         toolbar.delegate = self
@@ -29,18 +32,11 @@ final class FrameToolbar: NSObject, NSToolbarDelegate {
         toolbar.allowsUserCustomization = false
     }
 
-    static func join(_ member: WindowToolbar, window: NSWindow) -> FrameToolbar {
+    /// the window's, attached to it the first time
+    private static func of(_ window: NSWindow) -> FrameToolbar {
         let key = ObjectIdentifier(window)
-        if let frame = byWindow[key] {
-            if !frame.members.contains(where: { $0 === member }) {
-                frame.members.append(member)
-                frame.members.sort { $0.handle < $1.handle }
-            }
-            frame.reload(force: true)
-            return frame
-        }
-        let frame = FrameToolbar(window: window, first: member.handle)
-        frame.members = [member]
+        if let frame = byWindow[key] { return frame }
+        let frame = FrameToolbar(window: window)
         byWindow[key] = frame
         window.perform(NSSelectorFromString("w2sAttachToolbar:"), with: [
             "toolbar": frame.toolbar,
@@ -50,10 +46,37 @@ final class FrameToolbar: NSObject, NSToolbarDelegate {
         return frame
     }
 
+    static func join(_ member: WindowToolbar, window: NSWindow) -> FrameToolbar {
+        let frame = of(window)
+        if !frame.members.contains(where: { $0 === member }) {
+            frame.members.append(member)
+            frame.members.sort { $0.handle < $1.handle }
+        }
+        frame.reload(force: true)
+        return frame
+    }
+
+    /// A Mac window with a sidebar has its button in the toolbar: a window without
+    /// a toolbar of the app's gets one for it.
+    static func setSidebarToggle(_ on: Bool, window: NSWindow) {
+        if on {
+            let frame = of(window)
+            frame.sidebarToggle = true
+            frame.reload(force: true)
+        } else if let frame = byWindow[ObjectIdentifier(window)] {
+            frame.sidebarToggle = false
+            frame.dropIfEmpty()
+        }
+    }
+
     func leave(_ member: WindowToolbar) {
         members.removeAll { $0 === member }
+        dropIfEmpty()
+    }
+
+    private func dropIfEmpty() {
         guard let window = window else { return }
-        if members.isEmpty {
+        if members.isEmpty && !sidebarToggle {
             FrameToolbar.byWindow[ObjectIdentifier(window)] = nil
             window.perform(NSSelectorFromString("w2sDetachToolbar"))
         } else {
@@ -62,10 +85,12 @@ final class FrameToolbar: NSObject, NSToolbarDelegate {
     }
 
     private var identifiers: [NSToolbarItem.Identifier] {
-        var ids: [NSToolbarItem.Identifier] = []
+        var ids: [NSToolbarItem.Identifier] = sidebarToggle ? [.toggleSidebar, .sidebarTrackingSeparator] : []
+        var groups = 0
         for member in members where !member.buttons.isEmpty {
-            if !ids.isEmpty { ids.append(.space) }
+            if groups > 0 { ids.append(.space) }
             ids += member.buttons.map(member.id)
+            groups += 1
         }
         return ids
     }
@@ -86,7 +111,9 @@ final class FrameToolbar: NSObject, NSToolbarDelegate {
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { identifiers }
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { identifiers + [.space] }
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        identifiers + [.space, .toggleSidebar, .sidebarTrackingSeparator]
+    }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier,
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
