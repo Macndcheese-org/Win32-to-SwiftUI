@@ -164,6 +164,7 @@ enum Requests {
         // no owner: the alert's own window, without a modal session
         let target = AlertTarget { index in
             complete(index)
+            Detached.forget(alert.window)
             alert.window.orderOut(nil)
             retained.removeValue(forKey: ObjectIdentifier(alert))
         }
@@ -175,10 +176,11 @@ enum Requests {
         retained[ObjectIdentifier(alert)] = [alert, target] as NSArray
         alert.layout()
         let window = alert.window
-        if params["floating"] as? Bool == true { window.level = .floating }
         window.center()
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        if params["ownerRect"] != nil { Detached.show(window, params) }
+        if params["floating"] as? Bool == true { window.level = .floating }
     }
 
     /// Shows an alert without a modal session: a sheet on the owner, or its own window.
@@ -450,13 +452,19 @@ enum Requests {
             ["message": panel.message ?? "", "prompt": panel.prompt ?? "", "dir": panel.directoryURL?.path ?? "",
              "folders": (panel as? NSOpenPanel)?.canChooseDirectories ?? false,
              "multi": (panel as? NSOpenPanel)?.allowsMultipleSelection ?? false,
-             "okEnabled": delegate.okEnabled]
+             "okEnabled": delegate.okEnabled, "sheet": panel.sheetParent != nil,
+             "hidesOnDeactivate": panel.hidesOnDeactivate,
+             "overOwner": Detached.ownerFrame(params).map { $0.contains(NSPoint(x: panel.frame.midX, y: panel.frame.midY)) } ?? false]
         }
         if let owner = owner {
             panel.beginSheetModal(for: owner, completionHandler: complete)
         } else {
             NSApp.activate(ignoringOtherApps: true)
-            panel.begin(completionHandler: complete)
+            panel.begin { response in
+                Detached.forget(panel)
+                complete(response)
+            }
+            Detached.show(panel, params)
         }
     }
 
@@ -834,5 +842,55 @@ enum Debug {
         default:
             return "{\"error\":\"unknown op\"}"
         }
+    }
+}
+
+/// A panel or alert whose owner can't have a sheet: another process's window
+/// (steam.exe's folder picker, owned by steamwebhelper's Settings window) or a
+/// hidden one. Every wine process is an app of its own, so the panel's app isn't
+/// the active one: it would open behind the owner and, as a panel does, hide as
+/// soon as the other app is clicked. It stays instead, over its owner, and above
+/// the windows while a wine app is in front, as a sheet stays on its window;
+/// behind another app it's an ordinary window.
+enum Detached {
+    private static var observers: [ObjectIdentifier: NSObjectProtocol] = [:]
+
+    static func show(_ window: NSWindow, _ params: [String: Any]) {
+        window.hidesOnDeactivate = false
+        if let owner = ownerFrame(params) {
+            // centred on its owner, and on the screen
+            let size = window.frame.size
+            var origin = NSPoint(x: owner.midX - size.width / 2, y: owner.midY - size.height / 2)
+            if let screen = (NSScreen.screens.first { $0.frame.intersects(owner) } ?? NSScreen.main)?.visibleFrame {
+                origin.x = min(max(origin.x, screen.minX), screen.maxX - size.width)
+                origin.y = min(max(origin.y, screen.minY), screen.maxY - size.height)
+            }
+            window.setFrameOrigin(origin)
+        }
+        let apply = { (app: NSRunningApplication?) in
+            // wine's processes are all the same program: "wine"
+            window.level = app?.localizedName == NSRunningApplication.current.localizedName ? .floating : .normal
+        }
+        apply(NSWorkspace.shared.frontmostApplication)
+        forget(window)
+        observers[ObjectIdentifier(window)] = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { note in
+            apply(note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)
+        }
+    }
+
+    static func forget(_ window: NSWindow) {
+        guard let token = observers.removeValue(forKey: ObjectIdentifier(window)) else { return }
+        NSWorkspace.shared.notificationCenter.removeObserver(token)
+    }
+
+    /// The owner's frame in AppKit's coordinates, from its Win32 rectangle
+    static func ownerFrame(_ params: [String: Any]) -> NSRect? {
+        guard let r = params["ownerRect"] as? [Int], r.count == 4, let px = params["screenPx"] as? [Int], px.count == 2,
+              px[0] > 0, let primary = NSScreen.screens.first else { return nil }
+        // points per Win32 pixel (wine's retina mode or not); Win32's origin is the primary screen's top left
+        let s = primary.frame.width / CGFloat(px[0])
+        let w = CGFloat(r[2] - r[0]) * s, h = CGFloat(r[3] - r[1]) * s
+        return NSRect(x: primary.frame.minX + CGFloat(r[0]) * s, y: primary.frame.maxY - CGFloat(r[1]) * s - h, width: w, height: h)
     }
 }

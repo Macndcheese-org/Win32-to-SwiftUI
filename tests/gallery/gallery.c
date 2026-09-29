@@ -1133,6 +1133,22 @@ static void CALLBACK task_dialog_first( HWND hwnd, UINT msg, UINT_PTR id, DWORD 
     SetTimer( hwnd, 4, 500, task_dialog_second );
 }
 
+/* an owner that can't have a sheet (another process's window; here a hidden one):
+ * the panel comes over it, and doesn't hide when its app isn't the active one */
+static BOOL detached_ok;
+
+static void CALLBACK detached_panel( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    char *q = pQuery( NULL );
+
+    KillTimer( hwnd, id );
+    detached_ok = q && strstr( q, "\"sheet\":false" ) && strstr( q, "\"hidesOnDeactivate\":false" ) &&
+                  strstr( q, "\"overOwner\":true" );
+    if (!detached_ok) printf( "      detached panel: %s\n", q ? q : "(null)" );
+    pFree( q );
+    inject( NULL, "{\"t\":\"cancel\"}" );
+}
+
 /* while the folder picker is up: check what the callback set, browse, choose */
 static void CALLBACK folder_panel( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
 {
@@ -2820,6 +2836,20 @@ static int selftest(void)
     printf( "      open panel returned %d: %ls\n", r, file );
     check( r && file[1] == ':' && wcsstr( file, L"w2s-gallery-test.txt" ) && ofn.nFileOffset > 0,
            "native open panel returns a Windows path" );
+
+    /* an owner without a sheet: the panel over it, staying up */
+    {
+        HWND hidden = CreateWindowExW( 0, L"Static", L"Owner elsewhere", WS_OVERLAPPEDWINDOW, 300, 200, 500, 400,
+                                       NULL, NULL, GetModuleHandleW( NULL ), NULL );
+        file[0] = 0;
+        ofn.hwndOwner = hidden;
+        SetTimer( main_window, 7, 1200, detached_panel );
+        r = GetOpenFileNameW( &ofn );
+        check( !r && detached_ok,
+               "an owner that can't have a sheet (another process's): the panel comes over it and doesn't hide itself" );
+        ofn.hwndOwner = main_window;
+        DestroyWindow( hidden );
+    }
 
     /* SHBrowseForFolder -> the open panel in folder mode, with the app's callback */
     {

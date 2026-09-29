@@ -94,6 +94,7 @@ BOOL w2s_run_request_ex( const char *kind, HWND owner, const char *json, struct 
     struct w2s_host owner_host = { 0 };
     struct thread_windows disabled = { 0 };
     BOOL have_host = FALSE;
+    char *with_owner = NULL;
     MSG msg;
     int i;
 
@@ -101,6 +102,24 @@ BOOL w2s_run_request_ex( const char *kind, HWND owner, const char *json, struct 
     if (owner) owner = GetAncestor( owner, GA_ROOT );
     /* the owner's NSWindow, for a sheet */
     if (owner && IsWindowVisible( owner )) have_host = w2s_get_host( owner, &owner_host );
+    if (owner && !have_host)
+    {
+        /* no sheet: the owner is another process's window (steam.exe's folder picker for
+         * steamwebhelper's Settings window) or hidden. Where it is, so the panel or
+         * alert comes over it; Win32 pixels, and the primary screen's for the scale */
+        size_t len = strlen( json );
+        RECT rc;
+
+        if (len >= 2 && json[len - 1] == '}' && GetWindowRect( owner, &rc ) &&
+            (with_owner = HeapAlloc( GetProcessHeap(), 0, len + 128 )))
+        {
+            memcpy( with_owner, json, len - 1 );
+            sprintf( with_owner + len - 1, "%s\"ownerRect\":[%ld,%ld,%ld,%ld],\"screenPx\":[%d,%d]}",
+                     len > 2 ? "," : "", rc.left, rc.top, rc.right, rc.bottom,
+                     GetSystemMetrics( SM_CXSCREEN ), GetSystemMetrics( SM_CYSCREEN ) );
+            json = with_owner;
+        }
+    }
 
     start.kind = W2S_PTR( kind );
     start.window = have_host ? owner_host.window : 0;
@@ -110,8 +129,10 @@ BOOL w2s_run_request_ex( const char *kind, HWND owner, const char *json, struct 
     if (w2s_call( unix_w2s_request_start, &start ) || !start.id)
     {
         if (have_host) w2s_release_host( owner, &owner_host );
+        HeapFree( GetProcessHeap(), 0, with_owner );
         return FALSE;
     }
+    HeapFree( GetProcessHeap(), 0, with_owner );
 
     if (owner) disable_proc( owner, (LPARAM)&disabled );
     else EnumThreadWindows( GetCurrentThreadId(), disable_proc, (LPARAM)&disabled );
