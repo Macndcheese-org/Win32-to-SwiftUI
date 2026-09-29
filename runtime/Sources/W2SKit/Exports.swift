@@ -130,6 +130,10 @@ public func w2s_swift_control_create(_ hostView: UInt64, _ window: UInt64, _ pos
             let bars = ScrollBarsController(host: host)
             host.owned = bars
             bars.update()
+        } else if entryID == "treeview" {
+            let sidebar = FrameSidebar(host: host)
+            host.owned = sidebar
+            sidebar.update()
         }
     }
     return handle

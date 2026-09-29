@@ -46,6 +46,10 @@ The rule of the project: a real macOS component, never a copy of one.
   comdlg32, wine's programs, IE's and the help viewer's toolbars, cryptui, aclui) is an
   SF Symbol, a Finder icon or an AppKit image with the same meaning; report lists show
   their items' icons, as Finder's list view does.
+- A tree along a main window's leading edge (regedit's keys) is the window's real
+  sidebar (a split view's sidebar item, full height), not a list styled as one.
+- The menu bar has one Edit menu (the app's, with the Mac's text commands when it has
+  none) and the Help menu last.
 - Windows that scroll themselves (WS_VSCROLL/WS_HSCROLL on a view of the app's own, an
   owner-drawn list) and the ScrollBar control have NSScrollers instead of Windows
   scroll bars.

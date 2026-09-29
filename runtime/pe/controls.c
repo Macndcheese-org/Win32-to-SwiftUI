@@ -1116,6 +1116,7 @@ struct lv_data
     int cx, cy, gen;
     BOOL more;                      /* images left for the next snapshot */
     BYTE sent[MAX_LV_IMAGES / 8];
+    RECT sidebar_rect;              /* tree: where it was when the sidebar last looked */
 };
 
 /* An image list's images, each sent once: the native view keeps them until
@@ -1368,6 +1369,55 @@ static void tree_nodes( HWND hwnd, HTREEITEM item, struct json *j, int depth, in
     }
 }
 
+/* A tree along the leading edge of a main window, most of its height (regedit's,
+ * winefile's) is the window's sidebar, as Finder's: the Mac's own. The sidebar
+ * reaches to the pane the app laid out beside the tree (its splitter between):
+ * *pane is where that pane starts, in the window's client coordinates. */
+static BOOL tree_frame_sidebar( HWND hwnd, int *pane, RECT *tree )
+{
+    HWND root = GetAncestor( hwnd, GA_ROOT ), parent = GetParent( hwnd ), sib;
+    WCHAR cls[16] = { 0 };
+    RECT client, rc;
+
+    if (!root || root == hwnd || (GetWindowLongW( root, GWL_STYLE ) & WS_CHILD)) return FALSE;
+    GetClassNameW( root, cls, ARRAYSIZE(cls) );
+    if (!wcscmp( cls, L"#32770" )) return FALSE;
+    GetClientRect( root, &client );
+    GetWindowRect( hwnd, tree );
+    MapWindowPoints( NULL, root, (POINT *)tree, 2 );
+    if (tree->left > 1 || tree->bottom - tree->top < (client.bottom - client.top) * 3 / 5) return FALSE;
+    /* the pane beside it: the nearest sibling that starts at or after its right edge */
+    *pane = tree->right;
+    for (sib = GetWindow( parent, GW_CHILD ); sib; sib = GetWindow( sib, GW_HWNDNEXT ))
+    {
+        if (sib == hwnd || !(GetWindowLongW( sib, GWL_STYLE ) & WS_VISIBLE)) continue;
+        GetWindowRect( sib, &rc );
+        MapWindowPoints( NULL, root, (POINT *)&rc, 2 );
+        if (rc.left < tree->right || rc.bottom <= tree->top || rc.top >= tree->bottom) continue;
+        if (*pane == tree->right || rc.left < *pane) *pane = rc.left;
+    }
+    return TRUE;
+}
+
+/* the user dragged the sidebar's divider: the app's own splitter, dragged as
+ * the mouse would (the gap between the tree and the pane beside it) */
+static void tree_move_splitter( HWND hwnd, int want )
+{
+    HWND parent = GetParent( hwnd ), root = GetAncestor( hwnd, GA_ROOT );
+    POINT origin = { 0, 0 };
+    RECT tree;
+    int pane, x, y;
+
+    if (!tree_frame_sidebar( hwnd, &pane, &tree ) || pane <= tree.right || want == pane) return;
+    MapWindowPoints( parent, root, &origin, 1 );
+    x = (tree.right + pane) / 2 - origin.x;
+    y = (tree.top + tree.bottom) / 2 - origin.y;
+    SendMessageW( parent, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM( x, y ) );
+    SendMessageW( parent, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM( x + want - pane, y ) );
+    SendMessageW( parent, WM_LBUTTONUP, 0, MAKELPARAM( x + want - pane, y ) );
+    if (GetCapture() == parent) ReleaseCapture();
+}
+
 static void tree_snapshot( struct w2s_control *ctl, struct json *j )
 {
     HWND parent = GetParent( ctl->hwnd );
@@ -1395,6 +1445,20 @@ static void tree_snapshot( struct w2s_control *ctl, struct json *j )
     GetWindowRect( ctl->hwnd, &rc );
     MapWindowPoints( NULL, parent, (POINT *)&rc, 2 );
     json_bool( j, "sidebar", wcscmp( parent_class, L"#32770" ) && rc.left <= 1 );
+    {
+        RECT tree;
+        int pane;
+        if (tree_frame_sidebar( ctl->hwnd, &pane, &tree ))
+        {
+            json_int( j, "sidebarPane", pane );
+            /* the app lays out the pane beside after the tree: look again once it has */
+            if (!EqualRect( &tree, &data->sidebar_rect ))
+            {
+                data->sidebar_rect = tree;
+                PostMessageW( ctl->hwnd, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
+            }
+        }
+    }
 }
 
 /* what a click on the node's button does: notify, let the app veto or fill
@@ -1437,6 +1501,7 @@ static void tree_apply( struct w2s_control *ctl, const struct w2s_event *ev )
         if (item != (HTREEITEM)SendMessageW( ctl->hwnd, TVM_GETNEXTITEM, TVGN_CARET, 0 ))
             SendMessageW( ctl->hwnd, TVM_SELECTITEM, TVGN_CARET, (LPARAM)item );
     }
+    else if (!strcmp( ev->type, "sidebarWidth" )) tree_move_splitter( ctl->hwnd, (int)ev->value );
     else if (!strcmp( ev->type, "expand" )) tree_expand( ctl->hwnd, item, TRUE );
     else if (!strcmp( ev->type, "collapse" )) tree_expand( ctl->hwnd, item, FALSE );
     else if (!strcmp( ev->type, "activate" ))

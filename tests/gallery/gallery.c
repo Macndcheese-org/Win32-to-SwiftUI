@@ -1340,6 +1340,92 @@ static void selftest_look(void)
     check( query_has( ctl[ID_WHITECHECK], "\"checked\":0" ), "BM_SETCHECK -> the white page's native check box" );
 }
 
+/* a tree along a main window's leading edge, a list beside it and a splitter the
+ * app draws between them (regedit's): the tree is the window's sidebar */
+static int split_pos = 150;
+static BOOL split_drag;
+
+static void split_layout( HWND hwnd )
+{
+    RECT rc;
+    GetClientRect( hwnd, &rc );
+    MoveWindow( GetDlgItem( hwnd, 1 ), 0, 0, split_pos - 3, rc.bottom, TRUE );
+    MoveWindow( GetDlgItem( hwnd, 2 ), split_pos + 3, 0, rc.right - split_pos - 3, rc.bottom, TRUE );
+}
+
+static LRESULT CALLBACK splitwin_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    int x = (short)LOWORD( lparam );
+
+    switch (msg)
+    {
+    case WM_SIZE: split_layout( hwnd ); return 0;
+    case WM_LBUTTONDOWN:
+        if (x >= split_pos - 3 && x <= split_pos + 3) { split_drag = TRUE; SetCapture( hwnd ); }
+        return 0;
+    case WM_LBUTTONUP:
+        if (split_drag && GetCapture() == hwnd)
+        {
+            split_pos = x;
+            split_layout( hwnd );
+            ReleaseCapture();
+        }
+        split_drag = FALSE;
+        return 0;
+    }
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
+}
+
+static void selftest_frame_sidebar(void)
+{
+    WNDCLASSW wc = { 0 };
+    TVINSERTSTRUCTW ins = { 0 };
+    HWND win, tree, list;
+    RECT rc;
+
+    wc.lpfnWndProc = splitwin_proc;
+    wc.hInstance = GetModuleHandleW( NULL );
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpszClassName = L"W2SSplitWindow";
+    RegisterClassW( &wc );
+    win = CreateWindowExW( 0, L"W2SSplitWindow", L"Registry", WS_OVERLAPPEDWINDOW, 240, 140, 640, 420,
+                           NULL, NULL, GetModuleHandleW( NULL ), NULL );
+    tree = CreateWindowExW( 0, WC_TREEVIEWW, NULL, WS_CHILD | WS_VISIBLE | TVS_HASBUTTONS | TVS_LINESATROOT, 0, 0, 0, 0,
+                            win, (HMENU)1, GetModuleHandleW( NULL ), NULL );
+    list = CreateWindowExW( 0, WC_LISTVIEWW, NULL, WS_CHILD | WS_VISIBLE | LVS_REPORT, 0, 0, 0, 0, win, (HMENU)2,
+                            GetModuleHandleW( NULL ), NULL );
+    ins.hInsertAfter = TVI_LAST;
+    ins.item.mask = TVIF_TEXT;
+    ins.item.pszText = (WCHAR *)L"HKEY_CURRENT_USER";
+    SendMessageW( tree, TVM_INSERTITEMW, 0, (LPARAM)&ins );
+    split_layout( win );
+    ShowWindow( win, SW_SHOW );
+    pump( 800 );
+    check( pIsTranslated( tree ) && query_has( tree, "\"sidebarPane\":153" ) && query_has( tree, "\"frameSidebar\":true" ) &&
+           query_has( tree, "\"sidebarItem\":true" ),
+           "a tree along a main window's edge is the window's sidebar (a split view's sidebar item), up to the list" );
+    check( query_int( tree, "sidebarSafeTop" ) >= query_int( tree, "layoutTop" ) && query_int( tree, "layoutTop" ) > 0,
+           "the sidebar's content starts below the titlebar (the traffic lights)" );
+    if (getenv( "W2S_SIDEBAR_SHOT" ))
+    {
+        char json[512];
+        char *q = pQuery( tree );
+        printf( "      sidebar: %s\n", q ? strstr( q, "\"layoutTop\"" ) ? strstr( q, "\"layoutTop\"" ) : q : "(null)" );
+        if (q) pFree( q );
+        snprintf( json, sizeof(json), "{\"t\":\"capture\",\"s\":\"%s\"}", getenv( "W2S_SIDEBAR_SHOT" ) );
+        inject( tree, json );
+        pump( 300 );
+    }
+    inject( tree, "{\"t\":\"sidebarWidth\",\"v\":223}" );
+    pump( 500 );
+    GetWindowRect( tree, &rc );
+    check( split_pos == 220 && rc.right - rc.left == 217 && query_has( tree, "\"sidebarPane\":223" ),
+           "dragging the sidebar's divider drags the app's splitter: the app lays itself out again" );
+    DestroyWindow( win );
+    pump( 300 );
+    (void)list;
+}
+
 /* a French app's menus (regedit's): its Édition has no Copy/Paste, its Aide is last */
 static void selftest_menu_order(void)
 {
@@ -2947,6 +3033,7 @@ static int selftest(void)
     selftest_superclass();
     selftest_groupbox_room();
     selftest_menu_order();
+    selftest_frame_sidebar();
     selftest_about();
     selftest_taskbar();
     selftest_flash();

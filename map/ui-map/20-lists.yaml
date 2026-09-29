@@ -322,12 +322,17 @@ entries:
             }
           }.listStyle(.sidebar)
     glass: automatic
-    state_in: [TVM_INSERTITEM, TVM_DELETEITEM, TVM_SETITEM, TVM_EXPAND, TVM_SELECTITEM, TVM_ENSUREVISIBLE, TVM_SETIMAGELIST, TVM_SORTCHILDREN, TVM_SORTCHILDRENCB]
+    state_in: [TVM_INSERTITEM, TVM_DELETEITEM, TVM_SETITEM, TVM_EXPAND, TVM_SELECTITEM, TVM_ENSUREVISIBLE, TVM_SETIMAGELIST, TVM_SORTCHILDREN, TVM_SORTCHILDRENCB, WM_WINDOWPOSCHANGED]
     events_out: {select: WM_NOTIFY/TVN_SELCHANGING then TVN_SELCHANGED, expand: TVN_ITEMEXPANDING then TVN_ITEMEXPANDED, activate: NM_DBLCLK, menu: NM_RCLICK, rename: TVN_BEGINLABELEDIT/TVN_ENDLABELEDIT}
     notes: >-
       Rows are DisclosureGroup(isExpanded:) rather than List(children:), because apps fill a
       node's children only when TVN_ITEMEXPANDING arrives (file browsers do this), so the
-      bridge must see the expansion before the children exist. .sidebar is the Finder-sidebar
+      bridge must see the expansion before the children exist. A tree along a main window's
+      leading edge, most of its height (regedit, winefile), is the window's own sidebar: an
+      NSSplitViewController sidebar item (winemac: w2sAttachSidebar) floating over wine's
+      content on macOS 26+, full height under the titlebar, up to the pane the app laid out
+      beside the tree. Dragging its divider drags the app's own splitter (the gap between the
+      tree and that pane), and the app lays itself out again. Elsewhere .sidebar is the list's
       look; a tree inside a dialog uses .bordered. A native expansion is what a click on the
       node's button does: TVN_ITEMEXPANDING (the app may veto or insert the children),
       TVM_EXPAND, TVN_ITEMEXPANDED; a node's HTREEITEM is its id. TVS_CHECKBOXES trees stay

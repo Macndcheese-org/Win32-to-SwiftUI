@@ -130,6 +130,7 @@ struct Snapshot: Codable, Equatable {
     // tree view
     var nodes: [TreeNode]?
     var sidebar: Bool?
+    var sidebarPane: Double?    // tree: the window's sidebar, up to this pane (client px; FrameSidebar)
     var mode: String?           // tab: "strip", "form" (a property sheet as a settings form) or "wizard"
     var sheetPx: [Double]?      // tab, form: the sheet's client size
     var tabRect: [Double]?      // tab, form: the tab control in the sheet

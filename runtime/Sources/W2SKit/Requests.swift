@@ -704,6 +704,18 @@ enum Debug {
                 }
                 if let s = bar(hosting) { out["tabBarWidth"] = Int(s.frame.width) }
             }
+            if host.entry == "treeview", let sidebar = host.owned as? FrameSidebar {
+                out["frameSidebar"] = sidebar.attached
+                if let v = sidebar.sidebarView, let w = v.window {
+                    out["sidebarSafeTop"] = Int(v.safeAreaInsets.top)
+                    out["layoutTop"] = Int(w.frame.height - w.contentLayoutRect.maxY)
+                }
+                if let split = host.hosting?.window?.contentViewController as? NSSplitViewController,
+                   let side = split.splitViewItems.first {
+                    out["sidebarWidth"] = Int(side.viewController.view.frame.width.rounded())
+                    out["sidebarItem"] = side.behavior == .sidebar
+                }
+            }
             if host.entry == "toolbar", let frame = host.owned as? WindowToolbar {
                 let window = host.hosting?.window
                 out["frameToolbar"] = frame.toolbar != nil && window?.toolbar === frame.toolbar
