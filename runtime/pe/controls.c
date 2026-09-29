@@ -17,6 +17,16 @@ static void class_name( HWND hwnd, WCHAR *name, int size )
     if ((bang = wcschr( name, '!' ))) memmove( name, bang + 1, (wcslen( bang + 1 ) + 1) * sizeof(WCHAR) );
 }
 
+/* the builtin class a window is made of: a superclass of one (Delphi's TComboBox,
+ * TListBox) is that class, which its procedure marks the window with */
+static void real_class_name( HWND hwnd, WCHAR *name, int size )
+{
+    WCHAR *bang;
+    name[0] = 0;
+    if (!RealGetWindowClassW( hwnd, name, size )) GetClassNameW( hwnd, name, size );
+    if ((bang = wcschr( name, '!' ))) memmove( name, bang + 1, (wcslen( bang + 1 ) + 1) * sizeof(WCHAR) );
+}
+
 static BOOL is_class( const WCHAR *name, const WCHAR *want )
 {
     return !_wcsicmp( name, want );
@@ -3074,7 +3084,8 @@ static const struct w2s_kind *select_control_kind( HWND hwnd )
 
     if (!(style & WS_CHILD) || !parent) return NULL;
     class_name( hwnd, name, ARRAYSIZE(name) );
-    class_name( parent, parent_name, ARRAYSIZE(parent_name) );
+    /* a part of a Delphi TComboBox is a combo box's part all the same */
+    real_class_name( parent, parent_name, ARRAYSIZE(parent_name) );
 
     /* a rebar's toolbars and ComboBoxEx lists are translated as anywhere (map: rebar) */
     if (is_class( parent_name, L"ReBarWindow32" ) && is_class( name, TOOLBARCLASSNAMEW ))
@@ -3082,7 +3093,13 @@ static const struct w2s_kind *select_control_kind( HWND hwnd )
     if (is_class( name, WC_COMBOBOXEXW ))
         return (style & 3) == CBS_SIMPLE ? NULL : &kind_comboboxex;
 
-    /* parts of composite controls belong to their parent */
+    /* parts of composite controls belong to their parent: a combo box answers for its
+     * edit and list whatever its class is called (a superclass of comctl32's) */
+    if (is_class( name, L"Edit" ) || is_class( name, L"ListBox" ) || is_class( name, L"ComboLBox" ))
+    {
+        COMBOBOXINFO cbi = { sizeof(cbi) };
+        if (GetComboBoxInfo( parent, &cbi ) && (cbi.hwndItem == hwnd || cbi.hwndList == hwnd)) return NULL;
+    }
     if (is_class( parent_name, L"ComboBox" ) || is_class( parent_name, L"ComboBoxEx32" ) ||
         is_class( parent_name, L"SysListView32" ) || is_class( parent_name, L"SysTreeView32" ) ||
         is_class( parent_name, L"SysDateTimePick32" ) || is_class( parent_name, L"SysIPAddress32" ) ||

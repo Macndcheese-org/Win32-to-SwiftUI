@@ -550,6 +550,30 @@ BOOL w2s_attach( HWND hwnd, const struct w2s_kind *kind )
     return FALSE;
 }
 
+/* A window whose creation just ended turns out to be a combo box of a class we
+ * don't translate (Delphi's TComboBox, a superclass of comctl32's): it made its
+ * edit and list in its WM_CREATE, before it could say they are its parts, so they
+ * may have come out as controls of their own. They go back to it. */
+static void release_combo_parts( HWND hwnd )
+{
+    COMBOBOXINFO cbi = { sizeof(cbi) };
+    struct w2s_control *ctl;
+    HWND parts[2];
+    int i;
+
+    if (!GetWindow( hwnd, GW_CHILD ) || !GetComboBoxInfo( hwnd, &cbi )) return;
+    parts[0] = cbi.hwndItem;
+    parts[1] = cbi.hwndList;
+    for (i = 0; i < 2; i++)
+    {
+        if (!parts[i] || !(ctl = GetPropW( parts[i], prop_name )) || !ctl->active) continue;
+        TRACE( "%p is combo box %p's part\n", parts[i], hwnd );
+        ctl->reselecting++;
+        deactivate( ctl, FALSE );
+        ctl->reselecting--;
+    }
+}
+
 /***********************************************************************
  *      W2SWindowCreated  (win32swiftui.@)
  */
@@ -570,7 +594,11 @@ void WINAPI W2SWindowCreated( HWND hwnd )
         w2s_frame_created( hwnd );      /* menus.c: its menu goes to the Mac menu bar */
         return;
     }
-    if (!(kind = w2s_select_kind( hwnd ))) return;
+    if (!(kind = w2s_select_kind( hwnd )))
+    {
+        release_combo_parts( hwnd );
+        return;
+    }
     w2s_attach( hwnd, kind );
 }
 

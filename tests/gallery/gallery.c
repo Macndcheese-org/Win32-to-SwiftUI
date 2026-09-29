@@ -1312,6 +1312,57 @@ static void selftest_look(void)
     check( query_has( ctl[ID_WHITECHECK], "\"checked\":0" ), "BM_SETCHECK -> the white page's native check box" );
 }
 
+/* a superclass of ComboBox, as Delphi's VCL makes TComboBox: of user32's (marked
+ * as a combo box by its procedure) and of comctl32's v6 one (not marked) */
+static WNDPROC base_combo_proc[2];
+
+static LRESULT CALLBACK tcombobox_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    return CallWindowProcW( base_combo_proc[0], hwnd, msg, wparam, lparam );
+}
+
+static LRESULT CALLBACK tcombobox_v6_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    return CallWindowProcW( base_combo_proc[1], hwnd, msg, wparam, lparam );
+}
+
+static void selftest_superclass(void)
+{
+    static const WCHAR *names[2] = { L"TComboBox", L"TComboBoxV6" };
+    static const char *what[2] =
+    {
+        "a Delphi TComboBox (user32's) keeps its own edit: no native field over it",
+        "a Delphi TComboBox of comctl32 v6's keeps its own edit: no native field over it",
+    };
+    unsigned int i;
+
+    for (i = 0; i < 2; i++)
+    {
+        WNDCLASSEXW wc = { sizeof(wc) };
+        COMBOBOXINFO cbi = { sizeof(cbi) };
+        ULONG_PTR cookie = 0;
+        BOOL v6 = i && v6_begin( &cookie );
+        HWND win, combo;
+
+        GetClassInfoExW( NULL, L"ComboBox", &wc );
+        base_combo_proc[i] = wc.lpfnWndProc;
+        wc.lpfnWndProc = i ? tcombobox_v6_proc : tcombobox_proc;
+        wc.hInstance = GetModuleHandleW( NULL );
+        wc.lpszClassName = names[i];
+        RegisterClassExW( &wc );
+        win = CreateWindowExW( 0, L"W2SScrollHost", L"Delphi", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 200, 200, 300, 200,
+                               NULL, NULL, GetModuleHandleW( NULL ), NULL );
+        combo = CreateWindowExW( 0, names[i], NULL, WS_CHILD | WS_VISIBLE | CBS_DROPDOWN, 10, 10, 200, 200, win,
+                                 NULL, GetModuleHandleW( NULL ), NULL );
+        if (v6) v6_end( cookie );
+        pump( 300 );
+        check( combo && GetComboBoxInfo( combo, &cbi ) && cbi.hwndItem && !pIsTranslated( cbi.hwndItem ) &&
+               (!i || v6), what[i] );
+        DestroyWindow( win );
+        pump( 200 );
+    }
+}
+
 /* wine's strips in an app's image list (as cryptui, aclui, hhctrl and ieframe make
  * theirs) are known by their pixels and show as SF Symbols */
 static HIMAGELIST strip_list( const WCHAR *dll, UINT id, int size, UINT flags, COLORREF mask )
@@ -2802,6 +2853,7 @@ static int selftest(void)
     selftest_frame_toolbar();
     selftest_scrollbars();
     selftest_strips();
+    selftest_superclass();
     selftest_about();
     selftest_taskbar();
     selftest_flash();
