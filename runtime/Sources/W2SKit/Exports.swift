@@ -23,16 +23,33 @@ public func w2s_swift_init(_ version: UInt32, _ osMajor: UnsafeMutablePointer<UI
 enum Capture {
     private static var timer: Timer?
 
+    /// tests: every tab control that is a property sheet's goes to its next page
+    static func nextPages() {
+        W2S.lock.lock()
+        let hosts = Array(W2S.controls.values)
+        W2S.lock.unlock()
+        for host in hosts where host.entry == "tab" {
+            let count = host.model.snap.items?.count ?? 0
+            guard count > 1 else { continue }
+            host.model.emit(["t": "select", "v": ((host.model.snap.selection ?? 0) + 1) % count])
+        }
+    }
+
     static func start(_ dir: String) {
         guard timer == nil else { return }
         let exe = (CommandLine.arguments.first as NSString?)?.lastPathComponent ?? "wine"
+        // W2S_TOUR=1: after each capture, property sheets move to their next page
+        let tour = ProcessInfo.processInfo.environment["W2S_TOUR"] == "1"
+        var shot = 0
         timer = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { _ in
+            shot += 1
+            defer { if tour { Capture.nextPages() } }
             for (i, window) in NSApp.windows.enumerated() where window.isVisible && window.frame.width > 80 {
                 guard let view = window.contentView?.superview ?? window.contentView,
                       let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
                 view.cacheDisplay(in: view.bounds, to: rep)
                 let title = window.title.isEmpty ? "untitled" : window.title
-                let name = "\(exe)-\(i)-\(title)".replacingOccurrences(of: "/", with: "_")
+                let name = (tour ? "\(exe)-\(i)-\(title)-\(shot)" : "\(exe)-\(i)-\(title)").replacingOccurrences(of: "/", with: "_")
                 try? rep.representation(using: .png, properties: [:])?
                     .write(to: URL(fileURLWithPath: dir).appendingPathComponent(name + ".png"))
                 // and the view tree, for what a picture can't tell
@@ -102,9 +119,9 @@ public func w2s_swift_control_create(_ hostView: UInt64, _ window: UInt64, _ pos
         if entryID == "button.groupbox" { GroupBoxTitle.apply(host) }
         // what a control puts in its window's frame lives exactly as long as the control
         if entryID == "tab" {
-            let panes = WindowPanes(host: host)
-            host.owned = panes
-            panes.update()
+            let form = SettingsFormController(host: host)
+            host.owned = form
+            form.update()
         } else if entryID == "toolbar" {
             let toolbar = WindowToolbar(host: host)
             host.owned = toolbar

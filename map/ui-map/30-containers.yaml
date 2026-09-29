@@ -48,30 +48,48 @@ entries:
               Button("OK", action: action).keyboardShortcut(.defaultAction)
             }
           }.padding()
-    appkit:
-      - since: 12
+      - since: 13
         code: |-
-          // a settings window's panes: the toolbar in the window's frame (HIG, Settings)
-          let toolbar = NSToolbar(identifier: "settings")
-          toolbar.displayMode = .labelOnly
-          window.toolbar = toolbar
-          window.toolbarStyle = .preference
+          VStack(spacing: 0) {
+            TabView(selection: $choice) {
+              ForEach(choices) { c in
+                Form {
+                  Section(title) {
+                    LabeledContent("Label:") { TextField("", text: $text).frame(width: 240) }
+                    Toggle(title, isOn: $isOn)
+                  }
+                }
+                .formStyle(.columns)
+                .tabItem { Text(c.title) }.tag(c.id)
+              }
+            }
+            HStack {
+              Spacer()
+              Button("Cancel", role: .cancel, action: action).keyboardShortcut(.cancelAction)
+              Button("Apply", action: action)
+              Button("OK", action: action).keyboardShortcut(.defaultAction)
+            }.padding()
+          }
     glass: automatic
     state_in: [PSM_SETCURSEL, PSM_ADDPAGE, PSM_REMOVEPAGE, PSM_CHANGED, PSM_UNCHANGED, PSM_SETTITLE, PSM_SETWIZBUTTONS]
     events_out: {page: PSN_SETACTIVE/PSN_KILLACTIVE, apply: PSN_APPLY, cancel: PSN_QUERYCANCEL/PSN_RESET}
     notes: >-
-      Up to 6 pages (the HIG's most for a tab view): a tab view. More (winecfg has 8): the
-      sheet is a settings window, and a Mac settings window switches panes with a toolbar in
-      its frame (HIG, Settings): winemac puts an NSToolbar in the window's frame
-      (mnc_w2s.m, w2sAttachToolbar:) in the preference style, one text item per page (Win32
-      pages have no icons; none is made up), the shown pane selected, the window titled after
-      it. Wine's content (the pages and OK/Cancel/Apply) sits below the toolbar; the window is
-      taller than wine's content by the titlebar and toolbar, and wider when the panes need
-      it, with wine's content centred (WineWindow's frame/content rect conversions), so Win32
-      geometry never sees them. The sheet's tab control is the model: its items and selection
-      make the panes, a pane choice selects the tab, and TCM_ADJUSTRECT leaves the page area
-      its whole rectangle. OK/Cancel/Apply stay, because apps commit on PSN_APPLY; macOS
-      settings would apply live, but that can't be emulated safely.
+      A property sheet is a settings window. From macOS 13, its current page is laid out again
+      as a macOS settings form (SettingsForm.swift): a tab view across the top with every page
+      (the window widened until no tab is cut), the page's controls as form rows in the columns
+      style (labels right-aligned, controls left-aligned, as Safari's settings), group boxes as
+      sections, and the sheet's buttons at the bottom right. Rows come from the Win32 geometry:
+      controls centred on one height are a row; a text left of a row labels it; one-line texts
+      over a line of fields label the field under each (one setting per row); an image is a row
+      of its own; long texts wrap. Every control in the form is the native view of its Win32
+      control (the same model), so the page stays the app's; the controls' own views hide while
+      the form shows them. A window of the app's own (an owner-drawn button) gets a slot in the
+      form it is moved into, and draws itself there; the page covers the sheet meanwhile, and
+      both go back when the page changes. The tab control's host view covers the sheet (host
+      outsets) above the other controls'; the sheet is sized to the form, centred on its screen
+      the first time. A page with a window the form can't place (one holding windows of its own)
+      keeps the tab strip and the sheet's own layout. OK/Cancel/Apply stay, because apps commit
+      on PSN_APPLY; macOS settings would apply live, but that can't be emulated safely.
 
   - id: propsheet.wizard
     kind: dialog

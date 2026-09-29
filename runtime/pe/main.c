@@ -441,6 +441,17 @@ struct w2s_control *w2s_control_from_hwnd( HWND hwnd )
     return ctl && ctl->active ? ctl : NULL;
 }
 
+/***********************************************************************
+ *      w2s_control_of
+ *
+ * The translated control a window is (its native view up), or NULL.
+ */
+struct w2s_control *w2s_control_of( HWND hwnd )
+{
+    struct w2s_control *ctl = GetPropW( hwnd, prop_name );
+    return ctl && ctl->active && ctl->handle ? ctl : NULL;
+}
+
 static LRESULT CALLBACK subclass_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
     struct w2s_control *ctl = GetPropW( hwnd, prop_name );
@@ -507,6 +518,9 @@ static LRESULT CALLBACK subclass_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
         struct w2s_control_focus_params params = { ctl->handle, msg == WM_SETFOCUS };
         w2s_call( unix_w2s_control_focus, &params );
     }
+    /* a control shown or hidden on a settings form's page: the form lays out again */
+    if (msg == WM_WINDOWPOSCHANGED && (((WINDOWPOS *)lparam)->flags & (SWP_SHOWWINDOW | SWP_HIDEWINDOW)))
+        w2s_form_child_changed( hwnd );
     if (ctl->kind->observe) ctl->kind->observe( ctl, msg, wparam, lparam );
     if (is_reselect_message( msg ) && !ctl->applying) reselect_kind( ctl );
     if (ctl->active && !ctl->applying && !ctl->snapshotting && is_state_message( ctl, msg )) w2s_push( ctl, FALSE );

@@ -547,9 +547,69 @@ static DLGTEMPLATE *page_template( const WCHAR *text )
     return tmpl;
 }
 
+static HWND page_child( HWND page, const WCHAR *cls, const WCHAR *text, DWORD style, int x, int y, int w, int h, int id )
+{
+    HWND child = CreateWindowExW( 0, cls, text, WS_CHILD | WS_VISIBLE | style, x, y, w, h, page, (HMENU)(INT_PTR)id,
+                                  GetModuleHandleW( NULL ), NULL );
+    SendMessageW( child, WM_SETFONT, SendMessageW( page, WM_GETFONT, 0, 0 ), FALSE );
+    return child;
+}
+
 static INT_PTR CALLBACK page_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
-    return msg == WM_INITDIALOG;
+    WCHAR text[64];
+
+    if (msg != WM_INITDIALOG) return FALSE;
+    GetDlgItemTextW( hwnd, 1000, text, ARRAYSIZE(text) );
+    if (!wcscmp( text, L"This is the General page." ))
+    {
+        /* a settings page as Windows lays them out: labels left of fields, a check box,
+         * radio buttons in a group box, a label above a field */
+        page_child( hwnd, L"Static", L"&Name:", SS_LEFT, 10, 40, 60, 16, 1001 );
+        page_child( hwnd, L"Edit", L"Wine", WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL, 80, 38, 150, 22, 1002 );
+        page_child( hwnd, L"Button", L"&Show hidden files", BS_AUTOCHECKBOX | WS_TABSTOP, 80, 66, 200, 18, 1003 );
+        page_child( hwnd, L"Button", L"Startup", BS_GROUPBOX, 10, 92, 300, 66, 1004 );
+        page_child( hwnd, L"Button", L"Open a new window", BS_AUTORADIOBUTTON | WS_TABSTOP | WS_GROUP, 20, 110, 200, 18, 1005 );
+        page_child( hwnd, L"Button", L"Open the last session", BS_AUTORADIOBUTTON, 20, 132, 200, 18, 1006 );
+        page_child( hwnd, L"Static", L"Home page:", SS_LEFT, 10, 166, 100, 16, 1007 );
+        page_child( hwnd, L"Edit", L"https://www.winehq.org", WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL, 10, 184, 250, 22, 1008 );
+    }
+    else if (!wcscmp( text, L"This is the Sound page." ))
+    {
+        /* a window of the app's own: a slot in the form, where it is moved and draws itself */
+        page_child( hwnd, L"Static", L"Output level:", SS_LEFT, 10, 44, 90, 16, 1010 );
+        page_child( hwnd, L"W2SWhitePanel", NULL, 0, 110, 40, 120, 24, 1009 );
+    }
+    else if (!wcscmp( text, L"This is the Displays page." ))
+    {
+        /* two labels over two fields, side by side (the Windows way) */
+        HWND a, b;
+        page_child( hwnd, L"Static", L"Resolution:", SS_LEFT, 10, 40, 100, 16, 1017 );
+        page_child( hwnd, L"Static", L"Refresh rate:", SS_LEFT, 170, 40, 100, 16, 1018 );
+        a = page_child( hwnd, L"ComboBox", NULL, CBS_DROPDOWNLIST | WS_TABSTOP, 10, 58, 150, 200, 1019 );
+        b = page_child( hwnd, L"ComboBox", NULL, CBS_DROPDOWNLIST | WS_TABSTOP, 170, 58, 120, 200, 1020 );
+        SendMessageW( a, CB_ADDSTRING, 0, (LPARAM)L"1920 x 1080" );
+        SendMessageW( b, CB_ADDSTRING, 0, (LPARAM)L"60 Hz" );
+    }
+    else if (!wcscmp( text, L"This is the Accessibility page." ))
+    {
+        /* an About page: an icon beside several texts, one of them a long paragraph */
+        HWND icon = page_child( hwnd, L"Static", NULL, SS_ICON, 10, 40, 48, 48, 1013 );
+        SendMessageW( icon, STM_SETICON, (WPARAM)LoadIconW( NULL, (LPCWSTR)IDI_APPLICATION ), 0 );
+        page_child( hwnd, L"Static", L"Gallery", SS_LEFT, 70, 40, 120, 16, 1014 );
+        page_child( hwnd, L"Static", L"Version 1.2.3", SS_LEFT, 70, 58, 120, 16, 1015 );
+        page_child( hwnd, L"Static", L"This program is free software; you can redistribute it and/or modify it under the "
+                    L"terms of the GNU Lesser General Public License as published by the Free Software Foundation.",
+                    SS_LEFT, 70, 78, 250, 60, 1016 );
+    }
+    else if (!wcscmp( text, L"This is the Keyboard shortcuts page." ))
+    {
+        /* a window of the app's own with windows in it: the form can't lay those out */
+        HWND panel = page_child( hwnd, L"W2SWhitePanel", NULL, 0, 10, 40, 200, 60, 1011 );
+        CreateWindowExW( 0, L"Button", L"Inside", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 10, 10, 80, 24, panel,
+                         (HMENU)1012, GetModuleHandleW( NULL ), NULL );
+    }
+    return TRUE;
 }
 
 static const WCHAR *page_titles[] = { L"General", L"Appearance", L"Desktop & Dock", L"Displays", L"Sound",
@@ -2201,48 +2261,95 @@ static int selftest(void)
         }
     }
 
-    /* property sheets: more than 6 pages are a settings window, whose panes are a
-     * toolbar in the window's frame (HIG); fewer keep the tab view */
+    /* property sheets are settings windows: a tab view across the top, the page laid out
+     * again as a settings form, the sheet's buttons below, the sheet sized to it */
     {
-        HWND sheet = property_sheet( 7, TRUE ), tab, page;
-        RECT tab_rc, page_rc;
-        int x, extra;
+        HWND sheet = property_sheet( 7, TRUE ), tab, name, ok;
+        RECT client, first;
+        int cover_w, cover_h;
 
-        pump( 800 );
+        pump( 1200 );
         tab = (HWND)SendMessageW( sheet, PSM_GETTABCONTROL, 0, 0 );
-        check( pIsTranslated( tab ) && query_has( tab, "\"mode\":\"panes\"" ) &&
-               query_has( tab, "\"windowPanes\":true" ) && query_has( tab, "\"toolbarInWindow\":true" ) &&
-               query_has( tab, "\"toolbarStyle\":\"preference\"" ),
-               "a 7-page property sheet is a settings window: a toolbar of panes in the window's frame" );
-        check( query_has( tab, "\"paneItems\":[\"General\",\"Appearance\"" ) && query_int( tab, "paneVisible" ) == 7 &&
-               query_has( tab, "\"selectedPane\":\"w2s.pane.0\"" ) && query_has( tab, "\"windowTitle\":\"General\"" ),
-               "one text pane per page, all visible, the shown one selected, the window titled after it" );
-        x = query_int( tab, "wineViewX" );
-        extra = query_int( tab, "windowWidth" ) - query_int( tab, "wineViewWidth" );
-        check( x >= 0 && (extra - 2 * x == 0 || extra - 2 * x == 1) && query_int( tab, "wineViewTop" ) >= 50,
-               "wine's content sits below the toolbar, centred when the panes need a wider window" );
-        page = (HWND)SendMessageW( sheet, PSM_GETCURRENTPAGEHWND, 0, 0 );
-        GetWindowRect( tab, &tab_rc );
-        GetWindowRect( page, &page_rc );
-        check( page_rc.left - tab_rc.left < 8, "the pages fill the tab control's area (its tabs are in the toolbar)" );
-        inject( tab, "{\"t\":\"paneClick\",\"v\":3}" );
-        pump( 400 );
-        page = (HWND)SendMessageW( sheet, PSM_GETCURRENTPAGEHWND, 0, 0 );
-        check( page && page == (HWND)SendMessageW( sheet, PSM_INDEXTOHWND, 3, 0 ) && IsWindowVisible( page ) &&
-               query_has( tab, "\"selection\":3" ) && query_has( tab, "\"selectedPane\":\"w2s.pane.3\"" ) &&
-               query_has( tab, "\"windowTitle\":\"Displays\"" ),
-               "a click on a pane switches the page; the pane stays selected, the title follows" );
-        SendMessageW( sheet, PSM_SETCURSEL, 1, 0 );
-        pump( 400 );
-        check( query_has( tab, "\"selectedPane\":\"w2s.pane.1\"" ) && query_has( tab, "\"windowTitle\":\"Appearance\"" ),
-               "PSM_SETCURSEL moves the selected pane and the title" );
+        GetClientRect( sheet, &client );
+        check( pIsTranslated( tab ) && query_has( tab, "\"mode\":\"form\"" ) && query_has( tab, "\"formFront\":true" ),
+               "a property sheet is a settings form: the tab control's view covers the sheet, above the other controls'" );
+        {
+            char *q = pQuery( tab ), *p = q ? strstr( q, "\"formCover\":[" ) : NULL;
+            cover_w = p ? atoi( p + strlen( "\"formCover\":[" ) ) : -1;
+            cover_h = p ? atoi( strchr( p, ',' ) + 1 ) : -1;
+            pFree( q );
+        }
+        check( abs( cover_w - client.right ) <= 1 && abs( cover_h - client.bottom ) <= 1,
+               "the form covers the whole sheet" );
+        check( query_has( tab, "Name: [edit.single]" ) && query_has( tab, "[button.checkbox]" ) &&
+               query_has( tab, "Home page: [edit.single]" ) && query_has( tab, "\"formSections\":3" ) &&
+               query_has( tab, "note: This is the General page." ),
+               "the page as form rows: labels beside their fields (also one written above), the group box a section" );
+        name = GetDlgItem( (HWND)SendMessageW( sheet, PSM_GETCURRENTPAGEHWND, 0, 0 ), 1002 );
+        ok = GetDlgItem( sheet, IDOK );
+        check( query_has( name, "\"formHidden\":true" ) && query_has( ok, "\"formHidden\":true" ),
+               "the page's controls and the sheet's buttons show in the form, not in their own views" );
+        inject( name, "{\"t\":\"text\",\"s\":\"Wine Is Not an Emulator\"}" );
+        pump( 200 );
+        {
+            WCHAR text[64];
+            GetWindowTextW( name, text, ARRAYSIZE(text) );
+            check( !wcscmp( text, L"Wine Is Not an Emulator" ), "typing in the form's field is typing in the page's edit" );
+        }
+        first = client;
+        inject( tab, "{\"t\":\"select\",\"v\":3}" );
+        pump( 1000 );
+        check( query_has( tab, "Resolution: [combobox.dropdownlist]" ) && query_has( tab, "Refresh rate: [combobox.dropdownlist]" ),
+               "labels over side-by-side fields: one setting per row, each label beside its field" );
+        inject( tab, "{\"t\":\"select\",\"v\":4}" );
+        pump( 1000 );
+        {
+            HWND page = (HWND)SendMessageW( sheet, PSM_GETCURRENTPAGEHWND, 0, 0 ), panel = GetDlgItem( page, 1009 );
+            RECT rc;
+
+            GetWindowRect( panel, &rc );
+            MapWindowPoints( NULL, sheet, (POINT *)&rc, 2 );
+            printf( "      slot: panel at %ld,%ld in the sheet\n", rc.left, rc.top );
+            {
+                char *q = pQuery( tab ), *p = q ? strstr( q, "\"formHoles\":[[" ) : NULL;
+                int hx = p ? atoi( p + strlen( "\"formHoles\":[[" ) ) : -1, hy = p ? atoi( strchr( p + 14, ',' ) + 1 ) : -1;
+                pFree( q );
+                printf( "      slot: hole at %d,%d\n", hx, hy );
+                check( query_has( tab, "\"mode\":\"form\"" ) && query_has( tab, "Output level: [slot]" ) &&
+                       abs( rc.left - hx ) <= 2 && abs( rc.top - hy ) <= 2,
+                       "a window of the app's own gets a slot in the form, and is moved exactly into it" );
+            }
+            inject( tab, "{\"t\":\"select\",\"v\":5}" );
+            pump( 1000 );
+            GetWindowRect( panel, &rc );
+            MapWindowPoints( NULL, page, (POINT *)&rc, 2 );
+            printf( "      slot: panel back at %ld,%ld in its page\n", rc.left, rc.top );
+            check( rc.left == 110 && rc.top == 40, "leaving the page puts the app's window back where it was" );
+        }
+        check( query_has( tab, "\"mode\":\"strip\"" ) && query_has( ok, "\"formHidden\":false" ),
+               "a page with a window of the app's own holding windows keeps the tab strip, the sheet's own layout" );
+        inject( tab, "{\"t\":\"select\",\"v\":6}" );
+        pump( 1000 );
+        GetClientRect( sheet, &client );
+        check( query_has( tab, "\"mode\":\"form\"" ) && query_has( tab, "[static.image]" ) &&
+               query_has( tab, "note: Gallery" ) && query_has( tab, "note: Version 1.2.3" ) && client.right < 1000,
+               "an icon beside texts: each on its own row, not one row; a long paragraph wraps" );
+        inject( tab, "{\"t\":\"select\",\"v\":1}" );
+        pump( 800 );
+        GetClientRect( sheet, &client );
+        check( query_has( tab, "\"mode\":\"form\"" ) && query_has( tab, "note: This is the Appearance page." ) &&
+               query_has( ok, "\"formHidden\":true" ),
+               "the next page is a form again" );
+        if (client.right < 600) printf( "      sheet client %ldx%ld\n", client.right, client.bottom );
+        check( client.right >= 600, "the sheet is wide enough for all its tabs (landscape)" );
+        (void)first;
         DestroyWindow( sheet );
         pump( 200 );
 
         sheet = property_sheet( 3, TRUE );
         pump( 600 );
         tab = (HWND)SendMessageW( sheet, PSM_GETTABCONTROL, 0, 0 );
-        check( pIsTranslated( tab ) && query_has( tab, "\"mode\":\"strip\"" ), "a 3-page property sheet keeps the tab strip" );
+        check( pIsTranslated( tab ) && query_has( tab, "\"mode\":\"form\"" ), "a 3-page property sheet is a settings form too" );
         {
             HWND page = (HWND)SendMessageW( sheet, PSM_GETCURRENTPAGEHWND, 0, 0 );
             RECT tab_rc, page_rc;

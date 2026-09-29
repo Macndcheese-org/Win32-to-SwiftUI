@@ -11,7 +11,7 @@ enum ControlViews {
     // map: progress trackbar tab static.frame statusbar edit.multiline combobox.editable treeview
     // map: updown datetime monthcal tooltip (as .help on every control: HelpText)
     // map: listview.checkboxes listview.icon
-    // map: propsheet propsheet.wizard (modes of the sheet's tab control: WindowPanes, WizardSteps)
+    // map: propsheet propsheet.wizard (modes of the sheet's tab control: SettingsForm, WizardSteps)
     // map: toolbar rebar comboboxex syslink trackbar.vertical
     static let entries: Set<String> = [
         "button.push", "button.default", "button.checkbox", "button.pushlike", "button.radio", "button.groupbox",
@@ -80,17 +80,25 @@ struct Metrics {
         fontSize = max(8, px * scale)
         controlSize = fontSize <= 10 ? .mini : fontSize <= 12 ? .small : .regular
     }
+
+    init(fontSize: CGFloat, controlSize: ControlSize, scale: CGFloat) {
+        self.fontSize = fontSize
+        self.controlSize = controlSize
+        self.scale = scale
+    }
 }
 
 struct ControlRoot: View {
     @ObservedObject var model: ControlModel
     let entry: String
+    /// the look it takes whatever its Win32 size (a settings form's controls)
+    var fixed: Metrics? = nil
 
     var body: some View {
         GeometryReader { geo in
             let snap = model.snap
             let scale = geo.size.height / CGFloat(max(1, snap.heightPx ?? Double(geo.size.height)))
-            let metrics = Metrics(snap: snap, scale: scale.isFinite && scale > 0 ? scale : 1)
+            let metrics = fixed ?? Metrics(snap: snap, scale: scale.isFinite && scale > 0 ? scale : 1)
             content(snap: snap, metrics: metrics)
                 .modifier(HelpText(text: snap.help))
                 .font(.system(size: metrics.fontSize))
@@ -1924,10 +1932,14 @@ struct TabStrip: View {
     @ObservedObject var model: ControlModel
 
     var body: some View {
-        if model.snap.mode == "panes" {
-            // the panes are a toolbar in the window's frame, outside wine's
-            // content: nothing is drawn here
-            EmptyView()
+        if model.snap.mode == "form", #available(macOS 13, *) {
+            // the whole sheet as a settings form: this view covers the sheet (outsets)
+            GeometryReader { geo in
+                let sheet = model.snap.sheetPx ?? []
+                let s = sheet.count == 2 && sheet[1] > 0 ? geo.size.height / CGFloat(sheet[1]) : 1
+                SettingsForm(model: model, scale: s.isFinite && s > 0 ? s : 1, form: W2S.handle(of: model))
+                    .frame(width: geo.size.width, height: geo.size.height)
+            }
         } else if model.snap.mode == "wizard" {
             WizardSteps(model: model)
         } else {
@@ -1946,7 +1958,7 @@ struct TabStrip: View {
 /// is translucent. The tab items are empty: the tab control answers
 /// TCM_ADJUSTRECT with this box's insets, so wine puts the page in it. Too many
 /// tabs for the width are clipped, as NSTabView does; a property sheet with more
-/// pages than a tab view should have gets a toolbar of panes instead (WindowPanes).
+/// property sheet whose page the settings form can show is laid out as one instead (SettingsForm).
 struct TabBox: View {
     @ObservedObject var model: ControlModel
     @State private var placed = false

@@ -1643,24 +1643,51 @@ static const struct w2s_kind kind_monthcal = { "monthcal", monthcal_snapshot, mo
 
 /* ---------- Tab ---------- */
 
-/* A top-level property sheet with more than 6 pages is a settings window
- * (the map's propsheet entry): its pages are a toolbar of panes in the
- * window's frame, outside wine's content. The sheet's tab control carries
- * it: in this mode TCM_ADJUSTRECT is answered with no change (the page area
- * is the tab control's whole rectangle: the tabs are in the toolbar). The
- * tab control's own in-window view draws nothing and passes clicks through. */
+/* A top-level property sheet is a settings window. Its current page, when
+ * every window on it is a control the runtime translates, is laid out again
+ * natively as a macOS settings form (map: propsheet): the sheet's tab control's
+ * native view covers the whole sheet (host outsets) with a tab view, the page's
+ * controls as form rows (labels right-aligned, controls in a column) and the
+ * sheet's buttons; the Win32 page stays underneath as the model, and the sheet
+ * is sized to the form. A page the form can't show keeps the tab strip. */
 #define IDC_PROPSHEET_TAB 12320     /* comctl32's IDC_TABCONTROL */
+#define IDC_PROPSHEET_APPLY 12321   /* comctl32's IDC_APPLY_BUTTON */
 
 struct tab_data
 {
     BOOL decided;
-    BOOL panes;                       /* a settings window's toolbar of panes, not a strip */
+    BOOL sheet;                       /* a top-level property sheet's tab control */
+    BOOL form;                        /* the current page is shown as a settings form */
+    SIZE orig;                        /* the sheet's own size, before a form sized it */
+    BOOL resized;
+    BOOL centred;                     /* the form has placed the window once */
+    /* the app's own windows moved into the form's slots, and their page */
+    HWND page;
+    RECT page_rect;                   /* the page's own place, in the sheet */
+    int moved;
+    struct { HWND hwnd; RECT rect; } slot[16];
 };
 
+/* the page and its windows back where the app put them */
+static void form_unslot( struct tab_data *data )
+{
+    int i;
+
+    if (data->page && IsWindow( data->page ))
+        SetWindowPos( data->page, 0, data->page_rect.left, data->page_rect.top, data->page_rect.right - data->page_rect.left,
+                      data->page_rect.bottom - data->page_rect.top, SWP_NOZORDER | SWP_NOACTIVATE );
+    for (i = 0; i < data->moved; i++)       /* in their page */
+        if (IsWindow( data->slot[i].hwnd ))
+            SetWindowPos( data->slot[i].hwnd, 0, data->slot[i].rect.left, data->slot[i].rect.top, 0, 0,
+                          SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE );
+    data->moved = 0;
+    data->page = NULL;
+}
+
+static const WCHAR form_prop[] = L"W2SFormTab";
+
 /* decided at the first layout query (TCM_ADJUSTRECT), when the sheet has all
- * its pages: the tabs arrive one by one before that. A property sheet with
- * more pages than a tab view should have (HIG: six) is a settings window,
- * whose panes a Mac app switches with a toolbar in the window's frame. */
+ * its pages */
 static struct tab_data *tab_layout( struct w2s_control *ctl, BOOL decide )
 {
     struct tab_data *data = ctl->data;
@@ -1675,10 +1702,177 @@ static struct tab_data *tab_layout( struct w2s_control *ctl, BOOL decide )
     data->decided = TRUE;
     GetClassNameW( parent, parent_class, ARRAYSIZE(parent_class) );
     style = GetWindowLongW( parent, GWL_STYLE );
-    data->panes = count > 6 && !wcscmp( parent_class, L"#32770" ) && GetDlgCtrlID( ctl->hwnd ) == IDC_PROPSHEET_TAB &&
-                  (style & WS_CAPTION) && !(style & WS_CHILD);
-    if (data->panes) TRACE( "%p: property sheet with %d pages gets a toolbar of panes\n", ctl->hwnd, count );
+    data->sheet = w2s_os_major >= 13 && !wcscmp( parent_class, L"#32770" ) &&
+                  GetDlgCtrlID( ctl->hwnd ) == IDC_PROPSHEET_TAB && (style & WS_CAPTION) && !(style & WS_CHILD);
+    if (data->sheet)
+    {
+        SetPropW( parent, form_prop, ctl->hwnd );
+        TRACE( "%p: a property sheet: its pages can be settings forms\n", ctl->hwnd );
+    }
     return data;
+}
+
+/* what the settings form can show: the entries it lays out */
+static BOOL form_entry( const char *entry )
+{
+    static const char * const entries[] =
+    {
+        "static.text", "static.image", "static.separator", "static.frame",
+        "button.push", "button.default", "button.checkbox", "button.radio", "button.3state", "button.groupbox",
+        "button.pushlike", "edit.single", "edit.password", "edit.number", "edit.readonly", "edit.multiline",
+        "combobox.dropdownlist", "combobox.editable", "comboboxex", "listbox.single", "listbox.multi",
+        "listview.list", "listview.report", "listview.checkboxes", "listview.icon", "treeview",
+        "trackbar", "trackbar.vertical", "updown", "progress", "datetime", "syslink",
+    };
+    unsigned int i;
+    for (i = 0; i < ARRAYSIZE(entries); i++) if (!strcmp( entry, entries[i] )) return TRUE;
+    return FALSE;
+}
+
+struct form_scan
+{
+    HWND sheet, page;
+    struct json *j;                   /* NULL: only check */
+    BOOL ok;
+    WCHAR blocker[64];                /* the class of the window the form can't show */
+    const struct tab_data *data;      /* the windows already in slots (their own places count) */
+    POINT shift;                      /* the page moved from its place: where things were */
+};
+
+static void form_item( struct json *j, struct w2s_control *ctl, HWND sheet, POINT shift )
+{
+    RECT rc;
+
+    GetWindowRect( ctl->hwnd, &rc );
+    MapWindowPoints( NULL, sheet, (POINT *)&rc, 2 );
+    OffsetRect( &rc, shift.x, shift.y );
+    json_obj_begin( j );
+    json_int( j, "h", (INT64)ctl->handle );
+    json_str_a( j, "e", ctl->kind->entry );
+    json_arr_begin( j, "r" );
+    json_int( j, NULL, rc.left );
+    json_int( j, NULL, rc.top );
+    json_int( j, NULL, rc.right - rc.left );
+    json_int( j, NULL, rc.bottom - rc.top );
+    json_arr_end( j );
+    json_obj_end( j );
+}
+
+/* the page's own windows: visible ones must all be controls the form shows */
+static BOOL CALLBACK form_child( HWND hwnd, LPARAM lparam )
+{
+    struct form_scan *scan = (struct form_scan *)lparam;
+    struct w2s_control *ctl;
+    RECT rc;
+
+    if (GetParent( hwnd ) != scan->page || !(GetWindowLongW( hwnd, GWL_STYLE ) & WS_VISIBLE)) return TRUE;
+    GetClientRect( hwnd, &rc );
+    if (IsRectEmpty( &rc )) return TRUE;
+    if (!(ctl = w2s_control_of( hwnd )) && !GetWindow( hwnd, GW_CHILD ))
+    {
+        /* the app's own window (an owner-drawn button): a slot in the form it's moved into */
+        if (scan->j)
+        {
+            int k;
+
+            GetWindowRect( hwnd, &rc );
+            MapWindowPoints( NULL, scan->sheet, (POINT *)&rc, 2 );
+            OffsetRect( &rc, scan->shift.x, scan->shift.y );
+            /* one already in its slot: where the app had it (its page's place in the sheet, and its own) */
+            for (k = 0; scan->data && k < scan->data->moved; k++)
+                if (scan->data->slot[k].hwnd == hwnd)
+                    OffsetRect( &rc, scan->data->page_rect.left + scan->data->slot[k].rect.left - rc.left,
+                                scan->data->page_rect.top + scan->data->slot[k].rect.top - rc.top );
+            json_obj_begin( scan->j );
+            json_int( scan->j, "h", 0 );
+            json_int( scan->j, "w", (INT64)(ULONG_PTR)hwnd );
+            json_str_a( scan->j, "e", "slot" );
+            json_arr_begin( scan->j, "r" );
+            json_int( scan->j, NULL, rc.left );
+            json_int( scan->j, NULL, rc.top );
+            json_int( scan->j, NULL, rc.right - rc.left );
+            json_int( scan->j, NULL, rc.bottom - rc.top );
+            json_arr_end( scan->j );
+            json_obj_end( scan->j );
+        }
+        return TRUE;
+    }
+    if (!ctl || !form_entry( ctl->kind->entry ))
+    {
+        scan->ok = FALSE;
+        GetClassNameW( hwnd, scan->blocker, ARRAYSIZE(scan->blocker) );
+        if (ctl) MultiByteToWideChar( CP_UTF8, 0, ctl->kind->entry, -1, scan->blocker, ARRAYSIZE(scan->blocker) );
+        TRACE( "%p: page %p can't be a form: %ls\n", hwnd, scan->page, scan->blocker );
+        return FALSE;
+    }
+    if (scan->j) form_item( scan->j, ctl, scan->sheet, scan->shift );
+    return TRUE;
+}
+
+/* 1: the page can be a form; 0: it can't; -1: no page shown yet (a switch under way) */
+static int form_page( HWND sheet, HWND page, struct json *j, WCHAR *blocker, const struct tab_data *data )
+{
+    struct form_scan scan = { sheet, page, j, TRUE };
+
+    /* a page moved to the sheet's corner for its slots: the layout is the app's own */
+    scan.data = data;
+    if (data && data->page == page)
+    {
+        RECT now;
+        GetWindowRect( page, &now );
+        MapWindowPoints( NULL, sheet, (POINT *)&now, 2 );
+        scan.shift.x = data->page_rect.left - now.left;
+        scan.shift.y = data->page_rect.top - now.top;
+    }
+
+    if (!page || !(GetWindowLongW( page, GWL_STYLE ) & WS_VISIBLE)) return -1;
+    EnumChildWindows( page, form_child, (LPARAM)&scan );
+    if (blocker) lstrcpynW( blocker, scan.blocker, 64 );
+    return scan.ok;
+}
+
+/* a window on a settings form's page came or went: the form lays out again */
+void w2s_form_child_changed( HWND hwnd )
+{
+    HWND root = GetAncestor( hwnd, GA_ROOT ), tab;
+
+    if (root && root != hwnd && (tab = GetPropW( root, form_prop ))) PostMessageW( tab, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
+}
+
+/* the sheet back to its own size (a page the form can't show) */
+/* the sheet at a window size: centred on its screen the first time it becomes a
+ * form, as a Mac settings window opens; after that around the same centre with
+ * its top staying put (as a settings window resizing for a pane); always on
+ * the screen */
+static void form_resize( HWND sheet, int cx, int cy, BOOL centre )
+{
+    MONITORINFO mi = { sizeof(mi) };
+    RECT win, work;
+    int x, y;
+
+    GetWindowRect( sheet, &win );
+    x = win.left + ((win.right - win.left) - cx) / 2;
+    y = win.top;
+    if (GetMonitorInfoW( MonitorFromWindow( sheet, MONITOR_DEFAULTTONEAREST ), &mi ))
+    {
+        work = mi.rcWork;
+        if (centre)
+        {
+            x = work.left + ((work.right - work.left) - cx) / 2;
+            y = work.top + ((work.bottom - work.top) - cy) / 3;     /* a little above the middle */
+        }
+        x = max( work.left, min( x, work.right - cx ) );
+        y = max( work.top, min( y, work.bottom - cy ) );
+    }
+    SetWindowPos( sheet, 0, x, y, cx, cy, SWP_NOZORDER | SWP_NOACTIVATE );
+}
+
+static void form_restore( struct w2s_control *ctl, struct tab_data *data )
+{
+    form_unslot( data );
+    if (!data->resized) return;
+    data->resized = FALSE;
+    form_resize( GetParent( ctl->hwnd ), data->orig.cx, data->orig.cy, FALSE );
 }
 
 static BOOL tab_answer( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM lparam, LRESULT *ret )
@@ -1690,9 +1884,8 @@ static BOOL tab_answer( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM
     if (!(data = ctl->data) || !data->decided)
     {
         data = tab_layout( ctl, TRUE );
-        if (data->panes) w2s_push( ctl, FALSE );
+        if (data->sheet) PostMessageW( ctl->hwnd, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
     }
-    if (!data->panes)
     {
         /* SwiftUI's TabView (an NSTabView): the page goes in its box, below (or
          * above, TCS_BOTTOM) the tabs straddling its edge. The box fills the
@@ -1719,9 +1912,6 @@ static BOOL tab_answer( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM
         *ret = 0;
         return TRUE;
     }
-    /* panes: the page area is the tab control's whole rectangle (its tabs are in the toolbar) */
-    *ret = 0;
-    return TRUE;
 }
 
 static void tab_items( struct w2s_control *ctl, struct json *j )
@@ -1746,16 +1936,119 @@ static void tab_items( struct w2s_control *ctl, struct json *j )
 static void tab_snapshot( struct w2s_control *ctl, struct json *j )
 {
     struct tab_data *data = tab_layout( ctl, FALSE );
+    HWND sheet = GetParent( ctl->hwnd ), page = NULL;
+    static const int buttons[] = { IDHELP, IDC_PROPSHEET_APPLY, IDCANCEL, IDOK };
+    WCHAR blocker[64];
+    RECT rc, client;
+    unsigned int i;
 
-    json_str_a( j, "mode", data->panes ? "panes" : "strip" );
+    if (data->sheet) page = (HWND)SendMessageW( sheet, PSM_GETCURRENTPAGEHWND, 0, 0 );
+    blocker[0] = 0;
+    if (data->sheet)
+    {
+        /* between two pages (TCM_SETCURSEL comes before the page shows) the mode stays */
+        int formable = form_page( sheet, page, NULL, blocker, data );
+        if (formable >= 0) data->form = formable;
+    }
+    if (!data->form) form_restore( ctl, data );
+    json_str_a( j, "mode", data->form ? "form" : "strip" );
+    if (blocker[0]) json_str( j, "formBlocker", blocker );
     json_bool( j, "bottom", (GetWindowLongW( ctl->hwnd, GWL_STYLE ) & TCS_BOTTOM) != 0 );
     tab_items( ctl, j );
+    if (!data->form) return;
+
+    /* the sheet, where the tab control sits in it, the page's controls, the sheet's buttons */
+    GetClientRect( sheet, &client );
+    GetWindowRect( ctl->hwnd, &rc );
+    MapWindowPoints( NULL, sheet, (POINT *)&rc, 2 );
+    json_arr_begin( j, "sheetPx" );
+    json_int( j, NULL, client.right );
+    json_int( j, NULL, client.bottom );
+    json_arr_end( j );
+    json_arr_begin( j, "tabRect" );
+    json_int( j, NULL, rc.left );
+    json_int( j, NULL, rc.top );
+    json_int( j, NULL, rc.right - rc.left );
+    json_int( j, NULL, rc.bottom - rc.top );
+    json_arr_end( j );
+    json_arr_begin( j, "page" );
+    if (page && (GetWindowLongW( page, GWL_STYLE ) & WS_VISIBLE)) form_page( sheet, page, j, NULL, data );
+    json_arr_end( j );
+    json_arr_begin( j, "sheetButtons" );
+    for (i = 0; i < ARRAYSIZE(buttons); i++)
+    {
+        HWND button = GetDlgItem( sheet, buttons[i] );
+        struct w2s_control *b;
+        POINT none = { 0, 0 };
+        if (button && (GetWindowLongW( button, GWL_STYLE ) & WS_VISIBLE) && (b = w2s_control_of( button )))
+            form_item( j, b, sheet, none );
+    }
+    json_arr_end( j );
 }
 
 static void tab_apply( struct w2s_control *ctl, const struct w2s_event *ev )
 {
     NMHDR nm = { 0 };
 
+    if (!strcmp( ev->type, "formSlots" ) && ev->array_count % 3 == 0)
+    {
+        /* the app's windows into the form's slots: the page covers the sheet (it is
+         * under the form), each window at its slot [hwnd, x, y] in the sheet */
+        struct tab_data *data = tab_layout( ctl, FALSE );
+        HWND sheet = GetParent( ctl->hwnd ), page = (HWND)SendMessageW( sheet, PSM_GETCURRENTPAGEHWND, 0, 0 );
+        RECT client, rc;
+        int i, k;
+
+        if (!data->form || !page) return;
+        if (data->page != page)
+        {
+            form_unslot( data );
+            GetWindowRect( page, &data->page_rect );
+            MapWindowPoints( NULL, sheet, (POINT *)&data->page_rect, 2 );
+            data->page = page;
+        }
+        GetClientRect( sheet, &client );
+        SetWindowPos( page, 0, 0, 0, client.right, client.bottom, SWP_NOZORDER | SWP_NOACTIVATE );
+        for (i = 0; i + 2 < ev->array_count; i += 3)
+        {
+            HWND hwnd = (HWND)(ULONG_PTR)(UINT)ev->array[i];
+            if (!IsWindow( hwnd ) || GetParent( hwnd ) != page) continue;
+            for (k = 0; k < data->moved; k++) if (data->slot[k].hwnd == hwnd) break;
+            if (k == data->moved && data->moved < ARRAYSIZE(data->slot))
+            {
+                /* where it is in its page (the page moving takes it along) */
+                GetWindowRect( hwnd, &rc );
+                MapWindowPoints( NULL, page, (POINT *)&rc, 2 );
+                data->slot[k].hwnd = hwnd;
+                data->slot[k].rect = rc;
+                data->moved++;
+            }
+            SetWindowPos( hwnd, 0, ev->array[i + 1], ev->array[i + 2], 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE );
+        }
+        return;
+    }
+    if (!strcmp( ev->type, "formSize" ) && ev->array_count == 2)
+    {
+        /* the form's size: the sheet's client area, the window kept centred on where it was */
+        struct tab_data *data = tab_layout( ctl, FALSE );
+        HWND sheet = GetParent( ctl->hwnd );
+        RECT win, rc = { 0, 0, ev->array[0], ev->array[1] };
+        BOOL first = !data->centred;
+
+        if (!data->form || ev->array[0] <= 0 || ev->array[1] <= 0) return;
+        GetWindowRect( sheet, &win );
+        if (!data->resized)
+        {
+            data->orig.cx = win.right - win.left;
+            data->orig.cy = win.bottom - win.top;
+            data->resized = TRUE;
+        }
+        data->centred = TRUE;
+        AdjustWindowRectEx( &rc, GetWindowLongW( sheet, GWL_STYLE ), FALSE, GetWindowLongW( sheet, GWL_EXSTYLE ) );
+        form_resize( sheet, rc.right - rc.left, rc.bottom - rc.top, first );
+        w2s_push( ctl, TRUE );
+        return;
+    }
     if (strcmp( ev->type, "select" ) || !ev->has_value) return;
     if ((int)SendMessageW( ctl->hwnd, TCM_GETCURSEL, 0, 0 ) == (int)ev->value) return;
     if (w2s_notify_parent( ctl->hwnd, TCN_SELCHANGING, &nm )) return; /* vetoed */
@@ -1763,13 +2056,31 @@ static void tab_apply( struct w2s_control *ctl, const struct w2s_event *ev )
     w2s_notify_parent( ctl->hwnd, TCN_SELCHANGE, &nm );
 }
 
+/* a page switch: lay out again once the sheet has shown the new page */
+static void tab_observe( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    struct tab_data *data = ctl->data;
+
+    if (msg == TCM_SETCURSEL && data && data->sheet)
+    {
+        /* the page going away gets its windows back where they were */
+        form_unslot( data );
+        PostMessageW( ctl->hwnd, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
+    }
+}
+
 static void tab_release( struct w2s_control *ctl )
 {
-    HeapFree( GetProcessHeap(), 0, ctl->data );
+    struct tab_data *data = ctl->data;
+    HWND sheet = GetParent( ctl->hwnd );
+
+    if (data) form_unslot( data );
+    if (data && data->sheet && sheet && GetPropW( sheet, form_prop ) == ctl->hwnd) RemovePropW( sheet, form_prop );
+    HeapFree( GetProcessHeap(), 0, data );
 }
 
 static const struct w2s_kind kind_tab = { "tab", tab_snapshot, tab_apply, tab_answer,
-                                                  NULL, NULL, NULL, tab_release };
+                                                  NULL, NULL, tab_observe, tab_release };
 
 /* ---------- Wizard (map: propsheet.wizard) ---------- */
 

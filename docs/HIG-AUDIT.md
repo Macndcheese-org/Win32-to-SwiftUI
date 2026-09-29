@@ -12,7 +12,7 @@ The rule of the project: a real macOS component, never a copy of one.
 | Checkboxes, radio buttons | checkboxes and radio buttons in the window body, never switches in place of checkboxes | checkboxes stay checkboxes, radios stay radios |
 | Group boxes | "By default, macOS displays a box's title above it" | NSBox, title above when there is room |
 | Tab views | at most six tabs; no pop-up to switch tabs | NSTabView up to 6 pages |
-| Settings windows | a toolbar of panes, the title following the pane | property sheets over 6 pages: a preference-style NSToolbar in the frame, one text pane per page |
+| Settings windows | a familiar layout, labels and controls in columns | property sheets: a tab view across a wide window, each page laid out again as a columns-style form (as Safari's settings); a toolbar of panes needs icons, which Win32 pages don't have |
 | Pop-up buttons | flat list of exclusive options | drop-down lists are NSPopUpButton |
 | Combo boxes | text input paired with a list | editable combos are NSComboBox |
 | Segmented controls | switching views in the window body is a tab view's job | TCS_BUTTONS tabs only become segmented controls |
@@ -35,8 +35,10 @@ The rule of the project: a real macOS component, never a copy of one.
 - Titles ending in "..." show macOS's ellipsis character ("Font…").
 - Steppers: Shift-click steps by 10.
 - A document window's text view (notepad's) has no border.
-- Settings windows (property sheets over six pages, winecfg) switch panes with a
-  toolbar in the window's frame instead of a sidebar; the title follows the pane.
+- Settings windows (property sheets, winecfg) are a tab view over a settings form in
+  a landscape window, instead of a sidebar; the page's controls are laid out again as
+  a macOS form.
+- A toolbar across the top of an app's main window is in the window's frame.
 
 ## Left open (need a decision or a screen)
 

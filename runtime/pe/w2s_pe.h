@@ -155,7 +155,9 @@ struct w2s_control
 };
 
 const struct w2s_kind *w2s_select_kind( HWND hwnd );
-void w2s_observe_tooltip( HWND hwnd );  /* controls.c: a tooltip window was created */
+void w2s_observe_tooltip( HWND hwnd );
+struct w2s_control *w2s_control_of( HWND hwnd );    /* main.c: the translated control a window is, or NULL */
+void w2s_form_child_changed( HWND hwnd );           /* controls.c: a window on a settings form's page came or went */  /* controls.c: a tooltip window was created */
 WCHAR *w2s_tool_text( HWND hwnd );      /* controls.c: its tooltip's text, HeapAlloc'd, or NULL */
 struct w2s_control *w2s_control_from_hwnd( HWND hwnd );
 BOOL w2s_attach( HWND hwnd, const struct w2s_kind *kind );

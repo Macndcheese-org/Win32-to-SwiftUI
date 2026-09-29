@@ -1,7 +1,7 @@
 // A Win32 toolbar in the window's frame (map: toolbar, "inFrame").
 import AppKit
 
-/// What a control puts in its window's frame (WindowPanes, WindowToolbar):
+/// What a control puts in or over its window (SettingsFormController, WindowToolbar):
 /// made once the host view is in a window, kept in step with the snapshot,
 /// taken down with the control.
 protocol WindowChrome: AnyObject {

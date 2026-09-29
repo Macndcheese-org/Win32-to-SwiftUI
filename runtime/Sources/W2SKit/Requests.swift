@@ -702,26 +702,24 @@ enum Debug {
                     out["toolbarStyle"] = window?.toolbarStyle == .unified ? "unified" : "other"
                 }
             }
-            if host.entry == "tab", let panes = host.owned as? WindowPanes {
-                out["windowPanes"] = panes.toolbar != nil
-                if let toolbar = panes.toolbar, let window = host.hosting?.window {
-                    out["paneItems"] = toolbar.items.map { $0.label }
-                    out["paneVisible"] = toolbar.visibleItems?.count ?? 0
-                    out["selectedPane"] = toolbar.selectedItemIdentifier?.rawValue ?? ""
-                    out["windowTitle"] = window.title
-                    out["toolbarStyle"] = window.toolbarStyle == .preference ? "preference" : "other"
-                    out["toolbarInWindow"] = window.toolbar === toolbar
-                }
-                // where wine's content sits in the window: below the toolbar, centred
-                if let window = host.hosting?.window,
-                   let wineView = window.perform(NSSelectorFromString("wineContentView"))?.takeUnretainedValue() as? NSView {
-                    let r = wineView.convert(wineView.bounds, to: nil)
-                    out["wineViewX"] = Int(r.minX)
-                    out["wineViewTop"] = Int(window.frame.height - r.maxY)
-                    out["windowWidth"] = Int(window.frame.width)
-                    out["wineViewWidth"] = Int(r.width)
+            if host.entry == "tab", host.model.snap.mode == "form", let hostView = host.hosting?.superview {
+                // the settings form: what it covers, what it shows
+                out["formCover"] = [Int(hostView.frame.width), Int(hostView.frame.height)]
+                out["formFront"] = hostView.superview?.subviews.last === hostView
+                out["formHoles"] = (FormPlaces.holes[handle] ?? []).map { [Int($0.minX.rounded()), Int($0.minY.rounded()), Int($0.width), Int($0.height)] }
+                if #available(macOS 13, *) {
+                    let sections = FormLayout.sections(host.model.snap.page ?? [])
+                    out["formSections"] = sections.count
+                    out["formRows"] = sections.map { $0.rows.map { row -> String in
+                        switch row {
+                        case .labeled(let label, let controls): return "\(label.label) [\(controls.map { $0.e }.joined(separator: ","))]"
+                        case .plain(let controls): return "[\(controls.map { $0.e }.joined(separator: ","))]"
+                        case .note(let text): return "note: \(text.label)"
+                        }
+                    } }
                 }
             }
+            if let hosting = host.hosting { out["formHidden"] = hosting.isHidden }
             if let hosting = host.hosting {
                 out["frame"] = [hosting.frame.origin.x, hosting.frame.origin.y, hosting.frame.width, hosting.frame.height]
                 if let hostView = hosting.superview { out["hostHeight"] = Int(hostView.frame.height) }
@@ -771,21 +769,15 @@ enum Debug {
                 else if let action = item.action { NSApp.sendAction(action, to: item.target, from: item) }
                 return "{\"ok\":true}"
             }
-            if event["t"] as? String == "paneClick" {
-                // tests: a click on toolbar pane v, through the item's own target and action
-                guard let panes = host.owned as? WindowPanes, let toolbar = panes.toolbar,
-                      let index = event["v"] as? Int, toolbar.items.indices.contains(index),
-                      let action = toolbar.items[index].action
-                else { return "{\"error\":\"no pane\"}" }
-                let item = toolbar.items[index]
-                NSApp.sendAction(action, to: item.target, from: item)
-                return "{\"ok\":true}"
-            }
             if event["t"] as? String == "realClick" {
                 // a mouse click at the view's centre through AppKit, as the mouse makes one:
                 // winemac's routing, hit-testing and the SwiftUI control's own tracking
                 guard let view = host.hosting, let window = view.window else { return "{\"error\":\"not in a window\"}" }
-                let rect = view.convert(view.bounds, to: nil)
+                var rect = view.convert(view.bounds, to: nil)
+                // shown in a settings form (its own view hidden): where the form has it
+                if view.isHidden, let place = FormPlaces.frames[handle], let form = W2S.control(place.form)?.hosting {
+                    rect = form.convert(place.rect, to: nil)
+                }
                 let point = NSPoint(x: rect.midX, y: rect.midY)
                 let hit = window.contentView.flatMap { $0.hitTest($0.superview?.convert(point, from: nil) ?? point) }
                 var chain: [String] = []
