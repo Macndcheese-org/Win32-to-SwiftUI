@@ -1394,6 +1394,54 @@ static void selftest_frame_toolbar(void)
     check( query_has( tb, "\"frameToolbar\":false" ), "hiding the Win32 toolbar takes it out of the frame" );
     DestroyWindow( win );
     pump( 200 );
+
+    /* a rebar across the top: its first band's toolbar goes in the frame, the other bands stay */
+    {
+        REBARBANDINFOW band = { sizeof(band) };
+        HWND rebar, combo;
+        RECT before, after;
+
+        win = CreateWindowExW( 0, L"W2SToolbarWindow", L"Rebar window", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                               160, 160, 480, 300, NULL, NULL, GetModuleHandleW( NULL ), NULL );
+        rebar = CreateWindowExW( 0, REBARCLASSNAMEW, NULL, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | RBS_VARHEIGHT |
+                                 CCS_NODIVIDER, 0, 0, 0, 0, win, (HMENU)3, GetModuleHandleW( NULL ), NULL );
+        tb = CreateWindowExW( 0, TOOLBARCLASSNAMEW, NULL, WS_CHILD | WS_VISIBLE | TBSTYLE_FLAT | CCS_NORESIZE |
+                              CCS_NOPARENTALIGN | CCS_NODIVIDER, 0, 0, 0, 0, rebar, (HMENU)4, GetModuleHandleW( NULL ), NULL );
+        SendMessageW( tb, TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0 );
+        SendMessageW( tb, TB_ADDBITMAP, 0, (LPARAM)&bitmap );
+        SendMessageW( tb, TB_ADDBUTTONSW, ARRAYSIZE(buttons), (LPARAM)buttons );
+        combo = CreateWindowExW( 0, L"ComboBox", NULL, WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 150, 200, rebar,
+                                 (HMENU)5, GetModuleHandleW( NULL ), NULL );
+        band.fMask = RBBIM_CHILD | RBBIM_CHILDSIZE | RBBIM_STYLE | RBBIM_ID;
+        band.fStyle = RBBS_CHILDEDGE;
+        band.hwndChild = tb;
+        band.cyMinChild = 26;
+        band.wID = 1;
+        SendMessageW( rebar, RB_INSERTBANDW, -1, (LPARAM)&band );
+        band.hwndChild = combo;
+        band.cyMinChild = 24;
+        band.fStyle = RBBS_CHILDEDGE | RBBS_BREAK;
+        band.wID = 2;
+        SendMessageW( rebar, RB_INSERTBANDW, -1, (LPARAM)&band );
+        GetWindowRect( rebar, &before );
+        pump( 800 );
+        GetWindowRect( rebar, &after );
+        band.fMask = RBBIM_STYLE;
+        SendMessageW( rebar, RB_GETBANDINFOW, 0, (LPARAM)&band );
+        check( pIsTranslated( tb ) && query_has( tb, "\"frameToolbar\":true" ) && (band.fStyle & RBBS_HIDDEN) &&
+               after.bottom - after.top < before.bottom - before.top,
+               "a rebar's first-band toolbar is the frame's toolbar; its band leaves the rebar, which shrinks" );
+        SendMessageW( rebar, RB_SHOWBAND, 0, FALSE );
+        pump( 400 );
+        check( query_has( tb, "\"frameToolbar\":false" ), "the app hiding that band (View > Toolbar) hides the frame's toolbar" );
+        SendMessageW( rebar, RB_SHOWBAND, 0, TRUE );
+        pump( 400 );
+        SendMessageW( rebar, RB_GETBANDINFOW, 0, (LPARAM)&band );
+        check( query_has( tb, "\"frameToolbar\":true" ) && (band.fStyle & RBBS_HIDDEN),
+               "showing it again shows the frame's toolbar; the band stays out of the window" );
+        DestroyWindow( win );
+        pump( 200 );
+    }
 }
 
 /* a document window's multi-line edit (notepad's) has no border, as TextEdit's */

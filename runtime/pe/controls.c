@@ -2487,7 +2487,25 @@ struct tb_data
     int strips;
     struct tb_strip strip[MAX_TB_STRIPS];
     BOOL frame;                     /* the window frame's toolbar (toolbar_frame) */
+    HWND rebar;                     /* in a rebar's first band, hidden there while in the frame */
+    BOOL band_shown;                /* what the app wants of that band (RB_SHOWBAND) */
 };
+
+/* RB_SHOWBAND's lparam when it's ours (the band going to the frame): no app passes it */
+#define W2S_HIDE_BAND 0x57325300
+
+/* the rebar band holding a window, or -1 */
+static int rebar_band_of( HWND rebar, HWND child )
+{
+    int i, count = (int)SendMessageW( rebar, RB_GETBANDCOUNT, 0, 0 );
+
+    for (i = 0; i < count; i++)
+    {
+        REBARBANDINFOW info = { sizeof(info), RBBIM_CHILD };
+        if (SendMessageW( rebar, RB_GETBANDINFOW, i, (LPARAM)&info ) && info.hwndChild == child) return i;
+    }
+    return -1;
+}
 
 /* the window whose frame has a toolbar: which toolbar is in it */
 static const WCHAR frame_toolbar_prop[] = L"W2SFrameToolbar";
@@ -2505,6 +2523,25 @@ static BOOL toolbar_frame( struct w2s_control *ctl )
     WCHAR cls[16] = { 0 };
     RECT rc;
 
+    GetClassNameW( parent, cls, ARRAYSIZE(cls) );
+    if (!wcscmp( cls, REBARCLASSNAMEW ))
+    {
+        /* a rebar across the top of the main window, the toolbar in its first band */
+        HWND rebar = parent, top = GetParent( rebar );
+        REBARBANDINFOW info = { sizeof(info), RBBIM_STYLE };
+
+        if (!top || (GetWindowLongW( top, GWL_STYLE ) & WS_CHILD)) return FALSE;
+        GetClassNameW( top, cls, ARRAYSIZE(cls) );
+        if (!wcscmp( cls, L"#32770" ) || (GetWindowLongW( rebar, GWL_STYLE ) & (CCS_VERT | CCS_NOPARENTALIGN))) return FALSE;
+        if (GetWindow( ctl->hwnd, GW_CHILD ) || SendMessageW( ctl->hwnd, TB_BUTTONCOUNT, 0, 0 ) <= 0) return FALSE;
+        if (rebar_band_of( rebar, ctl->hwnd ) != 0) return FALSE;
+        if ((owner = GetPropW( top, frame_toolbar_prop )) && owner != ctl->hwnd && IsWindow( owner )) return FALSE;
+        GetWindowRect( rebar, &rc );
+        MapWindowPoints( NULL, top, (POINT *)&rc, 2 );
+        if (rc.top > 4) return FALSE;
+        SendMessageW( rebar, RB_GETBANDINFOW, 0, (LPARAM)&info );
+        return !(info.fStyle & RBBS_HIDDEN);
+    }
     if (!parent || (GetWindowLongW( parent, GWL_STYLE ) & WS_CHILD)) return FALSE;
     GetClassNameW( parent, cls, ARRAYSIZE(cls) );
     if (!wcscmp( cls, L"#32770" )) return FALSE;
@@ -2551,9 +2588,10 @@ static void toolbar_observe( struct w2s_control *ctl, UINT msg, WPARAM wparam, L
 
     if (msg == WM_WINDOWPOSCHANGING)
     {
-        /* the frame's toolbar takes no room in the window (as it sizes itself, TB_AUTOSIZE) */
+        /* the frame's toolbar takes no room in the window (as it sizes itself, TB_AUTOSIZE);
+         * in a rebar its band is hidden instead */
         WINDOWPOS *pos = (WINDOWPOS *)lparam;
-        if ((data = ctl->data) && data->frame && !(pos->flags & SWP_NOSIZE)) pos->cy = 0;
+        if ((data = ctl->data) && data->frame && !data->rebar && !(pos->flags & SWP_NOSIZE)) pos->cy = 0;
         return;
     }
     if (msg != TB_ADDBITMAP && msg != TB_LOADIMAGES && msg != TB_SETIMAGELIST) return;
@@ -2701,16 +2739,29 @@ static void toolbar_snapshot( struct w2s_control *ctl, struct json *j )
     {
         RECT client;
         HWND parent = GetParent( ctl->hwnd );
+        WCHAR cls[16] = { 0 };
 
-        /* it goes in the frame: no height here, and the app lays its window out again */
         data->frame = TRUE;
-        SetPropW( parent, frame_toolbar_prop, ctl->hwnd );
-        GetClientRect( parent, &client );
-        PostMessageW( ctl->hwnd, TB_AUTOSIZE, 0, 0 );
-        PostMessageW( parent, WM_SIZE, SIZE_RESTORED, MAKELPARAM( client.right, client.bottom ) );
-        TRACE( "%p: toolbar in the frame of %p\n", ctl->hwnd, parent );
+        GetClassNameW( parent, cls, ARRAYSIZE(cls) );
+        if (!wcscmp( cls, REBARCLASSNAMEW ))
+        {
+            /* its band leaves the rebar, which shrinks and tells the app (RBN_HEIGHTCHANGE) */
+            data->rebar = parent;
+            data->band_shown = TRUE;
+            SetPropW( GetParent( parent ), frame_toolbar_prop, ctl->hwnd );
+            PostMessageW( parent, RB_SHOWBAND, 0, W2S_HIDE_BAND );
+        }
+        else
+        {
+            /* it goes in the frame: no height here, and the app lays its window out again */
+            SetPropW( parent, frame_toolbar_prop, ctl->hwnd );
+            GetClientRect( parent, &client );
+            PostMessageW( ctl->hwnd, TB_AUTOSIZE, 0, 0 );
+            PostMessageW( parent, WM_SIZE, SIZE_RESTORED, MAKELPARAM( client.right, client.bottom ) );
+        }
+        TRACE( "%p: toolbar in the window frame (rebar %p)\n", ctl->hwnd, data->rebar );
     }
-    json_bool( j, "inFrame", data->frame && (style & WS_VISIBLE) );
+    json_bool( j, "inFrame", data->frame && (data->rebar ? data->band_shown : (style & WS_VISIBLE) != 0) );
     json_bool( j, "list", (style & TBSTYLE_LIST) != 0 );
     json_bool( j, "mixed", (ex & TBSTYLE_EX_MIXEDBUTTONS) != 0 );
     json_arr_begin( j, "buttons" );
@@ -2804,6 +2855,7 @@ static void toolbar_release( struct w2s_control *ctl )
     struct tb_data *data = ctl->data;
     HWND parent = GetParent( ctl->hwnd );
 
+    if (data && data->rebar) parent = GetParent( data->rebar );
     if (data && data->frame && parent && GetPropW( parent, frame_toolbar_prop ) == ctl->hwnd)
         RemovePropW( parent, frame_toolbar_prop );
     HeapFree( GetProcessHeap(), 0, data );
@@ -2823,9 +2875,28 @@ static void rebar_snapshot( struct w2s_control *ctl, struct json *j )
     if ((rgn = children_region( ctl->hwnd, j ))) DeleteObject( rgn );
 }
 
+/* RB_SHOWBAND for the band whose toolbar is in the window frame: the app shows
+ * or hides the frame's toolbar; the band itself stays out of the window */
+static BOOL rebar_answer( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM lparam, LRESULT *ret )
+{
+    REBARBANDINFOW info = { sizeof(info), RBBIM_CHILD };
+    struct w2s_control *tb;
+    struct tb_data *data;
+
+    if (msg != RB_SHOWBAND) return FALSE;
+    if (!SendMessageW( ctl->hwnd, RB_GETBANDINFOW, wparam, (LPARAM)&info ) || !info.hwndChild ||
+        !(tb = w2s_control_of( info.hwndChild )) || strcmp( tb->kind->entry, "toolbar" ) ||
+        !(data = tb->data) || !data->frame || data->rebar != ctl->hwnd)
+        return FALSE;
+    if (lparam != W2S_HIDE_BAND) data->band_shown = lparam != 0;    /* else ours, as it went to the frame */
+    *ret = CallWindowProcW( ctl->orig, ctl->hwnd, RB_SHOWBAND, wparam, FALSE );
+    w2s_push( tb, TRUE );
+    return TRUE;
+}
+
 static const struct w2s_kind kind_rebar =
 {
-    "rebar", rebar_snapshot, nothing_apply, NULL, NULL, container_region
+    "rebar", rebar_snapshot, nothing_apply, rebar_answer, NULL, container_region
 };
 
 const struct w2s_kind *w2s_select_kind( HWND hwnd )

@@ -201,10 +201,13 @@ entries:
       by watching TB_ADDBITMAP and TB_LOADIMAGES); others are the app's pixels. Moving the
       toolbar into the window's unified title bar (NSToolbar, the appkit item) is the more
       Mac-like option; it changes the client area the app laid out, so it waits.
-      A toolbar across the top of an app's main window (not a dialog's, not in a rebar, no
-      windows of its own) goes in the window's frame, where a Mac app's toolbar is (HIG,
-      Toolbars): its buttons are the window's unified NSToolbar, the Win32 toolbar kept at no
-      height so the app lays its content out without it. Check buttons are toggles there.
+      A toolbar across the top of an app's main window (not a dialog's, no windows of its own)
+      goes in the window's frame, where a Mac app's toolbar is (HIG, Toolbars): its buttons are
+      the window's unified NSToolbar, the Win32 toolbar kept at no height so the app lays its
+      content out without it. Check buttons are toggles there. In a rebar across the top, the
+      first band's toolbar goes (its band leaves the rebar, which tells the app its new height);
+      the other bands (a format bar with combo boxes) stay in the window, and the app's
+      RB_SHOWBAND on that band shows or hides the frame's toolbar instead.
 
   - id: rebar
     kind: control
@@ -215,7 +218,8 @@ entries:
       - since: 12
         code: "Color.clear"
     glass: none
-    state_in: [RB_INSERTBAND, RB_SETBANDINFO, RB_DELETEBAND, RB_MAXIMIZEBAND, RB_SHOWBAND, WM_SIZE, WM_PARENTNOTIFY]
+    state_in: [RB_INSERTBAND, RB_SETBANDINFO, RB_DELETEBAND, RB_MAXIMIZEBAND, WM_SIZE, WM_PARENTNOTIFY]
+    answers: [RB_SHOWBAND]
     events_out: {layout: RBN_HEIGHTCHANGE, chevron: RBN_CHEVRONPUSHED}
     notes: >-
       A rebar is only a background with bands; each band's child (toolbar, combo box) is
