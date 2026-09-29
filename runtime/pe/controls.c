@@ -2513,9 +2513,10 @@ static const WCHAR frame_toolbar_prop[] = L"W2SFrameToolbar";
 /* A toolbar across the top of an app's main window goes in the window's
  * frame, where a Mac app's toolbar is (HIG, Toolbars): the window's NSToolbar
  * shows its buttons, and the Win32 toolbar is kept at no height, so the app
- * lays its content out without it. One per window; not in a dialog, a rebar
- * or at another edge, and not one holding windows of its own (a format bar's
- * combo boxes), which need their place in the window. */
+ * lays its content out without it. Toolbars stacked at the top (winefile's
+ * and its drive bar) share the frame's, a group each; a rebar's goes alone.
+ * Not in a dialog or at another edge, and not one holding windows of its own
+ * (a format bar's combo boxes), which need their place in the window. */
 static BOOL toolbar_frame( struct w2s_control *ctl )
 {
     HWND parent = GetParent( ctl->hwnd ), owner;
@@ -2548,7 +2549,6 @@ static BOOL toolbar_frame( struct w2s_control *ctl )
     if (!(style & WS_VISIBLE) || (style & (CCS_VERT | CCS_NOPARENTALIGN)) || (style & CCS_BOTTOM) == CCS_BOTTOM)
         return FALSE;
     if (GetWindow( ctl->hwnd, GW_CHILD ) || SendMessageW( ctl->hwnd, TB_BUTTONCOUNT, 0, 0 ) <= 0) return FALSE;
-    if ((owner = GetPropW( parent, frame_toolbar_prop )) && owner != ctl->hwnd && IsWindow( owner )) return FALSE;
     GetWindowRect( ctl->hwnd, &rc );
     MapWindowPoints( NULL, parent, (POINT *)&rc, 2 );
     return rc.top <= 4;     /* comctl32 leaves 2 pixels above for its divider line */

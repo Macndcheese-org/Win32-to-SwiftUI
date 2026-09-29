@@ -699,6 +699,7 @@ enum Debug {
                     out["frameEnabled"] = buttons.map { ($0.view as? NSButton)?.isEnabled ?? $0.isEnabled }
                     out["frameChecked"] = buttons.compactMap { ($0.view as? NSButton)?.state == .on ? $0.tag : nil }
                     out["frameLabels"] = buttons.map { $0.label }
+                    out["frameTitles"] = buttons.map { ($0.view as? NSButton)?.title ?? $0.title }
                     out["toolbarStyle"] = window?.toolbarStyle == .unified ? "unified" : "other"
                 }
             }

@@ -62,6 +62,7 @@ ICON_MODULES = {
     "regedit": ("regedit.exe", "programs/regedit/resource.h"),
     "comctl32": ("comctl32.dll", "include/commctrl.h"),
     "wordpad": ("wordpad.exe", "programs/wordpad/wordpad.h"),
+    "winefile": ("winefile.exe", "programs/winefile/resource.h"),
 }
 
 # what a stock icon (map section `icons`) may become

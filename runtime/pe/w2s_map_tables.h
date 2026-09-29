@@ -330,6 +330,16 @@ static const struct w2s_toolbar_image w2s_toolbar_images[] =
     { L"wordpad.exe", 101, 5, "sf:text.aligncenter" },
     { L"wordpad.exe", 101, 6, "sf:text.alignright" },
     { L"wordpad.exe", 101, 7, "sf:list.bullet" },
+    { L"winefile.exe", 100, 0, "sf:macwindow.badge.plus" },
+    { L"winefile.exe", 100, 1, "sf:square.stack" },
+    { L"winefile.exe", 100, 2, "sf:rectangle.split.1x2" },
+    { L"winefile.exe", 100, 3, "sf:rectangle.split.2x1" },
+    { L"winefile.exe", 101, 0, "sf:desktopcomputer" },
+    { L"winefile.exe", 101, 1, "sf:externaldrive" },
+    { L"winefile.exe", 101, 2, "sf:internaldrive" },
+    { L"winefile.exe", 101, 3, "sf:opticaldiscdrive" },
+    { L"winefile.exe", 101, 4, "sf:externaldrive.connected.to.line.below" },
+    { L"winefile.exe", 101, 5, "sf:memorychip" },
 };
 
 #endif

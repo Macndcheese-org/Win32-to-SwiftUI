@@ -152,3 +152,14 @@ toolbar_images:
   wordpad/IDB_FORMATBAR/5: {sf: text.aligncenter}
   wordpad/IDB_FORMATBAR/6: {sf: text.alignright}
   wordpad/IDB_FORMATBAR/7: {sf: list.bullet}
+  # winefile: its window buttons, and the drive bar (the kinds of drive Finder shows)
+  winefile/IDB_TOOLBAR/0: {sf: macwindow.badge.plus}
+  winefile/IDB_TOOLBAR/1: {sf: square.stack}
+  winefile/IDB_TOOLBAR/2: {sf: rectangle.split.1x2}
+  winefile/IDB_TOOLBAR/3: {sf: rectangle.split.2x1}
+  winefile/IDB_DRIVEBAR/0: {sf: desktopcomputer}
+  winefile/IDB_DRIVEBAR/1: {sf: externaldrive}
+  winefile/IDB_DRIVEBAR/2: {sf: internaldrive}
+  winefile/IDB_DRIVEBAR/3: {sf: opticaldiscdrive}
+  winefile/IDB_DRIVEBAR/4: {sf: externaldrive.connected.to.line.below}
+  winefile/IDB_DRIVEBAR/5: {sf: memorychip}

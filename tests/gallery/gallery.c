@@ -1486,6 +1486,48 @@ static void selftest_frame_toolbar(void)
     DestroyWindow( win );
     pump( 200 );
 
+    /* two toolbars stacked at the top (winefile's drive bar, then its window buttons) */
+    {
+        static const WCHAR places[] = L"Home\0Work\0";
+        TBBUTTON drives[2] =
+        {
+            { STD_FILEOPEN, 103, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, 0 },
+            { STD_FILEOPEN, 104, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, 1 },
+        };
+        HWND tb2;
+
+        win = CreateWindowExW( 0, L"W2SToolbarWindow", L"Two toolbars", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                               155, 155, 480, 300, NULL, NULL, GetModuleHandleW( NULL ), NULL );
+        tb = CreateWindowExW( 0, TOOLBARCLASSNAMEW, NULL, WS_CHILD | WS_VISIBLE | TBSTYLE_LIST | CCS_NOMOVEY, 0, 0, 0, 0,
+                              win, (HMENU)5, GetModuleHandleW( NULL ), NULL );
+        SendMessageW( tb, TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0 );
+        SendMessageW( tb, TB_ADDBITMAP, 0, (LPARAM)&bitmap );
+        SendMessageW( tb, TB_ADDSTRINGW, 0, (LPARAM)places );
+        SendMessageW( tb, TB_ADDBUTTONSW, ARRAYSIZE(drives), (LPARAM)drives );
+        tb2 = CreateWindowExW( 0, TOOLBARCLASSNAMEW, NULL, WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, win, (HMENU)6,
+                               GetModuleHandleW( NULL ), NULL );
+        SendMessageW( tb2, TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0 );
+        SendMessageW( tb2, TB_ADDBITMAP, 0, (LPARAM)&bitmap );
+        SendMessageW( tb2, TB_ADDBUTTONSW, 2, (LPARAM)buttons );
+        GetClientRect( win, &rc );
+        SendMessageW( win, WM_SIZE, SIZE_RESTORED, MAKELPARAM( rc.right, rc.bottom ) );
+        pump( 800 );
+        check( query_has( tb, "\"frameToolbar\":true" ) && query_has( tb2, "\"frameToolbar\":true" ) &&
+               query_int( tb, "frameItems" ) == 5,
+               "two toolbars stacked at the top share the frame's toolbar: a group each, a space between" );
+        check( query_has( tb, "\"frameTitles\":[\"Home\",\"Work\",\"\",\"\"]" ),
+               "a list toolbar's text shows beside its image in the frame (drive letters)" );
+        inject( tb, "{\"t\":\"frameClick\",\"v\":3}" );
+        pump( 300 );
+        check( got_frame_command == 100, "the second toolbar's items click its own buttons" );
+        DestroyWindow( tb2 );
+        pump( 400 );
+        check( query_has( tb, "\"frameToolbar\":true" ) && query_int( tb, "frameItems" ) == 2,
+               "a toolbar going away leaves the other's items in the frame" );
+        DestroyWindow( win );
+        pump( 200 );
+    }
+
     /* a rebar across the top: its first band's toolbar goes in the frame, the other bands stay */
     {
         REBARBANDINFOW band = { sizeof(band) };

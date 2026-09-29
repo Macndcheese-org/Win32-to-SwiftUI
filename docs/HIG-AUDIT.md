@@ -39,7 +39,9 @@ The rule of the project: a real macOS component, never a copy of one.
 - Settings windows (property sheets, winecfg) are a tab view over a settings form in
   a landscape window, instead of a sidebar; the page's controls are laid out again as
   a macOS form.
-- A toolbar across the top of an app's main window is in the window's frame.
+- A toolbar across the top of an app's main window is in the window's frame; toolbars
+  stacked there (winefile's drive bar and window buttons) share it, a group each, with
+  the text they show (drive letters) beside their symbols.
 - Windows that scroll themselves (WS_VSCROLL/WS_HSCROLL on a view of the app's own, an
   owner-drawn list) and the ScrollBar control have NSScrollers instead of Windows
   scroll bars.
