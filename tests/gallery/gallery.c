@@ -1340,6 +1340,55 @@ static void selftest_look(void)
     check( query_has( ctl[ID_WHITECHECK], "\"checked\":0" ), "BM_SETCHECK -> the white page's native check box" );
 }
 
+/* a French app's menus (regedit's): its Édition has no Copy/Paste, its Aide is last */
+static void selftest_menu_order(void)
+{
+    HMENU bar = CreateMenu(), reg = CreatePopupMenu(), edit = CreatePopupMenu(), view = CreatePopupMenu(),
+          help = CreatePopupMenu();
+    HWND win;
+
+    AppendMenuW( reg, MF_STRING, 9101, L"&Quitter" );
+    AppendMenuW( edit, MF_STRING, 9102, L"&Rechercher...\tCtrl+F" );
+    AppendMenuW( view, MF_STRING, 9103, L"&Actualiser\tF5" );
+    AppendMenuW( help, MF_STRING, 9104, L"\u00c0 &propos de l'\u00e9diteur du registre" );
+    AppendMenuW( bar, MF_POPUP, (UINT_PTR)reg, L"&Registre" );
+    AppendMenuW( bar, MF_POPUP, (UINT_PTR)edit, L"\u00c9&dition" );
+    AppendMenuW( bar, MF_POPUP, (UINT_PTR)view, L"&Affichage" );
+    AppendMenuW( bar, MF_POPUP, (UINT_PTR)help, L"&Aide" );
+    win = CreateWindowExW( 0, L"W2SScrollHost", L"Menus", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 230, 230, 400, 300,
+                           NULL, bar, GetModuleHandleW( NULL ), NULL );
+    pump( 400 );
+    inject( win, "{\"t\":\"open\",\"v\":1}" );
+    pump( 400 );
+    check( query_has( win, "\"editHidden\":true" ) && query_has( win, "\"textCommands\":true" ),
+           "one Edit menu: the app's (\u00c9dition), with the Mac's text commands on top; wine's goes" );
+    check( query_has( win, "\"helpLast\":true" ) && query_has( win, "\"helpMenu\":true" ),
+           "the app's Help menu (Aide) is the last one, after Window, and the Mac's Help menu" );
+    DestroyWindow( win );
+    pump( 200 );
+}
+
+/* a group box right under a field, in a dialog still hidden (regedit's Edit DWORD):
+ * no room for the title above it */
+static void selftest_groupbox_room(void)
+{
+    HWND dlg, edit, box;
+
+    dlg = CreateWindowExW( WS_EX_DLGMODALFRAME, L"W2SScrollHost", L"Edit DWORD", WS_POPUP | WS_CAPTION, 220, 220,
+                           360, 180, NULL, NULL, GetModuleHandleW( NULL ), NULL );
+    edit = CreateWindowExW( 0, L"Edit", L"NextParentID", WS_CHILD | WS_VISIBLE | WS_BORDER | WS_DISABLED, 8, 24, 340, 20,
+                            dlg, NULL, GetModuleHandleW( NULL ), NULL );
+    box = CreateWindowExW( 0, L"Button", L"Base", WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 195, 49, 155, 60, dlg, NULL,
+                           GetModuleHandleW( NULL ), NULL );
+    pump( 300 );
+    ShowWindow( dlg, SW_SHOW );
+    pump( 300 );
+    check( edit && pIsTranslated( box ) && query_has( box, "\"titleAbove\":false" ),
+           "a group box just under a field (a dialog built hidden): its title goes inside, not over the field" );
+    DestroyWindow( dlg );
+    pump( 200 );
+}
+
 /* a superclass of ComboBox, as Delphi's VCL makes TComboBox: of user32's (marked
  * as a combo box by its procedure) and of comctl32's v6 one (not marked) */
 static WNDPROC base_combo_proc[2];
@@ -2896,6 +2945,8 @@ static int selftest(void)
     selftest_scrollbars();
     selftest_strips();
     selftest_superclass();
+    selftest_groupbox_room();
+    selftest_menu_order();
     selftest_about();
     selftest_taskbar();
     selftest_flash();

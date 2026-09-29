@@ -125,7 +125,9 @@ static BOOL groupbox_room_above( HWND hwnd )
     SetRect( &band, rc.left, rc.top - GROUPBOX_TITLE_BAND, min( rc.right, rc.left + size.cx * 4 / 3 + 16 ), rc.top );
     for (child = GetWindow( parent, GW_CHILD ); child; child = GetWindow( child, GW_HWNDNEXT ))
     {
-        if (child == hwnd || !IsWindowVisible( child )) continue;
+        /* its own style: a dialog is hidden while it is built, and IsWindowVisible
+         * says no for all of its controls then (regedit's Edit DWORD) */
+        if (child == hwnd || !(GetWindowLongW( child, GWL_STYLE ) & WS_VISIBLE)) continue;
         GetWindowRect( child, &sib );
         MapWindowPoints( NULL, parent, (POINT *)&sib, 2 );
         /* a box around this one isn't in the way */

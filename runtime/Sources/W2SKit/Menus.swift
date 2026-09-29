@@ -8,6 +8,51 @@ final class W2SMenu: NSMenu {
     var win32Menu = 0
     var position = 0
     var topLevel = false
+    var textCommands = false        // the app's Edit menu: the Mac's text commands at its top
+}
+
+/// macOS's own words for the standard menus and commands, in every language it
+/// has (AppKit's tables): to know an app's Edit and Help menus whatever its
+/// language, and to title the commands the Mac adds as the Mac does.
+enum MenuWords {
+    private static var tables: [String: [String: [String: String]]] = [:]
+
+    private static func table(_ name: String) -> [String: [String: String]] {
+        if let t = tables[name] { return t }
+        var out: [String: [String: String]] = [:]
+        if let path = Bundle(for: NSApplication.self).path(forResource: name, ofType: "loctable"),
+           let dict = NSDictionary(contentsOfFile: path) as? [String: Any] {
+            for (lang, value) in dict { if let words = value as? [String: String] { out[lang] = words } }
+        }
+        tables[name] = out
+        return out
+    }
+
+    static func folded(_ s: String) -> String {
+        s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// every language's word for key
+    static func all(_ key: String, _ names: [String]) -> Set<String> {
+        var out: Set<String> = [folded(key)]
+        for name in names { for words in table(name).values { if let w = words[key] { out.insert(folded(w)) } } }
+        return out
+    }
+
+    /// the user's language's word for key
+    static func local(_ key: String, _ names: [String]) -> String {
+        for lang in Locale.preferredLanguages {
+            let code = lang.replacingOccurrences(of: "-", with: "_")
+            for candidate in [code, String(code.prefix { $0 != "_" })] {
+                for name in names { if let w = table(name)[candidate]?[key] { return w } }
+            }
+        }
+        return key
+    }
+
+    static let edit = all("Edit", ["InputManager"])
+    // "?" is a Help menu's title in many Windows apps
+    static let help = all("Help", ["MenuCommands", "HelpManager"]).union(["?"])
 }
 
 enum MenuBuild {
@@ -86,6 +131,63 @@ enum MenuBuild {
         if menu.items.last?.isSeparatorItem == true { menu.removeItem(at: menu.items.count - 1) }
     }
 
+    /// The Mac's text commands at the top of an app's Edit menu that has none: for
+    /// the field being typed in, else the app (wine turns them into Ctrl+X/C/V).
+    /// A key the app's menus already use stays the app's.
+    static func addTextCommands(_ menu: NSMenu, taken: Set<String>) {
+        let commands: [(String, [String], Selector, String, NSEvent.ModifierFlags)] = [
+            ("Undo", ["FunctionKeyNames"], Selector(("undo:")), "z", [.command]),
+            ("Redo", ["FunctionKeyNames"], Selector(("redo:")), "z", [.command, .shift]),
+            ("", [], Selector(("")), "", []),
+            ("Cut", ["MenuCommands"], #selector(NSText.cut(_:)), "x", [.command]),
+            ("Copy", ["MenuCommands"], #selector(NSText.copy(_:)), "c", [.command]),
+            ("Paste", ["MenuCommands"], #selector(NSText.paste(_:)), "v", [.command]),
+            ("Select All", ["MenuCommands"], #selector(NSText.selectAll(_:)), "a", [.command]),
+            ("", [], Selector(("")), "", []),
+        ]
+        var at = 0
+        for (key, names, action, keyEquivalent, mods) in commands {
+            if key.isEmpty {
+                menu.insertItem(.separator(), at: at)
+            } else {
+                let taken = taken.contains(keyString(keyEquivalent, mods))
+                let item = NSMenuItem(title: MenuWords.local(key, names), action: action,
+                                      keyEquivalent: taken ? "" : keyEquivalent)
+                item.keyEquivalentModifierMask = mods
+                item.target = nil          // the first responder
+                item.isEnabled = NSApp.target(forAction: action, to: nil, from: item) != nil
+                menu.insertItem(item, at: at)
+            }
+            at += 1
+        }
+    }
+
+    static func keyString(_ key: String, _ mods: NSEvent.ModifierFlags) -> String {
+        "\(mods.intersection([.command, .shift, .option, .control]).rawValue):\(key.lowercased())"
+    }
+
+    /// the key equivalents an app's menus use
+    static func keys(_ items: [[String: Any]]) -> Set<String> {
+        var out: Set<String> = []
+        for spec in items {
+            let parts = split(spec["text"] as? String ?? "")
+            if !parts.key.isEmpty { out.insert(keyString(parts.key, parts.mods)) }
+            if let sub = spec["sub"] as? [String: Any] { out.formUnion(keys(sub["items"] as? [[String: Any]] ?? [])) }
+        }
+        return out
+    }
+
+    static func title(_ spec: [String: Any]) -> String { MenuWords.folded(split(spec["text"] as? String ?? "").title) }
+
+    static func isHelp(_ spec: [String: Any]) -> Bool {
+        spec["sub"] != nil && (spec["right"] as? Bool == true || MenuWords.help.contains(title(spec)))
+    }
+
+    static func isEdit(_ spec: [String: Any]) -> Bool {
+        guard let sub = spec["sub"] as? [String: Any] else { return false }
+        return MenuWords.edit.contains(title(spec)) || hasCopyPaste(sub["items"] as? [[String: Any]] ?? [])
+    }
+
     /// the submenu spec for a Win32 menu handle, anywhere in the tree
     static func find(_ items: [[String: Any]], menu: Int) -> [[String: Any]]? {
         for spec in items {
@@ -117,6 +219,8 @@ final class MenuBar: NSObject, NSMenuDelegate {
     private let refreshed = DispatchSemaphore(value: 0)
     private var items: [NSMenuItem] = []          // main thread: ours in NSApp.mainMenu
     private var hiddenEdit: [NSMenuItem] = []     // winemac's Edit menu while ours has one
+    private var helpItem: NSMenuItem?             // the app's Help menu, last (after Window)
+    private var previousHelp: NSMenu?
     private var shown = false
     private var tracking = 0
 
@@ -180,14 +284,20 @@ final class MenuBar: NSObject, NSMenuDelegate {
         items = []
         for item in hiddenEdit { item.isHidden = false }
         hiddenEdit = []
+        if let help = helpItem, NSApp.helpMenu === help.submenu { NSApp.helpMenu = previousHelp }
+        helpItem = nil
     }
 
     private func rebuild() {
         guard let main = NSApp.mainMenu else { return }
         removeItems()
         let specs = currentItems()
+        let taken = MenuBuild.keys(specs)
+        // the Help menu is the last one, after Window (HIG); one Edit menu: the app's
+        let helpIndex = specs.lastIndex(where: MenuBuild.isHelp)
+        let editIndex = specs.firstIndex(where: MenuBuild.isEdit)
         var index = min(1, main.items.count)          // after the application menu
-        for spec in specs {
+        for (n, spec) in specs.enumerated() {
             guard let sub = spec["sub"] as? [String: Any] else { continue }
             let title = MenuBuild.split(spec["text"] as? String ?? "").title
             let top = NSMenuItem(title: title, action: nil, keyEquivalent: "")
@@ -196,16 +306,25 @@ final class MenuBar: NSObject, NSMenuDelegate {
             submenu.position = sub["pos"] as? Int ?? 0
             submenu.topLevel = true
             submenu.delegate = self
-            MenuBuild.fill(submenu, items: sub["items"] as? [[String: Any]] ?? [], target: self,
-                           action: #selector(choose(_:)), delegate: self)
+            let subItems = sub["items"] as? [[String: Any]] ?? []
+            submenu.textCommands = n == editIndex && !MenuBuild.hasCopyPaste(subItems)
+            MenuBuild.fill(submenu, items: subItems, target: self, action: #selector(choose(_:)), delegate: self)
+            if submenu.textCommands { MenuBuild.addTextCommands(submenu, taken: taken) }
             top.submenu = submenu
             top.isEnabled = spec["disabled"] as? Bool != true
-            main.insertItem(top, at: index)
+            if n == helpIndex {
+                main.addItem(top)
+                helpItem = top
+                if NSApp.helpMenu !== submenu { previousHelp = NSApp.helpMenu }
+                NSApp.helpMenu = submenu
+            } else {
+                main.insertItem(top, at: index)
+                index += 1
+            }
             items.append(top)
-            index += 1
         }
-        // one Edit menu: winemac's goes while the app's own has Copy/Paste
-        if MenuBuild.hasCopyPaste(specs) {
+        // one Edit menu: winemac's goes while the app has its own, or Copy/Paste elsewhere
+        if editIndex != nil || MenuBuild.hasCopyPaste(specs) {
             for item in main.items where !items.contains(item) {
                 if let sub = item.submenu, sub.items.contains(where: { $0.keyEquivalent == "v" && $0.keyEquivalentModifierMask == [.command] }) {
                     item.isHidden = true
@@ -222,7 +341,11 @@ final class MenuBar: NSObject, NSMenuDelegate {
     /// tests/gallery: what is in the menu bar, and the state of an item
     func debugState() -> [String: Any] {
         var out: [String: Any] = ["entry": "menubar", "shown": shown, "titles": items.map { $0.title },
-                                  "editHidden": !hiddenEdit.isEmpty]
+                                  "editHidden": !hiddenEdit.isEmpty,
+                                  "bar": (NSApp.mainMenu?.items ?? []).filter { !$0.isHidden }.map { $0.title },
+                                  "helpMenu": NSApp.helpMenu.map { h in items.contains { $0.submenu === h } } ?? false,
+                                  "helpLast": helpItem != nil && NSApp.mainMenu?.items.last(where: { !$0.isHidden }) === helpItem,
+                                  "textCommands": items.contains { ($0.submenu as? W2SMenu)?.textCommands == true }]
         var checked: [Int] = [], keys: [String] = []
         func walk(_ menu: NSMenu?) {
             for item in menu?.items ?? [] {
@@ -269,6 +392,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         }
         if let specs = MenuBuild.find(currentItems(), menu: menu.win32Menu) {
             MenuBuild.fill(menu, items: specs, target: self, action: #selector(choose(_:)), delegate: self)
+            if menu.textCommands { MenuBuild.addTextCommands(menu, taken: MenuBuild.keys(currentItems())) }
         }
     }
 }
