@@ -12,7 +12,7 @@ enum ControlViews {
     // map: updown datetime monthcal tooltip (as .help on every control: HelpText)
     // map: listview.checkboxes listview.icon
     // map: propsheet propsheet.wizard (modes of the sheet's tab control: SettingsForm, WizardSteps)
-    // map: toolbar rebar comboboxex syslink trackbar.vertical
+    // map: toolbar rebar comboboxex syslink trackbar.vertical scrollbar
     static let entries: Set<String> = [
         "button.push", "button.default", "button.checkbox", "button.pushlike", "button.radio", "button.groupbox",
         "button.3state", "button.split", "button.commandlink",
@@ -21,7 +21,7 @@ enum ControlViews {
         "combobox.dropdownlist", "listbox.single", "listbox.multi", "listview.list", "listview.report",
         "progress", "trackbar", "tab", "static.frame", "statusbar", "edit.multiline", "combobox.editable",
         "treeview", "updown", "datetime", "monthcal", "listview.checkboxes", "listview.icon",
-        "toolbar", "rebar", "comboboxex", "syslink", "trackbar.vertical",
+        "toolbar", "rebar", "comboboxex", "syslink", "trackbar.vertical", "scrollbar",
     ]
 
     static func supports(_ entry: String) -> Bool { entries.contains(entry) }
@@ -191,6 +191,8 @@ struct ControlRoot: View {
             TrackBar(model: model)
         case "trackbar.vertical":
             VerticalTrackBar(model: model)
+        case "scrollbar":
+            ScrollBars(model: model)
         case "tab":
             TabStrip(model: model)
         case "updown":

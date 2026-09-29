@@ -61,7 +61,8 @@ static const UINT w2s_answers_rebar[] = { RB_SHOWBAND };
 static const UINT w2s_state_statusbar[] = { SB_SETPARTS, SB_SETTEXTA, SB_SETTEXTW, SB_SIMPLE, SB_SETICON, SB_SETTIPTEXTA, SB_SETTIPTEXTW };
 static const UINT w2s_state_pager[] = { 0 };
 static const UINT w2s_state_mdiclient[] = { 0 };
-static const UINT w2s_state_scrollbar[] = { SBM_SETSCROLLINFO, SBM_SETPOS, SBM_SETRANGE, SBM_ENABLE_ARROWS };
+static const UINT w2s_state_scrollbar[] = { SBM_SETSCROLLINFO, SBM_SETPOS, SBM_SETRANGE, SBM_ENABLE_ARROWS, WM_SIZE };
+static const UINT w2s_answers_scrollbar[] = { WM_TIMER };
 static const UINT w2s_state_progress[] = { PBM_SETPOS, PBM_DELTAPOS, PBM_STEPIT, PBM_SETRANGE, PBM_SETRANGE32, PBM_SETSTATE, PBM_SETMARQUEE, PBM_SETBARCOLOR };
 static const UINT w2s_state_trackbar[] = { TBM_SETPOS, TBM_SETRANGE, TBM_SETRANGEMIN, TBM_SETRANGEMAX, TBM_SETTICFREQ, TBM_SETTIC, TBM_CLEARTICS, TBM_SETLINESIZE, TBM_SETPAGESIZE };
 static const UINT w2s_state_trackbar_vertical[] = { TBM_SETPOS, TBM_SETRANGE, TBM_SETRANGEMIN, TBM_SETRANGEMAX, TBM_SETTICFREQ, TBM_SETTIC, TBM_CLEARTICS, TBM_SETLINESIZE, TBM_SETPAGESIZE };
@@ -146,7 +147,7 @@ static const struct w2s_map_entry w2s_map_entries[] =
     { "statusbar", w2s_state_statusbar, 7, NULL, 0 },
     { "pager", w2s_state_pager, 0, NULL, 0 },
     { "mdiclient", w2s_state_mdiclient, 0, NULL, 0 },
-    { "scrollbar", w2s_state_scrollbar, 4, NULL, 0 },
+    { "scrollbar", w2s_state_scrollbar, 5, w2s_answers_scrollbar, 1 },
     { "progress", w2s_state_progress, 8, NULL, 0 },
     { "trackbar", w2s_state_trackbar, 9, NULL, 0 },
     { "trackbar.vertical", w2s_state_trackbar_vertical, 9, NULL, 0 },

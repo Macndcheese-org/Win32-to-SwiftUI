@@ -126,6 +126,10 @@ public func w2s_swift_control_create(_ hostView: UInt64, _ window: UInt64, _ pos
             let toolbar = WindowToolbar(host: host)
             host.owned = toolbar
             toolbar.update()
+        } else if entryID == "scrollbar" {
+            let bars = ScrollBarsController(host: host)
+            host.owned = bars
+            bars.update()
         }
     }
     return handle

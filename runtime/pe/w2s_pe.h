@@ -125,6 +125,7 @@ struct w2s_kind
 };
 
 #define W2S_OWN_TEXT 0x0001     /* the kind writes "text" itself (a multi-line edit's whole text) */
+#define W2S_KEEP_FRAME 0x0002   /* wine keeps the window's frame and client area (only its scroll bars are native) */
 
 struct w2s_control
 {

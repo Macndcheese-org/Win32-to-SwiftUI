@@ -1312,6 +1312,97 @@ static void selftest_look(void)
     check( query_has( ctl[ID_WHITECHECK], "\"checked\":0" ), "BM_SETCHECK -> the white page's native check box" );
 }
 
+/* scroll bars: a view of the app's own that scrolls itself, and a ScrollBar control */
+static int got_vscroll_code = -1, got_vscroll_pos = -1, got_bar_code = -1;
+static HWND got_bar_from;
+
+static LRESULT CALLBACK scrollview_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    if (msg == WM_VSCROLL)
+    {
+        SCROLLINFO si = { sizeof(si), SIF_ALL };
+
+        got_vscroll_code = LOWORD( wparam );
+        GetScrollInfo( hwnd, SB_VERT, &si );
+        switch (LOWORD( wparam ))
+        {
+        case SB_PAGEDOWN: si.nPos += si.nPage; break;
+        case SB_PAGEUP: si.nPos -= si.nPage; break;
+        case SB_THUMBTRACK: case SB_THUMBPOSITION: si.nPos = got_vscroll_pos = HIWORD( wparam ); break;
+        }
+        si.fMask = SIF_POS;
+        SetScrollInfo( hwnd, SB_VERT, &si, TRUE );
+        return 0;
+    }
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
+}
+
+static LRESULT CALLBACK scrollhost_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    if (msg == WM_VSCROLL && lparam)
+    {
+        got_bar_code = LOWORD( wparam );
+        got_bar_from = (HWND)lparam;
+        return 0;
+    }
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
+}
+
+static void selftest_scrollbars(void)
+{
+    SCROLLINFO si = { sizeof(si), SIF_ALL, 0, 99, 10, 0 };
+    WNDCLASSW wc = { 0 };
+    HWND win, view, bar;
+    char *q;
+
+    wc.lpfnWndProc = scrollview_proc;
+    wc.hInstance = GetModuleHandleW( NULL );
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpszClassName = L"W2SScrollView";
+    RegisterClassW( &wc );
+    wc.lpfnWndProc = scrollhost_proc;
+    wc.lpszClassName = L"W2SScrollHost";
+    RegisterClassW( &wc );
+    win = CreateWindowExW( 0, L"W2SScrollHost", L"Scrolling", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 180, 180, 400, 300,
+                           NULL, NULL, GetModuleHandleW( NULL ), NULL );
+    view = CreateWindowExW( WS_EX_CLIENTEDGE, L"W2SScrollView", NULL, WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL,
+                            10, 10, 300, 200, win, NULL, GetModuleHandleW( NULL ), NULL );
+    SetScrollInfo( view, SB_VERT, &si, TRUE );
+    SetScrollInfo( view, SB_HORZ, &si, TRUE );
+    pump( 500 );
+    check( pIsTranslated( view ) && query_has( view, "\"entry\":\"scrollbar\"" ) &&
+           query_has( view, "\"vert\":true" ) && query_has( view, "\"vert\":false" ) && query_has( view, "\"page\":10" ),
+           "a view of the app's own with scroll bars gets native scrollers (NSScroller) over them" );
+    check( query_has( view, "\"passThrough\":true" ), "the view's client area stays the app's: clicks there go to wine" );
+    si.fMask = SIF_POS;
+    si.nPos = 45;
+    SetScrollInfo( view, SB_VERT, &si, TRUE );
+    pump( 500 );
+    check( query_has( view, "\"pos\":45" ), "SetScrollInfo (which sends the window nothing) reaches the native scroller" );
+    inject( view, "{\"t\":\"vscroll\",\"v\":3}" );
+    pump( 300 );
+    check( got_vscroll_code == SB_PAGEDOWN && query_has( view, "\"pos\":55" ),
+           "a page click on the native scroller -> WM_VSCROLL SB_PAGEDOWN; the app scrolls, the knob follows" );
+    inject( view, "{\"t\":\"vscroll\",\"v\":5,\"a\":[20]}" );
+    pump( 300 );
+    check( got_vscroll_code == SB_THUMBTRACK && got_vscroll_pos == 20, "dragging the knob -> SB_THUMBTRACK with its position" );
+
+    bar = CreateWindowExW( 0, L"ScrollBar", NULL, WS_CHILD | WS_VISIBLE | SBS_VERT, 330, 10, 16, 200, win, NULL,
+                           GetModuleHandleW( NULL ), NULL );
+    si.fMask = SIF_ALL;
+    si.nPos = 30;
+    SendMessageW( bar, SBM_SETSCROLLINFO, TRUE, (LPARAM)&si );
+    pump( 300 );
+    check( pIsTranslated( bar ) && query_has( bar, "\"pos\":30" ), "a ScrollBar control is a native scroller" );
+    inject( bar, "{\"t\":\"vscroll\",\"v\":2}" );
+    pump( 300 );
+    check( got_bar_code == SB_PAGEUP && got_bar_from == bar, "its page click -> WM_VSCROLL SB_PAGEUP to its parent, from it" );
+    q = pQuery( view );
+    pFree( q );
+    DestroyWindow( win );
+    pump( 200 );
+}
+
 /* a toolbar across the top of a main window is the frame's toolbar (HIG) */
 static int got_frame_command;
 
@@ -2585,6 +2676,7 @@ static int selftest(void)
     selftest_find();
     selftest_document();
     selftest_frame_toolbar();
+    selftest_scrollbars();
     selftest_about();
     selftest_taskbar();
     selftest_flash();

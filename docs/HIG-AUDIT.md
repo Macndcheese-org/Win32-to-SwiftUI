@@ -19,6 +19,7 @@ The rule of the project: a real macOS component, never a copy of one.
 | Sliders | tick marks where the app has them; vertical only when needed | NSSlider with the trackbar's ticks, vertical NSSlider for TBS_VERT |
 | Steppers | Shift-click for large ranges | Shift-click steps by 10 |
 | Progress | determinate when possible; bar or spinner | NSProgressIndicator; marquee is indeterminate |
+| Scroll bars | the system's scrollers | NSScroller where Windows has a scroll bar; the app's own scrolling (wheel, keys) is unchanged |
 | Tables | sortable headings, resizable columns, alternating rows | SwiftUI Table; a heading click is LVN_COLUMNCLICK (the app sorts) |
 | Outline views | hierarchy in the first column, keep expansion | tree views are outlines with the app's expansion state |
 | Text fields | hints, secure fields | EM_SETCUEBANNER is the placeholder; ES_PASSWORD is a SecureField |
@@ -39,20 +40,14 @@ The rule of the project: a real macOS component, never a copy of one.
   a landscape window, instead of a sidebar; the page's controls are laid out again as
   a macOS form.
 - A toolbar across the top of an app's main window is in the window's frame.
+- Windows that scroll themselves (WS_VSCROLL/WS_HSCROLL on a view of the app's own, an
+  owner-drawn list) and the ScrollBar control have NSScrollers instead of Windows
+  scroll bars.
 
 ## Left open (need a decision or a screen)
 
-1. **Toolbars belong in the window frame.** HIG: "In a macOS app, the toolbar
-   resides in the frame at the top of a window". Win32 toolbars stay where the
-   app puts them (native buttons, no bezels). Moving them into the window's
-   NSToolbar changes the app's layout (its client area grows by the toolbar's
-   height), so it needs checking live.
-2. **Scroll bars of plain windows.** Windows that scroll themselves
-   (WS_VSCROLL/WS_HSCROLL on an owner-drawn list, a RichEdit) keep wine's
-   Windows scroll bars. NSScroller over the non-client area is the fix; it is
-   big and needs a screen to verify.
-3. **Alert button titles.** HIG: avoid "OK" as the default unless the alert
+1. **Alert button titles.** HIG: avoid "OK" as the default unless the alert
    only informs. MessageBox's buttons are the app's choice (MB_OKCANCEL...);
    the titles stay as Windows gives them.
-4. **Status bars.** HIG: avoid critical information in a bottom bar. Status
+2. **Status bars.** HIG: avoid critical information in a bottom bar. Status
    bars are the app's; they show as a macOS bottom bar. Nothing to change.

@@ -58,6 +58,7 @@ struct Snapshot: Codable, Equatable {
     var balloon: Balloon?
     var document: Bool?         // multi-line edit: a document window's text, drawn without a border
     var inFrame: Bool?          // toolbar: its buttons are the window frame's toolbar (WindowToolbar)
+    var bars: [ScrollBarState]? // scrollbar: a window's own, or the ScrollBar control's (ScrollBars.swift)
     // toolbar
     struct ToolbarButton: Codable, Equatable {
         var i: Int
@@ -246,6 +247,13 @@ final class PassThroughHostingView<Content: View>: NSHostingView<Content> {
                         NSRect(x: CGFloat(b.rect[0]) * scale, y: CGFloat(b.rect[1]) * scale,
                                width: CGFloat(b.rect[2]) * scale, height: CGFloat(b.rect[3]) * scale).contains(point)
                 }
+            }
+        case "scrollbar":
+            // the scrollers only: the window's client area under them is wine's
+            return { [weak model] point, size in
+                guard let snap = model?.snap else { return false }
+                let s = ScrollGeometry.scale(snap, height: size.height)
+                return (snap.bars ?? []).contains { ScrollGeometry.frame($0, snap, scale: s).contains(point) }
             }
         case "tab":
             return { [weak model] point, size in

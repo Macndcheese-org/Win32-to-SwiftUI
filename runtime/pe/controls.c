@@ -2899,7 +2899,171 @@ static const struct w2s_kind kind_rebar =
     "rebar", rebar_snapshot, nothing_apply, rebar_answer, NULL, container_region
 };
 
+/* ---------- Scroll bars (map: scrollbar) ---------- */
+
+/* A window's own scroll bars (WS_VSCROLL/WS_HSCROLL on an owner-drawn list, a
+ * RichEdit, an app's view) and the ScrollBar control are NSScrollers: the
+ * window's host view reaches over its scroll bars (outsets) and shows them
+ * there in the legacy style (always shown, as with "Show scroll bars: Always"),
+ * which covers wine's; the client area stays wine's, drawing and clicks. A
+ * window's SetScrollInfo sends it nothing, so its scroll bars are looked at
+ * on a timer of ours. */
+#define W2S_SCROLL_TIMER 0x57325302
+
+struct sb_data
+{
+    SCROLLINFO last[2];
+};
+
+static BOOL is_scrollbar_control( HWND hwnd )
+{
+    WCHAR name[16];
+    return GetClassNameW( hwnd, name, ARRAYSIZE(name) ) && !wcsicmp( name, L"ScrollBar" );
+}
+
+static void scroll_bar_json( struct json *j, HWND hwnd, int bar, BOOL vertical, const RECT *rc, DWORD state )
+{
+    SCROLLINFO si = { sizeof(si), SIF_ALL };
+
+    GetScrollInfo( hwnd, bar, &si );
+    json_obj_begin( j );
+    json_bool( j, "vert", vertical );
+    json_arr_begin( j, "rect" );
+    json_int( j, NULL, rc->left );
+    json_int( j, NULL, rc->top );
+    json_int( j, NULL, rc->right - rc->left );
+    json_int( j, NULL, rc->bottom - rc->top );
+    json_arr_end( j );
+    json_int( j, "min", si.nMin );
+    json_int( j, "max", si.nMax );
+    json_int( j, "page", si.nPage );
+    json_int( j, "pos", si.nPos );
+    json_bool( j, "enabled", !(state & STATE_SYSTEM_UNAVAILABLE) && si.nMax > si.nMin );
+    json_obj_end( j );
+}
+
+static void scroll_snapshot( struct w2s_control *ctl, struct json *j )
+{
+    static const LONG objects[2] = { OBJID_VSCROLL, OBJID_HSCROLL };
+    int i;
+
+    if (!ctl->data) ctl->data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(struct sb_data) );
+    json_arr_begin( j, "bars" );
+    if (is_scrollbar_control( ctl->hwnd ))
+    {
+        RECT rc;
+        GetClientRect( ctl->hwnd, &rc );
+        scroll_bar_json( j, ctl->hwnd, SB_CTL, (GetWindowLongW( ctl->hwnd, GWL_STYLE ) & SBS_VERT) != 0, &rc,
+                         IsWindowEnabled( ctl->hwnd ) ? 0 : STATE_SYSTEM_UNAVAILABLE );
+    }
+    else
+    {
+        /* where wine has them, in the client area's coordinates (outside it) */
+        for (i = 0; i < 2; i++)
+        {
+            SCROLLBARINFO sbi = { sizeof(sbi) };
+            RECT rc;
+
+            if (!GetScrollBarInfo( ctl->hwnd, objects[i], &sbi ) ||
+                (sbi.rgstate[0] & (STATE_SYSTEM_INVISIBLE | STATE_SYSTEM_OFFSCREEN)))
+                continue;
+            rc = sbi.rcScrollBar;
+            MapWindowPoints( NULL, ctl->hwnd, (POINT *)&rc, 2 );
+            scroll_bar_json( j, ctl->hwnd, i ? SB_HORZ : SB_VERT, !i, &rc, sbi.rgstate[0] );
+        }
+        SetTimer( ctl->hwnd, W2S_SCROLL_TIMER, 150, NULL );
+    }
+    json_arr_end( j );
+}
+
+/* the window's scroll bars as they are now: pushed when the app changed them */
+static void scroll_poll( struct w2s_control *ctl )
+{
+    struct sb_data *data = ctl->data;
+    BOOL changed = FALSE;
+    int i;
+
+    if (!data) return;
+    for (i = 0; i < 2; i++)
+    {
+        SCROLLINFO si = { sizeof(si), SIF_ALL };
+        GetScrollInfo( ctl->hwnd, i ? SB_HORZ : SB_VERT, &si );
+        if (memcmp( &si, &data->last[i], sizeof(si) ))
+        {
+            data->last[i] = si;
+            changed = TRUE;
+        }
+    }
+    if (changed) w2s_push( ctl, FALSE );
+}
+
+static BOOL scroll_answer( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM lparam, LRESULT *ret )
+{
+    /* our timer: not the app's */
+    if (msg != WM_TIMER || wparam != W2S_SCROLL_TIMER) return FALSE;
+    scroll_poll( ctl );
+    *ret = 0;
+    return TRUE;
+}
+
+/* a native scroll: what a click or a drag on wine's scroll bar sends */
+static void scroll_apply( struct w2s_control *ctl, const struct w2s_event *ev )
+{
+    BOOL vertical = !strcmp( ev->type, "vscroll" );
+    int pos = ev->array_count ? ev->array[0] : 0;
+    WPARAM wparam;
+
+    if (!ev->has_value || (!vertical && strcmp( ev->type, "hscroll" ))) return;
+    wparam = MAKEWPARAM( (int)ev->value, pos );
+    if (is_scrollbar_control( ctl->hwnd ))
+        SendMessageW( GetParent( ctl->hwnd ), vertical ? WM_VSCROLL : WM_HSCROLL, wparam, (LPARAM)ctl->hwnd );
+    else
+        SendMessageW( ctl->hwnd, vertical ? WM_VSCROLL : WM_HSCROLL, wparam, 0 );
+    if (IsWindow( ctl->hwnd ))
+    {
+        if (is_scrollbar_control( ctl->hwnd )) w2s_push( ctl, FALSE );
+        else scroll_poll( ctl );
+    }
+}
+
+/* wine keeps drawing the whole window (its client area), not a ScrollBar control */
+static HRGN scroll_region( struct w2s_control *ctl )
+{
+    RECT rc;
+
+    if (is_scrollbar_control( ctl->hwnd )) return NULL;
+    GetWindowRect( ctl->hwnd, &rc );
+    return CreateRectRgn( 0, 0, rc.right - rc.left, rc.bottom - rc.top );
+}
+
+static void scroll_release( struct w2s_control *ctl )
+{
+    KillTimer( ctl->hwnd, W2S_SCROLL_TIMER );
+    HeapFree( GetProcessHeap(), 0, ctl->data );
+}
+
+static const struct w2s_kind kind_scrollbar =
+    { "scrollbar", scroll_snapshot, scroll_apply, scroll_answer, NULL, scroll_region, NULL, scroll_release };
+static const struct w2s_kind kind_window_scrollbars =
+    { "scrollbar", scroll_snapshot, scroll_apply, scroll_answer, NULL, scroll_region, NULL, scroll_release, W2S_KEEP_FRAME };
+
+static const struct w2s_kind *select_control_kind( HWND hwnd );
+
 const struct w2s_kind *w2s_select_kind( HWND hwnd )
+{
+    const struct w2s_kind *kind = select_control_kind( hwnd );
+    DWORD style = GetWindowLongW( hwnd, GWL_STYLE );
+    HWND parent = GetParent( hwnd );
+
+    if (kind) return kind;
+    if (is_scrollbar_control( hwnd )) return (style & (SBS_SIZEBOX | SBS_SIZEGRIP)) ? NULL : &kind_scrollbar;
+    /* a child window with scroll bars of its own, not inside a translated control */
+    if ((style & WS_CHILD) && (style & (WS_VSCROLL | WS_HSCROLL)) && !(parent && w2s_control_of( parent )))
+        return &kind_window_scrollbars;
+    return NULL;
+}
+
+static const struct w2s_kind *select_control_kind( HWND hwnd )
 {
     DWORD style = GetWindowLongW( hwnd, GWL_STYLE );
     HWND parent = GetParent( hwnd );
@@ -3026,8 +3190,8 @@ const struct w2s_kind *w2s_select_kind( HWND hwnd )
     if (is_class( name, WC_TABCONTROLW ))
     {
         if (is_wizard_tab( hwnd )) return &kind_wizard;
-        /* TCS_MULTILINE (every property sheet) is fine: several rows become a
-         * window sidebar from macOS 13, and a strip scrolls before that */
+        /* TCS_MULTILINE (every property sheet) is fine: a property sheet is a
+         * settings form from macOS 13, and a strip scrolls before that */
         if (style & (TCS_OWNERDRAWFIXED | TCS_BUTTONS | TCS_VERTICAL)) return NULL;
         return &kind_tab;
     }

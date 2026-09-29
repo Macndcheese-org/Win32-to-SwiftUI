@@ -278,8 +278,8 @@ entries:
     notes: >-
       Child windows living inside a parent frame have no macOS counterpart. The children's
       controls are still translated; the MDI frame, child captions and COLOR_APPWORKSPACE
-      stay as wine draws them. Native window tabs (NSWindow tabbing) are a possible later
-      mapping.
+      stay as wine draws them; its scroll bars are NSScrollers (map: scrollbar). Native
+      window tabs (NSWindow tabbing) are a possible later mapping.
 
   - id: scrollbar
     kind: control
@@ -295,13 +295,20 @@ entries:
           s.doubleValue = 0.5
           s.isEnabled = true
     glass: automatic
-    state_in: [SBM_SETSCROLLINFO, SBM_SETPOS, SBM_SETRANGE, SBM_ENABLE_ARROWS, SetScrollInfo on WS_HSCROLL/WS_VSCROLL windows]
+    state_in: [SBM_SETSCROLLINFO, SBM_SETPOS, SBM_SETRANGE, SBM_ENABLE_ARROWS, WM_SIZE, SetScrollInfo on WS_HSCROLL/WS_VSCROLL windows]
+    answers: [WM_TIMER]
     events_out: {scroll: WM_HSCROLL/WM_VSCROLL with SB_THUMBTRACK, SB_THUMBPOSITION, SB_LINEUP/DOWN, SB_PAGEUP/DOWN}
     notes: >-
-      SwiftUI has no stand-alone scroller. NSScroller follows the user's "Show scroll bars"
-      setting (overlay or always). The same applies to the scroll bars windows get from
-      WS_HSCROLL/WS_VSCROLL. Arrow buttons don't exist on macOS scrollers, so SB_LINEUP and
-      SB_LINEDOWN only come from wheel and trackpad scrolling.
+      SwiftUI has no stand-alone scroller. The ScrollBar control, and the scroll bars a
+      child window gets from WS_HSCROLL/WS_VSCROLL (a view of the app's own, an owner-drawn
+      list) when nothing translated contains it, are legacy NSScrollers where wine has its
+      bars: always shown, since the app laid its view out around them. The host view of such
+      a window covers its client area and reaches over the bars; the client area stays wine's.
+      SetScrollInfo sends the window nothing, so the bars are polled (WM_TIMER, ours
+      swallowed). A page click is SB_PAGEUP/SB_PAGEDOWN; a knob drag is SB_THUMBTRACK, then
+      SB_THUMBPOSITION and SB_ENDSCROLL. Arrow buttons don't exist on macOS scrollers, so
+      SB_LINEUP and SB_LINEDOWN only come from the app's wheel handling. The track is
+      see-through on macOS 26 and later; it sits on the control background colour.
 
 flags:
   # Tab

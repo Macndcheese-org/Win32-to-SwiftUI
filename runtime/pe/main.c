@@ -486,7 +486,7 @@ static LRESULT CALLBACK subclass_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
     /* The empty window region already hides whatever wine paints, in and out
      * of WM_PAINT, and lets the parent paint behind the control, so painting
      * needs nothing from us. Two things still do: */
-    switch (msg)
+    switch (ctl->kind->flags & W2S_KEEP_FRAME ? 0 : msg)
     {
     case WM_NCCALCSIZE:
         /* the client area, which the host view follows, is the whole window:
