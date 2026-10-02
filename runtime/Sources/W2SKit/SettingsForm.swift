@@ -391,13 +391,8 @@ struct SettingsForm: View {
     @ObservedObject var model: ControlModel
     let scale: CGFloat
     var form: UInt64 = 0                // the tab control's handle
-    @State private var placed = false
     @State private var slots: [UInt64: CGRect] = [:]
     @State private var reportedSlots: [Int] = []
-
-    static func tabsWidth(_ titles: [String]) -> CGFloat {
-        titles.reduce(CGFloat(40)) { $0 + FormMetrics.textWidth(stripMnemonic($1)) + 28 }
-    }
 
     var body: some View {
         content
@@ -443,35 +438,15 @@ struct SettingsForm: View {
 
     var content: some View {
         let snap = model.snap
-        let titles = snap.items ?? []
         let selection = snap.selection ?? 0
         let page = snap.page ?? []
         return VStack(spacing: 0) {
-            TabView(selection: Binding(
-                get: { selection },
-                set: { i in
-                    guard i != model.snap.selection else { return }
-                    model.snap.selection = i
-                    model.emit(["t": "select", "v": i])
-                })) {
-                ForEach(titles.indices, id: \.self) { i in
-                    Group {
-                        if i == selection {
-                            FormPage(items: page, scale: scale, form: form).padding(.horizontal, 24).padding(.vertical, 16)
-                        } else {
-                            Color.clear
-                        }
-                    }
-                    .tabItem { Text(stripMnemonic(titles[i])) }
-                    .tag(i)
-                }
-            }
-            .frame(minWidth: SettingsForm.tabsWidth(titles))
-            // the tab bar sizes its tabs when it's made: made again once placed, and when the tabs change
-            .id("\(placed)|\(titles.joined(separator: "|"))")
-            .onAppear { DispatchQueue.main.async { placed = true } }
-            .padding(.horizontal, 20)
-            .padding(.top, 14)
+            // the panes are the window's toolbar (SettingsToolbar), as a Mac settings window's
+            FormPage(items: page, scale: scale, form: form)
+                .padding(.horizontal, 24)
+                .padding(.top, 20)
+                .padding(.bottom, 4)
+                .id(selection)
             HStack(spacing: 12) {
                 Spacer()
                 ForEach(snap.sheetButtons ?? [], id: \.self) { button in
@@ -484,12 +459,91 @@ struct SettingsForm: View {
     }
 }
 
+/// A settings window's panes as its toolbar (HIG, Settings: a toolbar of pane
+/// buttons that stays visible and shows the active one, the window titled with
+/// the pane's name): the tab control's tabs, or a pane list's items, each with
+/// the icon its name stands for (PaneIcons).
+final class SettingsToolbar: NSObject, NSToolbarDelegate {
+    let toolbar: NSToolbar
+    private weak var window: NSWindow?
+    private var titles: [String] = []
+    private let select: (Int) -> Void
+    private let windowTitle: String
+
+    init(window: NSWindow, select: @escaping (Int) -> Void) {
+        toolbar = NSToolbar(identifier: "org.winehq.w2s.settings.\(window.windowNumber)")
+        self.window = window
+        self.select = select
+        windowTitle = window.title
+        super.init()
+        toolbar.delegate = self
+        toolbar.displayMode = .iconAndLabel
+        toolbar.allowsUserCustomization = false
+        window.perform(NSSelectorFromString("w2sAttachToolbar:"), with: [
+            "toolbar": toolbar,
+            "style": NSNumber(value: NSWindow.ToolbarStyle.preference.rawValue),
+            "extraWidth": NSNumber(value: 0),
+        ] as NSDictionary)
+    }
+
+    var attached: Bool { window?.toolbar === toolbar }
+    var selected: Int? { toolbar.selectedItemIdentifier.flatMap { id in titles.indices.first { self.id($0) == id } } }
+
+    private func id(_ i: Int) -> NSToolbarItem.Identifier { .init("w2s.pane.\(i)") }
+
+    /// the toolbar's width for these panes' buttons (labels, the toolbar's margins)
+    static func width(_ titles: [String]) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        return titles.reduce(CGFloat(48)) { total, title in
+            total + max(64, ceil((stripMnemonic(title) as NSString).size(withAttributes: [.font: font]).width) + 26)
+        }
+    }
+
+    func update(titles new: [String], selection: Int) {
+        let names = new.map { stripMnemonic($0) }
+        if names != titles {
+            titles = names
+            while !toolbar.items.isEmpty { toolbar.removeItem(at: 0) }
+            for i in titles.indices { toolbar.insertItem(withItemIdentifier: id(i), at: i) }
+        }
+        guard titles.indices.contains(selection) else { return }
+        toolbar.selectedItemIdentifier = id(selection)
+        window?.title = titles[selection]
+    }
+
+    func detach() {
+        guard let window = window, window.toolbar === toolbar else { return }
+        window.perform(NSSelectorFromString("w2sDetachToolbar"))
+        window.title = windowTitle
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { titles.indices.map(id) }
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { titles.indices.map(id) }
+    func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { titles.indices.map(id) }
+
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier,
+                 willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        guard let i = titles.indices.first(where: { id($0) == identifier }) else { return nil }
+        let item = NSToolbarItem(itemIdentifier: identifier)
+        item.label = titles[i]
+        item.paletteLabel = titles[i]
+        item.image = NSImage(systemSymbolName: PaneIcons.symbol(for: titles[i]), accessibilityDescription: titles[i])
+        item.tag = i
+        item.target = self
+        item.action = #selector(chosen(_:))
+        return item
+    }
+
+    @objc private func chosen(_ item: NSToolbarItem) { select(item.tag) }
+}
+
 /// Puts the settings form over its sheet: the tab control's host view covers
 /// the sheet and stays above the other controls' (whose own views are hidden
 /// while the form shows them), and the sheet is sized to the form. A page the
 /// form can't show gets the plain tab strip back.
 final class SettingsFormController: WindowChrome {
     weak var host: ControlHost?
+    private(set) var panes: SettingsToolbar?
     private var hidden: Set<UInt64> = []
     private var outsets: [CGFloat] = [0, 0, 0, 0]     // top, left, bottom, right (points)
     private var askedSize: [Int] = []
@@ -520,6 +574,16 @@ final class SettingsFormController: WindowChrome {
         }
         hostView.perform(NSSelectorFromString("w2sSetFront:"), with: NSNumber(value: true))
 
+        // the panes in the window's toolbar
+        if panes == nil, let window = hostView.window {
+            panes = SettingsToolbar(window: window) { [weak host] i in
+                guard let host = host, i != host.model.snap.selection else { return }
+                host.model.snap.selection = i
+                host.model.emit(["t": "select", "v": i])
+            }
+        }
+        panes?.update(titles: snap.items ?? [], selection: snap.selection ?? 0)
+
         // the page's and the sheet's controls show in the form, not in their own views
         let shown = Set((snap.page ?? []).map { $0.h } + (snap.sheetButtons ?? []).map { $0.h })
         for h in hidden.subtracting(shown) {
@@ -536,7 +600,9 @@ final class SettingsFormController: WindowChrome {
         // box and the window's frame leave it a little short, hence the margin)
         let fitting = NSHostingView(rootView: SettingsForm(model: host.model, scale: s).content
             .controlSize(.regular)).fittingSize
-        let size = [Int(ceil(fitting.width / s)), Int(ceil((fitting.height + 12) / s))]
+        // wide enough for every pane's button too (on the screen), as a Mac settings window is
+        let panesWidth = min(SettingsToolbar.width(snap.items ?? []), (hostView.window?.screen?.visibleFrame.width ?? 1200) * 0.8)
+        let size = [Int(ceil(max(fitting.width, panesWidth) / s)), Int(ceil((fitting.height + 12) / s))]
         if size != askedSize, abs(Double(size[0]) - sheet[0]) > 2 || abs(Double(size[1]) - sheet[1]) > 2 {
             askedSize = size
             host.model.emit(["t": "formSize", "a": size])
@@ -544,6 +610,8 @@ final class SettingsFormController: WindowChrome {
     }
 
     private func leave() {
+        panes?.detach()
+        panes = nil
         for h in hidden {
             W2S.control(h)?.hosting?.isHidden = false
             W2S.control(h)?.model.shownInForm = false

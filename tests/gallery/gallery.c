@@ -3203,6 +3203,11 @@ static int selftest(void)
         GetClientRect( sheet, &client );
         check( pIsTranslated( tab ) && query_has( tab, "\"mode\":\"form\"" ) && query_has( tab, "\"formFront\":true" ),
                "a property sheet is a settings form: the tab control's view covers the sheet, above the other controls'" );
+        check( query_has( tab, "\"paneToolbar\":true" ) && query_has( tab, "\"paneSelected\":0" ) &&
+               query_has( tab, "\"paneStyle\":2" ) && query_has( tab, "\"windowTitle\":\"General\"" ),
+               "its tabs are the window's toolbar of panes (HIG settings window: the active one shown, the title its name)" );
+        check( query_has( tab, "\"paneIcons\":[\"gearshape\",\"circle.lefthalf.filled\",\"menubar.dock.rectangle\",\"display\",\"speaker.wave.2\"" ),
+               "each pane has the icon its name stands for (General: a gear, Appearance, Desktop & Dock, Displays, Sound)" );
         {
             char *q = pQuery( tab ), *p = q ? strstr( q, "\"formCover\":[" ) : NULL;
             cover_w = p ? atoi( p + strlen( "\"formCover\":[" ) ) : -1;
@@ -3278,8 +3283,8 @@ static int selftest(void)
         check( query_has( tab, "\"mode\":\"form\"" ) && query_has( tab, "note: This is the Appearance page." ) &&
                query_has( ok, "\"formHidden\":true" ),
                "the next page is a form again" );
-        if (client.right < 600) printf( "      sheet client %ldx%ld\n", client.right, client.bottom );
-        check( client.right >= 600, "the sheet is wide enough for all its tabs (landscape)" );
+        check( query_has( tab, "\"paneSelected\":1" ) && query_has( tab, "\"windowTitle\":\"Appearance\"" ),
+               "the toolbar and the title follow the page the app shows" );
         (void)first;
         DestroyWindow( sheet );
         pump( 200 );

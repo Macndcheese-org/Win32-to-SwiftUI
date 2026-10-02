@@ -774,6 +774,14 @@ enum Debug {
                 // the settings form: what it covers, what it shows
                 out["formCover"] = [Int(hostView.frame.width), Int(hostView.frame.height)]
                 out["formFront"] = hostView.superview?.subviews.last === hostView
+                if let panes = (host.owned as? SettingsFormController)?.panes {
+                    out["paneToolbar"] = panes.attached
+                    out["panes"] = panes.toolbar.items.map { $0.label }
+                    out["paneIcons"] = panes.toolbar.items.map { PaneIcons.symbol(for: $0.label) }
+                    out["paneSelected"] = panes.selected ?? -1
+                    out["paneStyle"] = hostView.window?.toolbarStyle.rawValue ?? -1
+                    out["windowTitle"] = hostView.window?.title ?? ""
+                }
                 if let responder = hostView.window?.firstResponder {
                     out["formHasFocus"] = (responder as? NSView)?.isDescendant(of: hostView) ?? false
                     out["firstResponder"] = String(describing: type(of: responder))
