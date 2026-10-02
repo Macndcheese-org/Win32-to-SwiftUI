@@ -1225,7 +1225,26 @@ static void CALLBACK panel_cancel( HWND hwnd, UINT msg, UINT_PTR id, DWORD time 
     inject( NULL, "{\"t\":\"cancel\"}" );
 }
 
-static BOOL color_native_ok, font_native_ok, print_native_ok;
+static BOOL color_native_ok, font_native_ok, print_native_ok, filters_native_ok;
+
+/* the open panel's file types: their names without the patterns, as a Mac
+ * format menu has them, and a long one cut short instead of widening the panel */
+static void CALLBACK filters_panel( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    static const char want[] = "\"filterTitles\":[\"All types\",\"Normal text file\","
+                               "\"Hypertext Markup Language file\",\"*.dat\",\"Same name\",\"Same name\",\"A format";
+    char *q = pQuery( NULL ), *titles;
+
+    KillTimer( hwnd, id );
+    titles = q ? strstr( q, "\"filterTitles\"" ) : NULL;
+    printf( "      file types: %.300s\n", titles ? titles : q ? q : "(null)" );
+    filters_native_ok = titles && !strncmp( titles, want, strlen( want ) ) &&
+        query_int( NULL, "filterWidth" ) > 0 && query_int( NULL, "filterWidth" ) <= 400;
+    printf( "      file type menu %d wide, its box %d, the panel %d\n", query_int( NULL, "filterWidth" ),
+            query_int( NULL, "accessoryWidth" ), query_int( NULL, "panelWidth" ) );
+    if (q) pFree( q );
+    inject( NULL, "{\"t\":\"cancel\"}" );
+}
 
 static void CALLBACK color_panel_ok( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
 {
@@ -3163,6 +3182,25 @@ static int selftest(void)
         check( td_radio == 2002 && td_verify == 1 && td_vetoed == 1 && td_clicks == 2,
                "native radio, check box and buttons -> TDN_* (a refused button keeps it open)" );
         check( button == 1001 && radio == 2002 && verified, "the task dialog returns the button, radio and check box" );
+    }
+
+    {
+        OPENFILENAMEW types = { sizeof(types) };
+        WCHAR name[MAX_PATH] = L"";
+
+        types.hwndOwner = main_window;
+        types.lpstrFilter = L"All types (*.*)\0*.*\0Normal text file (*.txt)\0*.txt\0"
+                            L"Hypertext Markup Language file (*.html;*.htm;*.shtml;*.shtm;*.xhtml;*.xht;*.hta)\0"
+                            L"*.html;*.htm;*.shtml;*.shtm;*.xhtml;*.xht;*.hta\0*.dat\0*.dat\0"
+                            L"Same name (*.a)\0*.a\0Same name (*.b)\0*.b\0"
+                            L"A format whose name goes on and on and on and on and on and on and on and on\0*.long\0\0";
+        types.lpstrFile = name;
+        types.nMaxFile = MAX_PATH;
+        types.Flags = OFN_EXPLORER;
+        SetTimer( main_window, 33, 1200, filters_panel );
+        GetOpenFileNameW( &types );
+        check( filters_native_ok, "the open panel's file types: names without their patterns (Notepad++'s), "
+               "the same name twice stays two types, a long one doesn't widen the panel" );
     }
 
     /* open panel: choose a Unix path, get a drive path back */

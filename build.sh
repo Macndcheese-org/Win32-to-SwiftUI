@@ -69,11 +69,15 @@ if (( I386 )); then
 fi
 
 echo "=== install into $DEST"
+# a new file renamed into place, never written over: a wine app still running
+# has the old one loaded, and writing into it makes every later load fail
+# ("rosetta error: Attachment of code signature supplement failed")
+put() { cp "$1" "$2.new" && mv -f "$2.new" "$2"; }
 mkdir -p "$DEST/dlls/win32swiftui/x86_64-windows"
-cp $OUT/x86_64-windows/win32swiftui.dll "$DEST/dlls/win32swiftui/x86_64-windows/"
+put $OUT/x86_64-windows/win32swiftui.dll "$DEST/dlls/win32swiftui/x86_64-windows/win32swiftui.dll"
 if (( I386 )); then
   mkdir -p "$DEST/dlls/win32swiftui/i386-windows"
-  cp $OUT/i386-windows/win32swiftui.dll "$DEST/dlls/win32swiftui/i386-windows/"
+  put $OUT/i386-windows/win32swiftui.dll "$DEST/dlls/win32swiftui/i386-windows/win32swiftui.dll"
 fi
-cp $OUT/win32swiftui.so "$DEST/dlls/win32swiftui/"
+put $OUT/win32swiftui.so "$DEST/dlls/win32swiftui/win32swiftui.so"
 ls -la "$DEST/dlls/win32swiftui" "$DEST/dlls/win32swiftui"/*-windows

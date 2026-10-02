@@ -332,6 +332,18 @@ enum Requests {
         @objc func changed(_ sender: NSPopUpButton) { apply(sender.indexOfSelectedItem) }
     }
 
+    /// A Win32 filter's name without the patterns it ends with ("Text files
+    /// (*.txt;*.log)" -> "Text files"), as a Mac format menu names formats;
+    /// a name that is only patterns stays as it is.
+    static func formatName(_ name: String) -> String {
+        guard name.hasSuffix(")"), let open = name.range(of: " (", options: .backwards) else { return name }
+        let inside = name[open.upperBound..<name.index(before: name.endIndex)]
+        let patterns = inside.split(whereSeparator: { $0 == ";" || $0 == "," || $0 == " " })
+        guard !patterns.isEmpty, patterns.allSatisfy({ $0.contains("*") || $0.contains("?") }) else { return name }
+        let base = name[..<open.lowerBound].trimmingCharacters(in: .whitespaces)
+        return base.isEmpty ? name : base
+    }
+
     static func contentTypes(_ filter: [String: Any]?) -> [UTType] {
         let exts = filter?["exts"] as? [String] ?? []
         return exts.compactMap { UTType(filenameExtension: $0) }
@@ -404,15 +416,32 @@ enum Requests {
             if save { panel.allowsOtherFileTypes = types.isEmpty || !(params["strict"] as? Bool ?? false) }
         }
         var target: FilterTarget?
+        var popupTitles: [String] = []
+        weak var filterPopup: NSPopUpButton?
         if filters.count > 1 {
-            // several filters: a pop-up like TextEdit's file-format menu
+            // several filters: a pop-up like TextEdit's file-format menu, with the
+            // formats' names; their patterns are the panel's filter already (the
+            // whole name is the item's tooltip). Items one by one: two filters may
+            // have the same name, which addItems(withTitles:) would merge.
             let popup = NSPopUpButton(frame: .zero, pullsDown: false)
-            popup.addItems(withTitles: filters.map { $0["name"] as? String ?? "" })
+            for filter in filters {
+                let name = filter["name"] as? String ?? ""
+                let item = NSMenuItem(title: formatName(name), action: nil, keyEquivalent: "")
+                if item.title != name { item.toolTip = name }
+                popup.menu?.addItem(item)
+            }
             popup.selectItem(at: filterIndex - 1)
             target = FilterTarget { applyFilter($0) }
             popup.target = target
             popup.action = #selector(FilterTarget.changed(_:))
             popup.sizeToFit()
+            // a long name is cut short rather than widening the panel (AppKit
+            // remembers an open panel's size for the app: wine's, every program's)
+            (popup.cell as? NSPopUpButtonCell)?.lineBreakMode = .byTruncatingTail
+            popup.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            popup.widthAnchor.constraint(lessThanOrEqualToConstant: 400).isActive = true
+            popupTitles = popup.itemTitles
+            filterPopup = popup
             let box = NSStackView(views: [popup])
             box.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
             panel.accessoryView = box
@@ -457,6 +486,8 @@ enum Requests {
              "folders": (panel as? NSOpenPanel)?.canChooseDirectories ?? false,
              "multi": (panel as? NSOpenPanel)?.allowsMultipleSelection ?? false,
              "okEnabled": delegate.okEnabled, "sheet": panel.sheetParent != nil,
+             "filterTitles": popupTitles, "filterWidth": Int(filterPopup?.frame.width ?? 0),
+             "accessoryWidth": Int(panel.accessoryView?.frame.width ?? 0), "panelWidth": Int(panel.frame.width),
              "hidesOnDeactivate": panel.hidesOnDeactivate,
              "policy": ["regular", "accessory", "prohibited"][NSApp.activationPolicy().rawValue],
              "overOwner": Detached.ownerFrame(params).map { $0.contains(NSPoint(x: panel.frame.midX, y: panel.frame.midY)) } ?? false]
