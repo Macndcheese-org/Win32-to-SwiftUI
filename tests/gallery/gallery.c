@@ -1660,6 +1660,175 @@ static void selftest_menu_order(void)
     pump( 200 );
 }
 
+/* Notepad++'s Find/Replace dialog: buttons, then a tab control made after them,
+ * their sibling under them across the dialog; translucent (layered) while it isn't
+ * the active window */
+static int replace_clicks[3];
+
+static INT_PTR CALLBACK replace_dlgproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    if (msg == WM_COMMAND && HIWORD( wparam ) == BN_CLICKED && LOWORD( wparam ) >= 1 && LOWORD( wparam ) <= 2)
+        replace_clicks[LOWORD( wparam )]++;
+    return FALSE;
+}
+
+static void selftest_replace_dialog(void)
+{
+    static const WCHAR *tabs[] = { L"Find", L"Replace", L"Find in Files", L"Find in Projects", L"Mark" };
+    HWND dlg, next, cancel, tab;
+    TCITEMW item = { TCIF_TEXT };
+    unsigned int i;
+
+    dlg = CreateWindowExW( WS_EX_CONTROLPARENT | WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE, WC_DIALOG, L"Replace",
+                           WS_POPUP | WS_CLIPSIBLINGS | WS_CAPTION | WS_SYSMENU | DS_SETFONT | DS_3DLOOK | DS_FIXEDSYS,
+                           300, 250, 625, 357, main_window, NULL, GetModuleHandleW( NULL ), NULL );
+    SetWindowLongPtrW( dlg, DWLP_DLGPROC, (LONG_PTR)replace_dlgproc );
+    next = CreateWindowExW( WS_EX_NOPARENTNOTIFY, L"Button", L"Find Next", WS_CHILD | WS_VISIBLE | WS_TABSTOP |
+                            BS_DEFPUSHBUTTON, 447, 33, 137, 23, dlg, (HMENU)1, GetModuleHandleW( NULL ), NULL );
+    CreateWindowExW( WS_EX_NOPARENTNOTIFY, L"Button", L"&Wrap around", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+                     18, 185, 54, 15, dlg, (HMENU)3, GetModuleHandleW( NULL ), NULL );
+    cancel = CreateWindowExW( WS_EX_NOPARENTNOTIFY, L"Button", L"Cancel", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                              447, 160, 137, 23, dlg, (HMENU)2, GetModuleHandleW( NULL ), NULL );
+    tab = CreateWindowExW( 0, WC_TABCONTROLW, L"Tab", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | TCS_FOCUSNEVER |
+                           TCS_TOOLTIPS, 0, 0, 617, 320, dlg, (HMENU)4, GetModuleHandleW( NULL ), NULL );
+    for (i = 0; i < ARRAYSIZE(tabs); i++)
+    {
+        item.pszText = (WCHAR *)tabs[i];
+        SendMessageW( tab, TCM_INSERTITEMW, i, (LPARAM)&item );
+    }
+    SendMessageW( tab, TCM_SETCURSEL, 1, 0 );
+    ShowWindow( dlg, SW_SHOW );
+    pump( 800 );
+    inject( next, "{\"t\":\"realClick\"}" );
+    pump( 400 );
+    inject( cancel, "{\"t\":\"realClick\"}" );
+    pump( 400 );
+    check( replace_clicks[1] == 1 && replace_clicks[2] == 1,
+           "Notepad++'s Replace dialog: its buttons take clicks over the tab control under them" );
+    /* translucent while another window is active */
+    SetWindowLongW( dlg, GWL_EXSTYLE, GetWindowLongW( dlg, GWL_EXSTYLE ) | WS_EX_LAYERED );
+    SetLayeredWindowAttributes( dlg, 0, 150, LWA_ALPHA );
+    pump( 400 );
+    inject( next, "{\"t\":\"realClick\"}" );
+    pump( 400 );
+    check( replace_clicks[1] == 2 && query_has( next, "\"inWindow\":true" ),
+           "translucent (layered), its buttons still take clicks" );
+    check( query_has( next, "\"titleBar\":true" ),
+           "translucent (layered), it keeps the Mac title bar (the traffic lights)" );
+    DestroyWindow( dlg );
+    pump( 200 );
+}
+
+/* a settings dialog that makes all its pages up front (Notepad++'s Preferences:
+ * 25 child dialogs, hundreds of controls): how long it takes to come up */
+static void selftest_many_controls(void)
+{
+    HWND dlg, page;
+    LARGE_INTEGER f, t0, t1, t2;
+    int p, i;
+
+    QueryPerformanceFrequency( &f );
+    QueryPerformanceCounter( &t0 );
+    dlg = CreateWindowExW( WS_EX_DLGMODALFRAME, L"W2SScrollHost", L"Preferences", WS_POPUP | WS_CAPTION | WS_SYSMENU,
+                           200, 200, 700, 480, NULL, NULL, GetModuleHandleW( NULL ), NULL );
+    for (p = 0; p < 25; p++)
+    {
+        page = CreateWindowExW( WS_EX_CONTROLPARENT, L"W2SScrollHost", NULL, WS_CHILD | (p ? 0 : WS_VISIBLE),
+                                200, 10, 480, 420, dlg, NULL, GetModuleHandleW( NULL ), NULL );
+        for (i = 0; i < 16; i++)
+        {
+            WCHAR text[32];
+            swprintf( text, ARRAYSIZE(text), L"Option %d.%d", p, i );
+            CreateWindowExW( 0, L"Button", text, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 10 + (i % 2) * 230,
+                             10 + (i / 2) * 26, 220, 20, page, NULL, GetModuleHandleW( NULL ), NULL );
+        }
+    }
+    QueryPerformanceCounter( &t1 );
+    ShowWindow( dlg, SW_SHOW );
+    pump( 50 );
+    QueryPerformanceCounter( &t2 );
+    printf( "      25 pages of 16 check boxes: made in %d ms, shown in %d ms\n",
+            (int)((t1.QuadPart - t0.QuadPart) * 1000 / f.QuadPart), (int)((t2.QuadPart - t1.QuadPart) * 1000 / f.QuadPart) );
+    DestroyWindow( dlg );
+    pump( 200 );
+}
+
+/* a ⌘ shortcut in an app with many menus (Notepad++'s): the command, at once */
+static int menu_commands[10000], menu_from_key, menu_initpopups;
+static LARGE_INTEGER menu_command_time;
+
+static LRESULT CALLBACK menuhost_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    if (msg == WM_COMMAND && LOWORD( wparam ) < ARRAYSIZE(menu_commands))
+    {
+        menu_commands[LOWORD( wparam )]++;
+        if (HIWORD( wparam ) == 1) menu_from_key++;
+        QueryPerformanceCounter( &menu_command_time );
+    }
+    /* Find is enabled when its menu opens (Notepad++ updates its items there) */
+    if (msg == WM_INITMENUPOPUP)
+    {
+        menu_initpopups++;
+        EnableMenuItem( (HMENU)wparam, 9199, MF_BYCOMMAND | MF_ENABLED );
+    }
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
+}
+
+static void selftest_menu_shortcut(void)
+{
+    WNDCLASSW wc = { 0 };
+    HMENU bar = CreateMenu();
+    WCHAR text[64];
+    HWND win;
+    int m, i;
+
+    for (m = 0; m < 10; m++)
+    {
+        HMENU menu = CreatePopupMenu(), sub = CreatePopupMenu();
+        for (i = 0; i < 20; i++)
+        {
+            swprintf( text, ARRAYSIZE(text), L"Command %d.%d", m, i );
+            AppendMenuW( sub, MF_STRING, 9300 + m * 50 + i, text );
+        }
+        for (i = 0; i < 20; i++)
+        {
+            swprintf( text, ARRAYSIZE(text), L"Item %d.%d", m, i );
+            AppendMenuW( menu, MF_STRING, 9200 + m * 10 + i % 10, text );
+        }
+        AppendMenuW( menu, MF_POPUP, (UINT_PTR)sub, L"More" );
+        if (m == 2) AppendMenuW( menu, MF_STRING | MF_GRAYED, 9199, L"&Find...\tCtrl+F" );
+        if (m == 3) AppendMenuW( menu, MF_STRING | MF_GRAYED, 9198, L"Go &to...\tCtrl+G" );
+        swprintf( text, ARRAYSIZE(text), L"Menu %d", m );
+        AppendMenuW( bar, MF_POPUP, (UINT_PTR)menu, text );
+    }
+    wc.lpfnWndProc = menuhost_proc;
+    wc.hInstance = GetModuleHandleW( NULL );
+    wc.lpszClassName = L"W2SMenuHost";
+    RegisterClassW( &wc );
+    win = CreateWindowExW( 0, L"W2SMenuHost", L"Shortcuts", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 240, 240, 400, 300,
+                           NULL, bar, GetModuleHandleW( NULL ), NULL );
+    pump( 600 );
+    {
+        LARGE_INTEGER f, t0;
+        QueryPerformanceFrequency( &f );
+        QueryPerformanceCounter( &t0 );
+        inject( win, "{\"t\":\"shortcut\",\"s\":\"f\"}" );
+        pump( 3000 );
+        printf( "      a shortcut took %d ms in AppKit, with %d menu refreshes; the app had the command after %d ms\n",
+                query_int( win, "shortcutMs" ), query_int( win, "updates" ),
+                menu_command_time.QuadPart ? (int)((menu_command_time.QuadPart - t0.QuadPart) * 1000 / f.QuadPart) : -1 );
+    }
+    check( menu_commands[9199] == 1 && menu_from_key == 1 && menu_initpopups == 1 && query_int( win, "shortcutMs" ) >= 0 &&
+           query_int( win, "shortcutMs" ) < 100,
+           "\u2318F in an app with many menus: at once, as TranslateAccelerator (its menu's WM_INITMENUPOPUP, "
+           "which enables it, then WM_COMMAND from a key)" );
+    inject( win, "{\"t\":\"shortcut\",\"s\":\"g\"}" );
+    pump( 1000 );
+    check( menu_commands[9198] == 0, "a grayed item's shortcut does nothing" );
+    DestroyWindow( win );
+    pump( 200 );
+}
+
 /* a group box right under a field, in a dialog still hidden (regedit's Edit DWORD):
  * no room for the title above it */
 static void selftest_groupbox_room(void)
@@ -2074,6 +2243,37 @@ static void selftest_frame_toolbar(void)
         SendMessageW( rebar, RB_GETBANDINFOW, 0, (LPARAM)&band );
         check( query_has( tb, "\"frameToolbar\":true" ) && (band.fStyle & RBBS_HIDDEN),
                "showing it again shows the frame's toolbar; the band stays out of the window" );
+        DestroyWindow( win );
+        pump( 200 );
+    }
+
+    /* Notepad++'s: a rebar the app places itself (CCS_NOPARENTALIGN) across the top */
+    {
+        REBARBANDINFOW band = { sizeof(band) };
+        HWND rebar;
+        RECT rc;
+
+        win = CreateWindowExW( 0, L"W2SToolbarWindow", L"Notepad", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                               170, 170, 480, 300, NULL, NULL, GetModuleHandleW( NULL ), NULL );
+        GetClientRect( win, &rc );
+        rebar = CreateWindowExW( WS_EX_TOOLWINDOW, REBARCLASSNAMEW, NULL, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS |
+                                 WS_CLIPCHILDREN | RBS_VARHEIGHT | CCS_NODIVIDER | CCS_NOPARENTALIGN | CCS_TOP,
+                                 0, 0, rc.right, 25, win, (HMENU)3, GetModuleHandleW( NULL ), NULL );
+        tb = CreateWindowExW( WS_EX_PALETTEWINDOW, TOOLBARCLASSNAMEW, NULL, WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN |
+                              WS_CLIPSIBLINGS | TBSTYLE_TOOLTIPS | TBSTYLE_FLAT | CCS_TOP | CCS_NOPARENTALIGN |
+                              CCS_NORESIZE | CCS_NODIVIDER, 0, 0, 0, 0, rebar, (HMENU)4, GetModuleHandleW( NULL ), NULL );
+        SendMessageW( tb, TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0 );
+        SendMessageW( tb, TB_ADDBITMAP, 0, (LPARAM)&bitmap );
+        SendMessageW( tb, TB_ADDBUTTONSW, ARRAYSIZE(buttons), (LPARAM)buttons );
+        band.fMask = RBBIM_CHILD | RBBIM_CHILDSIZE | RBBIM_STYLE | RBBIM_ID;
+        band.fStyle = RBBS_NOGRIPPER;
+        band.hwndChild = tb;
+        band.cyMinChild = 25;
+        band.wID = 1;
+        SendMessageW( rebar, RB_INSERTBANDW, -1, (LPARAM)&band );
+        pump( 800 );
+        check( pIsTranslated( tb ) && query_has( tb, "\"frameToolbar\":true" ),
+               "a rebar the app places across the top itself (Notepad++'s) puts its toolbar in the frame too" );
         DestroyWindow( win );
         pump( 200 );
     }
@@ -2787,6 +2987,13 @@ static int selftest(void)
     unsigned int i;
     int r;
 
+    /* W2S_ONLY=many: the timing alone, with the native UI or without (tests/run.sh --off) */
+    if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "many" ))
+    {
+        pump( 1500 );
+        selftest_many_controls();
+        return 0;
+    }
     check( w2s != NULL, "win32swiftui.dll is loaded (WINE_MNC_NATIVE_UI on)" );
     if (!w2s) return failures;
     pQuery = (void *)GetProcAddress( w2s, "W2SDebugQuery" );
@@ -2794,7 +3001,25 @@ static int selftest(void)
     pFree = (void *)GetProcAddress( w2s, "W2SDebugFree" );
     pIsTranslated = (void *)GetProcAddress( w2s, "W2SIsTranslated" );
     pump( 1500 );
-    /* W2S_ONLY=sidebar: just that test, while working on it */
+    /* W2S_ONLY=sidebar|shortcut: just that test, while working on it */
+    if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "replace" ))
+    {
+        selftest_replace_dialog();
+        printf( "%d passed, %d failed\n", passes, failures );
+        return failures;
+    }
+    if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "toolbar" ))
+    {
+        selftest_frame_toolbar();
+        printf( "%d passed, %d failed\n", passes, failures );
+        return failures;
+    }
+    if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "shortcut" ))
+    {
+        selftest_menu_shortcut();
+        printf( "%d passed, %d failed\n", passes, failures );
+        return failures;
+    }
     if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "sidebar" ))
     {
         selftest_frame_sidebar();
@@ -3265,6 +3490,8 @@ static int selftest(void)
     selftest_superclass();
     selftest_groupbox_room();
     selftest_menu_order();
+    selftest_menu_shortcut();
+    selftest_replace_dialog();
     selftest_frame_sidebar();
     selftest_about();
     selftest_taskbar();

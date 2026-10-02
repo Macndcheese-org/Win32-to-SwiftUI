@@ -11,6 +11,11 @@ final class W2SMenu: NSMenu {
     var textCommands = false        // the app's Edit menu: the Mac's text commands at its top
 }
 
+/// An app's menu item: whether the app has it enabled (MF_GRAYED, MF_DISABLED)
+final class W2SMenuItem: NSMenuItem {
+    var appEnabled = true
+}
+
 /// macOS's own words for the standard menus and commands, in every language it
 /// has (AppKit's tables): to know an app's Edit and Help menus whatever its
 /// language, and to title the commands the Mac adds as the Mac does.
@@ -110,11 +115,12 @@ enum MenuBuild {
                 continue
             }
             let parts = split(spec["text"] as? String ?? "")
-            let item = NSMenuItem(title: parts.title, action: action, keyEquivalent: parts.key)
+            let item = W2SMenuItem(title: parts.title, action: action, keyEquivalent: parts.key)
             item.keyEquivalentModifierMask = parts.mods
             item.target = target
             item.tag = spec["id"] as? Int ?? 0
-            item.isEnabled = spec["disabled"] as? Bool != true
+            item.appEnabled = spec["disabled"] as? Bool != true
+            item.isEnabled = item.appEnabled
             item.state = spec["checked"] as? Bool == true ? .on : .off
             if let sub = spec["sub"] as? [String: Any] {
                 let submenu = W2SMenu(title: parts.title)
@@ -212,7 +218,7 @@ enum MenuBuild {
 }
 
 /// One Win32 window's menu, shown in the Mac menu bar while that window is active.
-final class MenuBar: NSObject, NSMenuDelegate {
+final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
     unowned let host: ControlHost
     private var spec: [String: Any]               // guarded by W2S.lock
     private var waiting = false                   // guarded by W2S.lock
@@ -223,6 +229,8 @@ final class MenuBar: NSObject, NSMenuDelegate {
     private var previousHelp: NSMenu?
     private var shown = false
     private var tracking = 0
+    private var updates = 0                       // tests: menuNeedsUpdate calls
+    private var shortcutMs = -1                   // tests: how long the last injected shortcut took
 
     static var current: MenuBar?                  // main thread
 
@@ -309,6 +317,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
             let subItems = sub["items"] as? [[String: Any]] ?? []
             submenu.textCommands = n == editIndex && !MenuBuild.hasCopyPaste(subItems)
             MenuBuild.fill(submenu, items: subItems, target: self, action: #selector(choose(_:)), delegate: self)
+            MenuBar.validated(submenu)
             if submenu.textCommands { MenuBuild.addTextCommands(submenu, taken: taken) }
             top.submenu = submenu
             top.isEnabled = spec["disabled"] as? Bool != true
@@ -334,8 +343,24 @@ final class MenuBar: NSObject, NSMenuDelegate {
         }
     }
 
+    /// The menu bar's menus ask (autoenablesItems): the Mac's text commands their
+    /// first responder, the app's items this
+    static func validated(_ menu: NSMenu) {
+        menu.autoenablesItems = true
+        for item in menu.items { if let sub = item.submenu { validated(sub) } }
+    }
+
+    /// An item shown: as the app has it. A shortcut: on, and the app checks the item
+    /// first (menuKey), as TranslateAccelerator does: the state here may be older
+    /// than the app's (it changes items without a menu opening).
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if NSApp.currentEvent?.type == .keyDown && tracking == 0 { return true }
+        return (item as? W2SMenuItem)?.appEnabled ?? item.isEnabled
+    }
+
     @objc func choose(_ item: NSMenuItem) {
-        host.emit(["t": "menu", "v": item.tag])
+        // a shortcut: the app checks the item first (menuKey); a click: it was up to date
+        host.emit(["t": NSApp.currentEvent?.type == .keyDown && tracking == 0 ? "menuKey" : "menu", "v": item.tag])
     }
 
     /// tests/gallery: what is in the menu bar, and the state of an item
@@ -345,7 +370,8 @@ final class MenuBar: NSObject, NSMenuDelegate {
                                   "bar": (NSApp.mainMenu?.items ?? []).filter { !$0.isHidden }.map { $0.title },
                                   "helpMenu": NSApp.helpMenu.map { h in items.contains { $0.submenu === h } } ?? false,
                                   "helpLast": helpItem != nil && NSApp.mainMenu?.items.last(where: { !$0.isHidden }) === helpItem,
-                                  "textCommands": items.contains { ($0.submenu as? W2SMenu)?.textCommands == true }]
+                                  "textCommands": items.contains { ($0.submenu as? W2SMenu)?.textCommands == true },
+                                  "updates": updates, "shortcutMs": shortcutMs]
         var checked: [Int] = [], keys: [String] = []
         func walk(_ menu: NSMenu?) {
             for item in menu?.items ?? [] {
@@ -365,6 +391,27 @@ final class MenuBar: NSObject, NSMenuDelegate {
     func debugInject(_ event: [String: Any]) {
         switch event["t"] as? String {
         case "menu": host.emit(["t": "menu", "v": event["v"] as? Int ?? 0])
+        case "shortcut":
+            // ⌘ and a key, matched against the menu bar as AppKit does for a key press
+            let key = event["s"] as? String ?? ""
+            DispatchQueue.main.async {
+                if !self.shown { self.rebuild() }
+                guard let window = NSApp.windows.first(where: { $0.isVisible }),
+                      let press = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
+                                                   timestamp: ProcessInfo.processInfo.systemUptime,
+                                                   windowNumber: window.windowNumber, context: nil, characters: key,
+                                                   charactersIgnoringModifiers: key, isARepeat: false, keyCode: 0)
+                else { return }
+                self.updates = 0
+                let start = Date()
+                // the press as the current event, as AppKit matches a shortcut (it does so
+                // only for the active app: the test runs while another one may be)
+                NSApp.postEvent(press, atStart: true)
+                if let e = NSApp.nextEvent(matching: .keyDown, until: .distantPast, inMode: .default, dequeue: true) {
+                    _ = NSApp.mainMenu?.performKeyEquivalent(with: e)
+                }
+                self.shortcutMs = Int(Date().timeIntervalSince(start) * 1000)
+            }
         case "open":
             let i = event["v"] as? Int ?? 0
             if !shown { rebuild() }             // the test may run while another app is in front
@@ -379,8 +426,13 @@ final class MenuBar: NSObject, NSMenuDelegate {
 
     /// Before a submenu opens: the app gets WM_INITMENU(POPUP) and sends it again,
     /// as Windows apps check and enable items there. Wait for it briefly.
+    /// A shortcut makes AppKit update every menu before it looks for the item: no
+    /// app round trip each (a hundred menus in Notepad++, some of which the app
+    /// doesn't answer at once); the app checks the item it gets (validateMenuItem).
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard let menu = menu as? W2SMenu, menu.win32Menu != 0 else { return }
+        if NSApp.currentEvent?.type == .keyDown && tracking == 0 { return }
+        updates += 1
         W2S.lock.lock()
         waiting = true
         W2S.lock.unlock()
@@ -393,6 +445,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         if let specs = MenuBuild.find(currentItems(), menu: menu.win32Menu) {
             MenuBuild.fill(menu, items: specs, target: self, action: #selector(choose(_:)), delegate: self)
             if menu.textCommands { MenuBuild.addTextCommands(menu, taken: MenuBuild.keys(currentItems())) }
+            MenuBar.validated(menu)
         }
     }
 }

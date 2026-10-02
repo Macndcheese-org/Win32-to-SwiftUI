@@ -216,6 +216,49 @@ static void sync_menu( struct w2s_frame *frame, BOOL in_frame_change )
     send_menu( frame, FALSE );
 }
 
+/* the popup that holds command id, and its place in the menu above it */
+static HMENU popup_of( HMENU menu, UINT id, int *pos )
+{
+    int i, j, count = GetMenuItemCount( menu );
+    HMENU sub, found;
+
+    for (i = 0; i < count; i++)
+    {
+        if (!(sub = GetSubMenu( menu, i ))) continue;
+        for (j = GetMenuItemCount( sub ) - 1; j >= 0; j--)
+            if (!GetSubMenu( sub, j ) && GetMenuItemID( sub, j ) == id) break;
+        if (j >= 0)
+        {
+            *pos = i;
+            return sub;
+        }
+        if ((found = popup_of( sub, id, pos ))) return found;
+    }
+    return NULL;
+}
+
+/* a shortcut the menu bar matched, as TranslateAccelerator takes one: the app is
+ * told the item's menus open (it may enable or check it there), and a disabled
+ * or grayed item does nothing */
+static void menu_shortcut( struct w2s_frame *frame, UINT id )
+{
+    UINT state = ~0u;
+    HMENU popup;
+    int pos = 0;
+
+    if (!IsWindowEnabled( frame->hwnd )) return;
+    if (frame->menu && IsMenu( frame->menu ))
+    {
+        popup = popup_of( frame->menu, id, &pos );
+        SendMessageW( frame->hwnd, WM_INITMENU, (WPARAM)frame->menu, 0 );
+        if (popup) SendMessageW( frame->hwnd, WM_INITMENUPOPUP, (WPARAM)popup, MAKELPARAM( pos, FALSE ) );
+        state = GetMenuState( frame->menu, id, MF_BYCOMMAND );
+    }
+    if (state == ~0u || !(state & (MF_DISABLED | MF_GRAYED)))
+        PostMessageW( frame->hwnd, WM_COMMAND, MAKEWPARAM( id, 1 ), 0 );
+    send_menu( frame, FALSE );      /* the states the app set there */
+}
+
 static void apply_menu_events( struct w2s_frame *frame )
 {
     struct w2s_pop_events_params params;
@@ -246,6 +289,7 @@ static void apply_menu_events( struct w2s_frame *frame )
             /* as if chosen in wine's menu bar */
             PostMessageW( frame->hwnd, WM_COMMAND, MAKEWPARAM( (UINT)ev->value, 0 ), 0 );
         }
+        else if (!strcmp( ev->type, "menuKey" ) && ev->has_value) menu_shortcut( frame, (UINT)ev->value );
         else if (!strcmp( ev->type, "menuOpen" ) && ev->array_count >= 2)
         {
             /* a submenu is about to open: let the app update it, then send it

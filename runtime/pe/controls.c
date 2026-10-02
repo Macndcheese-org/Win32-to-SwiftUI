@@ -2600,7 +2600,7 @@ static BOOL toolbar_frame( struct w2s_control *ctl )
     HWND parent = GetParent( ctl->hwnd ), owner;
     DWORD style = GetWindowLongW( ctl->hwnd, GWL_STYLE );
     WCHAR cls[16] = { 0 };
-    RECT rc;
+    RECT rc, client;
 
     GetClassNameW( parent, cls, ARRAYSIZE(cls) );
     if (!wcscmp( cls, REBARCLASSNAMEW ))
@@ -2611,13 +2611,16 @@ static BOOL toolbar_frame( struct w2s_control *ctl )
 
         if (!top || (GetWindowLongW( top, GWL_STYLE ) & WS_CHILD)) return FALSE;
         GetClassNameW( top, cls, ARRAYSIZE(cls) );
-        if (!wcscmp( cls, L"#32770" ) || (GetWindowLongW( rebar, GWL_STYLE ) & (CCS_VERT | CCS_NOPARENTALIGN))) return FALSE;
+        if (!wcscmp( cls, L"#32770" ) || (GetWindowLongW( rebar, GWL_STYLE ) & CCS_VERT)) return FALSE;
         if (GetWindow( ctl->hwnd, GW_CHILD ) || SendMessageW( ctl->hwnd, TB_BUTTONCOUNT, 0, 0 ) <= 0) return FALSE;
         if (rebar_band_of( rebar, ctl->hwnd ) != 0) return FALSE;
         if ((owner = GetPropW( top, frame_toolbar_prop )) && owner != ctl->hwnd && IsWindow( owner )) return FALSE;
+        /* along the top, across the window: the app may place it itself (CCS_NOPARENTALIGN,
+         * Notepad++'s) */
         GetWindowRect( rebar, &rc );
         MapWindowPoints( NULL, top, (POINT *)&rc, 2 );
-        if (rc.top > 4) return FALSE;
+        GetClientRect( top, &client );
+        if (rc.top > 4 || (rc.right - rc.left) * 4 < client.right * 3) return FALSE;
         SendMessageW( rebar, RB_GETBANDINFOW, 0, (LPARAM)&info );
         return !(info.fStyle & RBBS_HIDDEN);
     }

@@ -229,8 +229,9 @@ final class PassThroughHostingView<Content: View>: NSHostingView<Content> {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard let hit = super.hitTest(point) else { return nil }
-        // an AppKit view of its own (a text field) is always the control
-        guard hit === self, let native = native else { return hit }
+        guard let native = native else { return hit }
+        // AppKit's views inside too: a tab control's NSTabView covers its page,
+        // where the app's controls lie (Notepad++'s Find dialog has its buttons there)
         return native(convert(point, from: superview), bounds.size) ? hit : nil
     }
 

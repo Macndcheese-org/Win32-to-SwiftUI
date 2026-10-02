@@ -9,6 +9,7 @@
 # WINE_SRC and WINE_BUILD point at the wine source and build trees (for the
 # map-table check and libwinecrt0.a).
 set -e
+setopt pipefail     # a failed step piped into a filter fails the build
 cd "${0:A:h}"
 WINE_SRC=${WINE_SRC:?set WINE_SRC to the MNC wine source tree (branch w2s)}
 WINE_BUILD=${WINE_BUILD:?set WINE_BUILD to the x86_64 build directory of that tree}

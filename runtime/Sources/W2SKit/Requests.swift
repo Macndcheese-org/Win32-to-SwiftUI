@@ -808,6 +808,7 @@ enum Debug {
                 // (hitTest takes the point in the superview's coordinates, as frame is)
                 out["passThrough"] = hosting.hitTest(NSPoint(x: hosting.frame.midX, y: hosting.frame.midY)) == nil
                 out["appearance"] = hosting.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])?.rawValue ?? ""
+                out["titleBar"] = hosting.window?.styleMask.contains(.titled) ?? false
             }
             return W2S.json(out)
         case "inject":
