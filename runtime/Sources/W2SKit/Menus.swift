@@ -55,7 +55,17 @@ enum MenuWords {
         return key
     }
 
+    /// a title without its trailing dots or colon ("Préférences..." -> "preferences")
+    static func bare(_ s: String) -> String {
+        var out = folded(s)
+        while let last = out.last, "….:".contains(last) || last == " " { out.removeLast() }
+        return out
+    }
+
     static let edit = all("Edit", ["InputManager"])
+    /// an app's settings item, in every language AppKit has, and Windows' "Options"
+    static let settings: Set<String> = Set(all("Settings\u{2026}", ["MenuCommands"]).union(all("Preferences\u{2026}", ["MenuCommands"]))
+        .map { bare($0) }).union(["options", "preferences", "settings"])
     // "?" is a Help menu's title in many Windows apps
     static let help = all("Help", ["MenuCommands", "HelpManager"]).union(["?"])
 }
@@ -185,6 +195,33 @@ enum MenuBuild {
 
     static func title(_ spec: [String: Any]) -> String { MenuWords.folded(split(spec["text"] as? String ?? "").title) }
 
+    /// the app's Settings (Preferences, Options) item: a command, not a submenu
+    static func isSettings(_ spec: [String: Any]) -> Bool {
+        spec["sub"] == nil && (spec["id"] as? Int ?? 0) != 0 &&
+            MenuWords.settings.contains(MenuWords.bare(split(spec["text"] as? String ?? "").title))
+    }
+
+    /// the first item anywhere in the tree, in menu order
+    static func firstItem(_ items: [[String: Any]], _ test: ([String: Any]) -> Bool) -> [String: Any]? {
+        for spec in items {
+            if test(spec) { return spec }
+            if let sub = spec["sub"] as? [String: Any],
+               let found = firstItem(sub["items"] as? [[String: Any]] ?? [], test) { return found }
+        }
+        return nil
+    }
+
+    /// an item gone from a menu (moved to the application menu): no separator left
+    /// at an end or doubled
+    static func drop(tag: Int, from menu: NSMenu) {
+        for item in menu.items where item.tag == tag && item.submenu == nil { menu.removeItem(item) }
+        var previousSeparator = true
+        for item in menu.items {
+            if item.isSeparatorItem && previousSeparator { menu.removeItem(item) } else { previousSeparator = item.isSeparatorItem }
+        }
+        if menu.items.last?.isSeparatorItem == true { menu.removeItem(at: menu.items.count - 1) }
+    }
+
     static func isHelp(_ spec: [String: Any]) -> Bool {
         spec["sub"] != nil && (spec["right"] as? Bool == true || MenuWords.help.contains(title(spec)))
     }
@@ -226,6 +263,8 @@ final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
     private var items: [NSMenuItem] = []          // main thread: ours in NSApp.mainMenu
     private var hiddenEdit: [NSMenuItem] = []     // winemac's Edit menu while ours has one
     private var helpItem: NSMenuItem?             // the app's Help menu, last (after Window)
+    private var appMenuItems: [NSMenuItem] = []   // ours in the application menu: Settings…
+    private var settingsID = 0                    // the app's settings command, moved there
     private var previousHelp: NSMenu?
     private var shown = false
     private var tracking = 0
@@ -294,6 +333,28 @@ final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
         hiddenEdit = []
         if let help = helpItem, NSApp.helpMenu === help.submenu { NSApp.helpMenu = previousHelp }
         helpItem = nil
+        for item in appMenuItems { item.menu?.removeItem(item) }
+        appMenuItems = []
+        settingsID = 0
+    }
+
+    /// The app's Settings (Préférences..., Tools > Options...) is the application
+    /// menu's Settings…, ⌘, (HIG: the app menu), and leaves the app's own menu.
+    private func moveSettings(_ specs: [[String: Any]], taken: Set<String>) {
+        guard let spec = MenuBuild.firstItem(specs, MenuBuild.isSettings), let id = spec["id"] as? Int,
+              let appMenu = NSApp.mainMenu?.items.first?.submenu else { return }
+        let free = !taken.contains(MenuBuild.keyString(",", [.command]))
+        let item = W2SMenuItem(title: MenuWords.local("Settings\u{2026}", ["MenuCommands"]), action: #selector(choose(_:)),
+                               keyEquivalent: free ? "," : "")
+        item.keyEquivalentModifierMask = [.command]
+        item.target = self
+        item.tag = id
+        item.appEnabled = spec["disabled"] as? Bool != true
+        let separator = NSMenuItem.separator()
+        appMenu.insertItem(item, at: 0)
+        appMenu.insertItem(separator, at: 1)
+        appMenuItems = [item, separator]
+        settingsID = id
     }
 
     private func rebuild() {
@@ -305,6 +366,7 @@ final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
         let helpIndex = specs.lastIndex(where: MenuBuild.isHelp)
         let editIndex = specs.firstIndex(where: MenuBuild.isEdit)
         var index = min(1, main.items.count)          // after the application menu
+        moveSettings(specs, taken: taken)
         for (n, spec) in specs.enumerated() {
             guard let sub = spec["sub"] as? [String: Any] else { continue }
             let title = MenuBuild.split(spec["text"] as? String ?? "").title
@@ -317,6 +379,7 @@ final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
             let subItems = sub["items"] as? [[String: Any]] ?? []
             submenu.textCommands = n == editIndex && !MenuBuild.hasCopyPaste(subItems)
             MenuBuild.fill(submenu, items: subItems, target: self, action: #selector(choose(_:)), delegate: self)
+            if settingsID != 0 { MenuBar.dropEverywhere(tag: settingsID, in: submenu) }
             MenuBar.validated(submenu)
             if submenu.textCommands { MenuBuild.addTextCommands(submenu, taken: taken) }
             top.submenu = submenu
@@ -341,6 +404,11 @@ final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
                 }
             }
         }
+    }
+
+    static func dropEverywhere(tag: Int, in menu: NSMenu) {
+        MenuBuild.drop(tag: tag, from: menu)
+        for item in menu.items { if let sub = item.submenu { dropEverywhere(tag: tag, in: sub) } }
     }
 
     /// The menu bar's menus ask (autoenablesItems): the Mac's text commands their
@@ -371,7 +439,9 @@ final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
                                   "helpMenu": NSApp.helpMenu.map { h in items.contains { $0.submenu === h } } ?? false,
                                   "helpLast": helpItem != nil && NSApp.mainMenu?.items.last(where: { !$0.isHidden }) === helpItem,
                                   "textCommands": items.contains { ($0.submenu as? W2SMenu)?.textCommands == true },
-                                  "updates": updates, "shortcutMs": shortcutMs]
+                                  "updates": updates, "shortcutMs": shortcutMs,
+                                  "appMenu": (NSApp.mainMenu?.items.first?.submenu?.items ?? []).map {
+                                      $0.isSeparatorItem ? "-" : "\($0.tag):\($0.keyEquivalent)" }]
         var checked: [Int] = [], keys: [String] = []
         func walk(_ menu: NSMenu?) {
             for item in menu?.items ?? [] {
@@ -383,6 +453,10 @@ final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
         for item in items { walk(item.submenu) }
         out["checked"] = checked
         out["keys"] = keys
+        func has(_ menu: NSMenu?, _ tag: Int) -> Bool {
+            (menu?.items ?? []).contains { ($0.tag == tag && $0.submenu == nil) || has($0.submenu, tag) }
+        }
+        out["settingsInAppMenus"] = settingsID != 0 && items.contains { has($0.submenu, settingsID) }
         return out
     }
 
@@ -444,6 +518,7 @@ final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
         }
         if let specs = MenuBuild.find(currentItems(), menu: menu.win32Menu) {
             MenuBuild.fill(menu, items: specs, target: self, action: #selector(choose(_:)), delegate: self)
+            if settingsID != 0 { MenuBar.dropEverywhere(tag: settingsID, in: menu) }
             if menu.textCommands { MenuBuild.addTextCommands(menu, taken: MenuBuild.keys(currentItems())) }
             MenuBar.validated(menu)
         }

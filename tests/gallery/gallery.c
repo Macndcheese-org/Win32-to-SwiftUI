@@ -1798,6 +1798,7 @@ static void selftest_menu_shortcut(void)
         AppendMenuW( menu, MF_POPUP, (UINT_PTR)sub, L"More" );
         if (m == 2) AppendMenuW( menu, MF_STRING | MF_GRAYED, 9199, L"&Find...\tCtrl+F" );
         if (m == 3) AppendMenuW( menu, MF_STRING | MF_GRAYED, 9198, L"Go &to...\tCtrl+G" );
+        if (m == 4) AppendMenuW( menu, MF_STRING, 9197, L"&Pr\u00e9f\u00e9rences..." );    /* Notepad++'s */
         swprintf( text, ARRAYSIZE(text), L"Menu %d", m );
         AppendMenuW( bar, MF_POPUP, (UINT_PTR)menu, text );
     }
@@ -1825,6 +1826,13 @@ static void selftest_menu_shortcut(void)
     inject( win, "{\"t\":\"shortcut\",\"s\":\"g\"}" );
     pump( 1000 );
     check( menu_commands[9198] == 0, "a grayed item's shortcut does nothing" );
+    inject( win, "{\"t\":\"open\",\"v\":4}" );         /* the app's menu refreshed as it opens */
+    pump( 400 );
+    check( query_has( win, "\"appMenu\":[\"9197:,\",\"-\"" ) && query_has( win, "\"settingsInAppMenus\":false" ),
+           "the app's Pr\u00e9f\u00e9rences... is the application menu's Settings\u2026, \u2318, (HIG), not in the app's menu" );
+    inject( win, "{\"t\":\"shortcut\",\"s\":\",\"}" );
+    pump( 1000 );
+    check( menu_commands[9197] == 1, "\u2318, opens the app's settings" );
     DestroyWindow( win );
     pump( 200 );
 }
