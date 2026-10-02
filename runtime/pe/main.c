@@ -23,6 +23,8 @@ UINT w2s_wake_message;
 UINT w2s_os_major = 12, w2s_os_minor;
 static BOOL unix_ready;
 static const WCHAR prop_name[] = L"Win32ToSwiftUI.Control";
+static LONG deferred_count;                         /* controls waiting to show (w2s_attach) */
+static DWORD show_hook_tls = TLS_OUT_OF_INDEXES;    /* each GUI thread's show_hook */
 
 /* messages that can change what any control shows */
 static const UINT base_state_in[] =
@@ -393,6 +395,15 @@ static BOOL activate( struct w2s_control *ctl, const struct w2s_kind *kind )
         return FALSE;
     }
     TRACE( "attached %p as %s: %s\n", ctl->hwnd, kind->entry, snap );
+    /* it had the focus before its view came (made while hidden, focused as it showed) */
+    {
+        HWND focus = GetFocus();
+        if (focus && (focus == ctl->hwnd || IsChild( ctl->hwnd, focus )))
+        {
+            struct w2s_control_focus_params focus_params = { ctl->handle, TRUE };
+            w2s_call( unix_w2s_control_focus, &focus_params );
+        }
+    }
     /* the native side has resolved wine's colours since we last wrote them:
      * write them once the control's creation is over */
     if (w2s_look_pending()) PostMessageW( ctl->hwnd, w2s_wake_message, W2S_WAKE_LOOK, 0 );
@@ -462,7 +473,11 @@ static LRESULT CALLBACK subclass_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
 
     if (msg == w2s_wake_message && w2s_wake_message)
     {
-        if (wparam == W2S_WAKE_REFRESH) w2s_push( ctl, FALSE );
+        if (wparam == W2S_WAKE_REFRESH)
+        {
+            ctl->push_posted = FALSE;
+            w2s_push( ctl, FALSE );
+        }
         else if (wparam == W2S_WAKE_LOOK) w2s_sync_look();
         else apply_events( ctl );
         return 0;
@@ -471,6 +486,7 @@ static LRESULT CALLBACK subclass_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
     if (msg == WM_NCDESTROY)
     {
         WNDPROC orig = ctl->orig;
+        if (ctl->deferred) InterlockedDecrement( &deferred_count );
         deactivate( ctl, TRUE );
         RemovePropW( hwnd, prop_name );
         HeapFree( GetProcessHeap(), 0, ctl );
@@ -479,6 +495,7 @@ static LRESULT CALLBACK subclass_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
     if (!ctl->active)
     {
         ret = CallWindowProcW( ctl->orig, hwnd, msg, wparam, lparam );
+        if (ctl->deferred) return ret;      /* until it shows (show_hook) */
         if (is_reselect_message( msg ) && unix_ready) reselect_kind( ctl );
         return ret;
     }
@@ -523,14 +540,76 @@ static LRESULT CALLBACK subclass_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
         w2s_form_child_changed( hwnd );
     if (ctl->kind->observe) ctl->kind->observe( ctl, msg, wparam, lparam );
     if (is_reselect_message( msg ) && !ctl->applying) reselect_kind( ctl );
-    if (ctl->active && !ctl->applying && !ctl->snapshotting && is_state_message( ctl, msg )) w2s_push( ctl, FALSE );
+    /* one snapshot for a burst of changes, once the app is back in its message loop:
+     * a combo box filled item by item (Notepad++'s Preferences) sent one per item,
+     * each with every item so far */
+    if (ctl->active && !ctl->applying && !ctl->snapshotting && is_state_message( ctl, msg ) && !ctl->push_posted)
+    {
+        ctl->push_posted = TRUE;
+        PostMessageW( hwnd, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
+    }
     return ret;
+}
+
+/* Controls made where nothing shows them yet: a dialog's controls before it shows,
+ * and a settings window's pages made up front (Notepad++'s Preferences has 25, all
+ * but one hidden: 475 controls, 40 seconds to open). Their native view comes when
+ * they show; meanwhile they are wine's, which draws nothing for them. */
+static void activate_deferred( struct w2s_control *ctl )
+{
+    const struct w2s_kind *kind;
+
+    if (!ctl->deferred || !IsWindowVisible( ctl->hwnd )) return;
+    ctl->deferred = NULL;
+    InterlockedDecrement( &deferred_count );
+    /* what it is now: its styles may have changed meanwhile (LVS_EX_CHECKBOXES) */
+    if ((kind = w2s_select_kind( ctl->hwnd ))) activate( ctl, kind );
+}
+
+static BOOL CALLBACK activate_shown_child( HWND hwnd, LPARAM lparam )
+{
+    struct w2s_control *ctl = GetPropW( hwnd, prop_name );
+    if (ctl && ctl->deferred) activate_deferred( ctl );
+    return deferred_count > 0;
+}
+
+/* a window just shown: the waiting controls in it that now show */
+static LRESULT CALLBACK show_hook( int code, WPARAM wparam, LPARAM lparam )
+{
+    const CWPRETSTRUCT *cwp = (const CWPRETSTRUCT *)lparam;
+
+    if (code == HC_ACTION && deferred_count > 0 && cwp->message == WM_WINDOWPOSCHANGED &&
+        (((const WINDOWPOS *)cwp->lParam)->flags & SWP_SHOWWINDOW))
+    {
+        activate_shown_child( cwp->hwnd, 0 );
+        EnumChildWindows( cwp->hwnd, activate_shown_child, 0 );
+    }
+    return CallNextHookEx( NULL, code, wparam, lparam );
+}
+
+/* what changes the window around it (a toolbar in the frame, a sidebar, a settings
+ * form, scroll bars) comes at once: the window would change size as it shows */
+static BOOL can_defer( HWND hwnd, const struct w2s_kind *kind )
+{
+    static const char *const at_once[] = { "toolbar", "rebar", "treeview", "tab", "scrollbar" };
+    unsigned int i;
+
+    if (IsWindowVisible( hwnd ) || show_hook_tls == TLS_OUT_OF_INDEXES) return FALSE;
+    for (i = 0; i < ARRAYSIZE(at_once); i++)
+        if (!strncmp( kind->entry, at_once[i], strlen( at_once[i] ) )) return FALSE;
+    if (!TlsGetValue( show_hook_tls ))
+    {
+        HHOOK hook = SetWindowsHookExW( WH_CALLWNDPROCRET, show_hook, NULL, GetCurrentThreadId() );
+        if (!hook) return FALSE;
+        TlsSetValue( show_hook_tls, hook );
+    }
+    return TRUE;
 }
 
 /***********************************************************************
  *      w2s_attach
  *
- * Subclasses a window and puts the native view of kind over it.
+ * Subclasses a window and puts the native view of kind over it (once it shows).
  */
 BOOL w2s_attach( HWND hwnd, const struct w2s_kind *kind )
 {
@@ -542,6 +621,12 @@ BOOL w2s_attach( HWND hwnd, const struct w2s_kind *kind )
     ctl->hwnd = hwnd;
     SetPropW( hwnd, prop_name, ctl );
     ctl->orig = (WNDPROC)SetWindowLongPtrW( hwnd, GWLP_WNDPROC, (LONG_PTR)subclass_proc );
+    if (can_defer( hwnd, kind ))
+    {
+        ctl->deferred = kind;
+        InterlockedIncrement( &deferred_count );
+        return TRUE;
+    }
     if (activate( ctl, kind )) return TRUE;
 
     SetWindowLongPtrW( hwnd, GWLP_WNDPROC, (LONG_PTR)ctl->orig );
@@ -566,7 +651,14 @@ static void release_combo_parts( HWND hwnd )
     parts[1] = cbi.hwndList;
     for (i = 0; i < 2; i++)
     {
-        if (!parts[i] || !(ctl = GetPropW( parts[i], prop_name )) || !ctl->active) continue;
+        if (!parts[i] || !(ctl = GetPropW( parts[i], prop_name ))) continue;
+        if (ctl->deferred)
+        {
+            ctl->deferred = NULL;
+            InterlockedDecrement( &deferred_count );
+            continue;
+        }
+        if (!ctl->active) continue;
         TRACE( "%p is combo box %p's part\n", parts[i], hwnd );
         ctl->reselecting++;
         deactivate( ctl, FALSE );
@@ -671,6 +763,7 @@ BOOL WINAPI DllMain( HINSTANCE instance, DWORD reason, void *reserved )
         struct w2s_init_params params = { W2S_PROTOCOL_VERSION };
 
         DisableThreadLibraryCalls( instance );
+        show_hook_tls = TlsAlloc();
         if (GetEnvironmentVariableA( "W2S_DEBUG", value, sizeof(value) )) w2s_debug = atoi( value );
         if (__wine_init_unix_call())
         {

@@ -145,6 +145,8 @@ struct w2s_control
     BOOL added_clipsiblings; /* we set WS_CLIPSIBLINGS (clip_wine_drawing) */
     int reselecting;         /* inside reselect_kind, or changing the style ourselves */
     int snapshotting;       /* building a snapshot sends queries to the control */
+    BOOL push_posted;       /* a snapshot is coming once the app's message burst is over */
+    const struct w2s_kind *deferred;    /* made where nothing shows it: its native view comes when it shows */
     UINT64 ack;             /* highest native event sequence number taken */
     UINT answered;          /* queries answered from the native view (for the tests) */
     void *data;             /* the kind's own state, HeapFree'd when the view goes */
