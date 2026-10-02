@@ -17,6 +17,8 @@ final class FrameSidebar: NSObject, WindowChrome {
     private var dragged: CGFloat?
     private var lastMove = Date.distantPast
     private(set) var collapsed = false
+    private var attachedAt = Date.distantPast
+    private var fitted: CGFloat = 0
 
     init(host: ControlHost) { self.host = host }
 
@@ -40,6 +42,7 @@ final class FrameSidebar: NSObject, WindowChrome {
             // the app laid itself out again (or the window resized): the sidebar follows,
             // unless the user is the one dragging it
             if dragged == nil && !collapsed { window.perform(NSSelectorFromString("w2sSetSidebarWidth:"), with: width) }
+            DispatchQueue.main.async { [weak self] in self?.fitRows() }
             return
         }
         // the Mac's sidebar text, whatever the tree's Win32 size
@@ -52,6 +55,37 @@ final class FrameSidebar: NSObject, WindowChrome {
         window.perform(NSSelectorFromString("w2sAttachSidebar:"),
                        with: ["controller": controller, "width": width, "target": self] as NSDictionary)
         FrameToolbar.setSidebarToggle(true, window: window)
+        attachedAt = Date()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.fitRows() }
+    }
+
+    /// The window's list in the sidebar (SwiftUI's outline view).
+    static func table(in view: NSView) -> NSTableView? {
+        if let t = view as? NSTableView { return t }
+        for sub in view.subviews { if let t = table(in: sub) { return t } }
+        return nil
+    }
+
+    /// The rows a window opens with are shown whole: in its first moments, the
+    /// sidebar widens to the widest row in view (never past half the window), and
+    /// the app's splitter follows, as after a drag. The app's own width is in
+    /// Win32 pixels, laid out for its text, not the Mac's sidebar text.
+    private func fitRows() {
+        guard Date().timeIntervalSince(attachedAt) < 2, dragged == nil, !collapsed,
+              let side = sidebarView, let window = side.window, let list = FrameSidebar.table(in: side) else { return }
+        var need: CGFloat = 0
+        let rows = list.rows(in: list.visibleRect)
+        for row in rows.location..<(rows.location + rows.length) {
+            guard let cell = list.view(atColumn: 0, row: row, makeIfNecessary: false) else { continue }
+            let frame = list.frameOfCell(atColumn: 0, row: row)
+            need = max(need, frame.minX + cell.fittingSize.width + (list.bounds.width - frame.maxX))
+        }
+        guard need > 0 else { return }
+        need = min(ceil(need + side.bounds.width - list.bounds.width), (window.frame.width / 2).rounded(.down))
+        guard need > side.bounds.width + 1, need > fitted else { return }
+        fitted = need
+        window.perform(NSSelectorFromString("w2sSetSidebarWidth:"), with: NSNumber(value: Double(need)))
+        w2sSidebarResized(NSNumber(value: Double(need)))
     }
 
     /// winemac: the user moved the divider, or hid or showed the sidebar (0: hidden)

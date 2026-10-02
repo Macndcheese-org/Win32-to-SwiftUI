@@ -325,11 +325,15 @@ final class ControlHost {
         W2S.lock.unlock()
     }
 
-    /// Main thread: points per Win32 pixel, from the host view's height.
+    /// Main thread: points per Win32 pixel, from the host view's height. While
+    /// the control has no size (a window's sidebar hidden squeezes its tree to
+    /// nothing), the last one measured: 1 there would halve every Retina width.
     var scale: CGFloat {
-        guard let view = hosting, let px = model.snap.heightPx, px > 0, view.bounds.height > 0 else { return 1 }
-        return view.bounds.height / CGFloat(px)
+        guard let view = hosting, let px = model.snap.heightPx, px > 0, view.bounds.height > 0 else { return lastScale ?? 1 }
+        lastScale = view.bounds.height / CGFloat(px)
+        return lastScale!
     }
+    private var lastScale: CGFloat?
 }
 
 final class Request {

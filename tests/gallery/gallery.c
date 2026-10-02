@@ -1101,7 +1101,7 @@ static BOOL query_lacks( HWND hwnd, const char *needle )
 static void inject( HWND hwnd, const char *event )
 {
     char *r = pInject( hwnd, event );
-    if (!r || !strstr( r, "ok" ) || strstr( event, "realClick" )) printf( "      inject %s: %s\n", event, r ? r : "(null)" );
+    if (!r || !strstr( r, "ok" ) || strstr( event, "realClick" ) || strstr( event, "RowClick" )) printf( "      inject %s: %s\n", event, r ? r : "(null)" );
     fflush( stdout );
     pFree( r );
 }
@@ -1344,6 +1344,7 @@ static void selftest_look(void)
  * app draws between them (regedit's): the tree is the window's sidebar */
 static int split_pos = 150;
 static BOOL split_drag;
+static int split_selchanged;
 
 static void split_layout( HWND hwnd )
 {
@@ -1360,6 +1361,36 @@ static LRESULT CALLBACK splitwin_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
     switch (msg)
     {
     case WM_SIZE: split_layout( hwnd ); return 0;
+    case WM_NOTIFY:
+        if (((NMHDR *)lparam)->code == TVN_SELCHANGEDW) split_selchanged++;
+        /* regedit's: a key's subkeys are added the first time it opens */
+        if (((NMHDR *)lparam)->code == TVN_ITEMEXPANDINGW)
+        {
+            NMTREEVIEWW *nm = (NMTREEVIEWW *)lparam;
+            HWND tree = nm->hdr.hwndFrom;
+            TVITEMW item = { TVIF_STATE, nm->itemNew.hItem, TVIS_EXPANDEDONCE, TVIS_EXPANDEDONCE };
+            int i;
+
+            if (nm->action != TVE_EXPAND || (nm->itemNew.state & TVIS_EXPANDEDONCE) ||
+                SendMessageW( tree, TVM_GETNEXTITEM, TVGN_CHILD, (LPARAM)nm->itemNew.hItem ))
+                return 0;
+            SendMessageW( tree, WM_SETREDRAW, FALSE, 0 );
+            for (i = 0; i < 25; i++)
+            {
+                TVINSERTSTRUCTW ins = { 0 };
+                WCHAR name[32];
+                swprintf( name, ARRAYSIZE(name), L"Key %d", i );
+                ins.hParent = nm->itemNew.hItem;
+                ins.hInsertAfter = TVI_LAST;
+                ins.item.mask = TVIF_TEXT | TVIF_CHILDREN;
+                ins.item.pszText = name;
+                ins.item.cChildren = i % 3 == 0;
+                SendMessageW( tree, TVM_INSERTITEMW, 0, (LPARAM)&ins );
+            }
+            SendMessageW( tree, TVM_SETITEMW, 0, (LPARAM)&item );
+            SendMessageW( tree, WM_SETREDRAW, TRUE, 0 );
+        }
+        return 0;
     case WM_LBUTTONDOWN:
         if (x >= split_pos - 3 && x <= split_pos + 3) { split_drag = TRUE; SetCapture( hwnd ); }
         return 0;
@@ -1376,10 +1407,34 @@ static LRESULT CALLBACK splitwin_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
     return DefWindowProcW( hwnd, msg, wparam, lparam );
 }
 
+static HTREEITEM tree_add( HWND tree, HTREEITEM parent, const WCHAR *text )
+{
+    TVINSERTSTRUCTW ins = { 0 };
+
+    ins.hParent = parent;
+    ins.hInsertAfter = TVI_LAST;
+    ins.item.mask = TVIF_TEXT;
+    ins.item.pszText = (WCHAR *)text;
+    return (HTREEITEM)SendMessageW( tree, TVM_INSERTITEMW, 0, (LPARAM)&ins );
+}
+
+/* a click on a sidebar row through AppKit; FALSE when the window isn't the key
+ * window (another app is in front): a list row then takes no click, as on any Mac */
+static BOOL sidebar_click( HWND tree, const char *event )
+{
+    char *r = pInject( tree, event );
+    BOOL key = r && strstr( r, "\"ok\":true" ) && !strstr( r, "\"key\":false" );
+
+    if (!key) printf( "      inject %s: %s\n", event, r ? r : "(null)" );
+    fflush( stdout );
+    pFree( r );
+    return key;
+}
+
 static void selftest_frame_sidebar(void)
 {
     WNDCLASSW wc = { 0 };
-    TVINSERTSTRUCTW ins = { 0 };
+    HTREEITEM computer, hkcu, software, microsoft, hklm;
     HWND win, tree, list;
     RECT rc;
 
@@ -1388,29 +1443,82 @@ static void selftest_frame_sidebar(void)
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wc.lpszClassName = L"W2SSplitWindow";
     RegisterClassW( &wc );
-    win = CreateWindowExW( 0, L"W2SSplitWindow", L"Registry", WS_OVERLAPPEDWINDOW, 240, 140, 640, 420,
+    win = CreateWindowExW( 0, L"W2SSplitWindow", L"Registry", WS_OVERLAPPEDWINDOW, 240, 140, 900, 520,
                            NULL, NULL, GetModuleHandleW( NULL ), NULL );
     tree = CreateWindowExW( 0, WC_TREEVIEWW, NULL, WS_CHILD | WS_VISIBLE | TVS_HASBUTTONS | TVS_LINESATROOT, 0, 0, 0, 0,
                             win, (HMENU)1, GetModuleHandleW( NULL ), NULL );
     list = CreateWindowExW( 0, WC_LISTVIEWW, NULL, WS_CHILD | WS_VISIBLE | LVS_REPORT, 0, 0, 0, 0, win, (HMENU)2,
                             GetModuleHandleW( NULL ), NULL );
-    ins.hInsertAfter = TVI_LAST;
-    ins.item.mask = TVIF_TEXT;
-    ins.item.pszText = (WCHAR *)L"HKEY_CURRENT_USER";
-    SendMessageW( tree, TVM_INSERTITEMW, 0, (LPARAM)&ins );
+    /* regedit's: opened on the last key it showed */
+    computer = tree_add( tree, TVI_ROOT, L"Computer" );
+    tree_add( tree, computer, L"HKEY_CLASSES_ROOT" );
+    hkcu = tree_add( tree, computer, L"HKEY_CURRENT_USER" );
+    software = tree_add( tree, hkcu, L"Software" );
+    microsoft = tree_add( tree, software, L"Microsoft" );
+    hklm = tree_add( tree, computer, L"HKEY_LOCAL_MACHINE" );
+    {
+        TVITEMW item = { TVIF_CHILDREN, hklm };
+        item.cChildren = 1;     /* its subkeys come when it opens */
+        SendMessageW( tree, TVM_SETITEMW, 0, (LPARAM)&item );
+    }
+    tree_add( tree, computer, L"HKEY_USERS" );
+    tree_add( tree, computer, L"HKEY_CURRENT_CONFIG" );
+    SendMessageW( tree, TVM_EXPAND, TVE_EXPAND, (LPARAM)computer );
+    SendMessageW( tree, TVM_EXPAND, TVE_EXPAND, (LPARAM)hkcu );
+    SendMessageW( tree, TVM_EXPAND, TVE_EXPAND, (LPARAM)software );
+    SendMessageW( tree, TVM_SELECTITEM, TVGN_CARET, (LPARAM)microsoft );
     split_layout( win );
     ShowWindow( win, SW_SHOW );
-    pump( 800 );
-    check( pIsTranslated( tree ) && query_has( tree, "\"sidebarPane\":153" ) && query_has( tree, "\"frameSidebar\":true" ) &&
-           query_has( tree, "\"sidebarItem\":true" ),
+    pump( 2500 );
+    check( query_int( tree, "visibleRows" ) >= 7 && query_int( tree, "truncatedRows" ) == 0,
+           "the sidebar opens wide enough for the rows in view: no name cut short" );
+    /* the sidebar up to the pane beside the tree (in Retina mode a Win32 pixel is half a point) */
+    check( pIsTranslated( tree ) && query_has( tree, "\"frameSidebar\":true" ) && query_has( tree, "\"sidebarItem\":true" ) &&
+           abs( query_int( tree, "sidebarPane" ) * query_int( tree, "scaleMilli" ) / 1000 - query_int( tree, "sidebarWidth" ) ) <= 1,
            "a tree along a main window's edge is the window's sidebar (a split view's sidebar item), up to the list" );
     check( query_int( tree, "sidebarSafeTop" ) >= query_int( tree, "layoutTop" ) && query_int( tree, "layoutTop" ) > 0,
            "the sidebar's content starts below the titlebar (the traffic lights)" );
+    /* rows: Computer, HKEY_CLASSES_ROOT, HKEY_CURRENT_USER, Software, Microsoft, HKEY_LOCAL_MACHINE */
+    split_selchanged = 0;
+    if (sidebar_click( tree, "{\"t\":\"sidebarRowClick\",\"v\":5,\"s\":\"lead\"}" ))
+    {
+        pump( 800 );
+        check( SendMessageW( tree, TVM_GETNEXTITEM, TVGN_CARET, 0 ) == (LRESULT)hklm && split_selchanged > 0,
+               "a click on a key in the sidebar selects it (TVN_SELCHANGED)" );
+        sidebar_click( tree, "{\"t\":\"sidebarRowClick\",\"v\":1}" );
+        pump( 800 );
+        check( SendMessageW( tree, TVM_GETNEXTITEM, TVGN_CARET, 0 ) != (LRESULT)hklm && split_selchanged > 1,
+               "and another" );
+    }
+    else printf( "      the window isn't in front (another app is): the row click checks are skipped\n" );
+    /* opening a key whose subkeys the app adds then, and clicking around in them */
+    inject( tree, "{\"t\":\"sidebarRowClick\",\"v\":5,\"s\":\"disclosure\"}" );
+    pump( 800 );
+    check( SendMessageW( tree, TVM_GETNEXTITEM, TVGN_CHILD, (LPARAM)hklm ) != 0 &&
+           (SendMessageW( tree, TVM_GETITEMSTATE, (WPARAM)hklm, TVIS_EXPANDED ) & TVIS_EXPANDED),
+           "a click on a key's disclosure button opens it: the app adds its subkeys" );
+    {
+        static const int rows[] = { 6, 9, 6, 12, 15, 7 };
+        char json[96];
+        unsigned int n;
+        for (n = 0; n < ARRAYSIZE(rows); n++)
+        {
+            snprintf( json, sizeof(json), "{\"t\":\"sidebarRowClick\",\"v\":%d%s}", rows[n],
+                      n % 2 ? ",\"s\":\"disclosure\"" : "" );
+            inject( tree, json );
+            pump( n % 2 ? 300 : 100 );
+        }
+        inject( tree, "{\"t\":\"sidebarRowClick\",\"v\":5,\"s\":\"disclosure\"}" );
+        pump( 600 );
+    }
+    check( IsWindow( tree ) && !(SendMessageW( tree, TVM_GETITEMSTATE, (WPARAM)hklm, TVIS_EXPANDED ) & TVIS_EXPANDED),
+           "clicking around in the opened key, then closing it" );
     /* narrower than a Mac sidebar can be: the app's splitter follows the sidebar */
     split_pos = 97;
     split_layout( win );
     pump( 1000 );
-    check( query_int( tree, "sidebarWidth" ) > 100 && abs( split_pos + 3 - query_int( tree, "sidebarWidth" ) ) <= 1,
+    check( query_int( tree, "sidebarWidth" ) > 100 &&
+           abs( (split_pos + 3) * query_int( tree, "scaleMilli" ) / 1000 - query_int( tree, "sidebarWidth" ) ) <= 1,
            "a tree pane narrower than the sidebar's minimum: the app's splitter follows the sidebar" );
     if (getenv( "W2S_SIDEBAR_SHOT" ))
     {
@@ -1422,10 +1530,10 @@ static void selftest_frame_sidebar(void)
         inject( tree, json );
         pump( 300 );
     }
-    inject( tree, "{\"t\":\"sidebarWidth\",\"v\":223}" );
+    inject( tree, "{\"t\":\"sidebarWidth\",\"v\":423}" );
     pump( 500 );
     GetWindowRect( tree, &rc );
-    check( split_pos == 220 && rc.right - rc.left == 217 && query_has( tree, "\"sidebarPane\":223" ),
+    check( split_pos == 420 && rc.right - rc.left == 417 && query_has( tree, "\"sidebarPane\":423" ),
            "dragging the sidebar's divider drags the app's splitter: the app lays itself out again" );
     check( query_has( tree, "\"sidebarToggle\":true" ), "the window's toolbar has the sidebar button" );
     inject( tree, "{\"t\":\"toggleSidebar\"}" );
@@ -1438,8 +1546,11 @@ static void selftest_frame_sidebar(void)
            "hidden, the sidebar's button stays beside the traffic lights (not in the overflow menu)" );
     inject( tree, "{\"t\":\"toggleSidebar\"}" );
     pump( 1500 );
-    check( query_has( tree, "\"sidebarCollapsed\":false" ) && abs( split_pos - 220 ) <= 2,
+    check( query_has( tree, "\"sidebarCollapsed\":false" ) && abs( split_pos - 420 ) <= 2,
            "showing it again puts the splitter back where it was" );
+    pump( 1500 );
+    check( abs( split_pos - 420 ) <= 2 && abs( query_int( tree, "sidebarWidth" ) - 423 * query_int( tree, "scaleMilli" ) / 1000 ) <= 2,
+           "and it stays there (in Retina mode too: a Win32 pixel is half a point)" );
     DestroyWindow( win );
     pump( 300 );
     (void)list;

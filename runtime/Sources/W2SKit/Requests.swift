@@ -706,6 +706,16 @@ enum Debug {
             }
             if host.entry == "treeview", let sidebar = host.owned as? FrameSidebar {
                 out["frameSidebar"] = sidebar.attached
+                out["scaleMilli"] = Int((host.scale * 1000).rounded())     // points per Win32 pixel
+                // rows in view whose text doesn't fit (shown with "...")
+                if let side = sidebar.sidebarView, let list = FrameSidebar.table(in: side) {
+                    let rows = list.rows(in: list.visibleRect)
+                    out["truncatedRows"] = (rows.location..<(rows.location + rows.length)).filter { row in
+                        guard let cell = list.view(atColumn: 0, row: row, makeIfNecessary: false) else { return false }
+                        return cell.frame.width + 0.5 < cell.fittingSize.width
+                    }.count
+                    out["visibleRows"] = rows.length
+                }
                 if let v = sidebar.sidebarView, let w = v.window {
                     out["sidebarSafeTop"] = Int(v.safeAreaInsets.top)
                     out["layoutTop"] = Int(w.frame.height - w.contentLayoutRect.maxY)
@@ -817,6 +827,49 @@ enum Debug {
                 if let button = item.view as? NSButton { button.performClick(nil) }
                 else if let action = item.action { NSApp.sendAction(action, to: item.target, from: item) }
                 return "{\"ok\":true}"
+            }
+            if event["t"] as? String == "sidebarRowClick" {
+                // tests: a mouse click on row v of the window's sidebar, through AppKit as the
+                // mouse makes one (winemac's routing, the list's own tracking)
+                guard let sidebar = host.owned as? FrameSidebar, let side = sidebar.sidebarView,
+                      let window = side.window, let row = event["v"] as? Int else { return "{\"error\":\"no sidebar\"}" }
+                guard let list = FrameSidebar.table(in: side), row < list.numberOfRows else { return "{\"error\":\"no row\"}" }
+                var rect = list.convert(list.rect(ofRow: row), to: nil)
+                var parts: [String] = []
+                // "disclosure": on the row's disclosure button instead
+                if event["s"] as? String == "disclosure" {
+                    if let outline = list as? NSOutlineView, !outline.frameOfOutlineCell(atRow: row).isEmpty {
+                        rect = outline.convert(outline.frameOfOutlineCell(atRow: row), to: nil)
+                    } else if let rowView = list.rowView(atRow: row, makeIfNecessary: false) {
+                        func find(_ v: NSView) -> NSView? {
+                            parts.append(String(describing: type(of: v)))
+                            if let b = v as? NSButton, b.bezelStyle == .disclosure || b.bezelStyle == .pushDisclosure { return b }
+                            for sub in v.subviews { if let f = find(sub) { return f } }
+                            return nil
+                        }
+                        if let button = find(rowView) { rect = button.convert(button.bounds, to: nil) }
+                        else { return W2S.json(["error": "no disclosure", "parts": parts, "table": String(describing: type(of: list))]) }
+                    }
+                }
+                // on the disclosure button, on the row's text ("lead") or past it
+                let point = event["s"] as? String == "disclosure" ? NSPoint(x: rect.midX, y: rect.midY)
+                    : event["s"] as? String == "lead" ? NSPoint(x: rect.minX + min(60, rect.width / 2), y: rect.midY)
+                    : NSPoint(x: rect.maxX - min(30, rect.width / 4), y: rect.midY)
+                let hit = window.contentView.flatMap { $0.hitTest($0.superview?.convert(point, from: nil) ?? point) }
+                DispatchQueue.main.async {
+                    func mouse(_ type: NSEvent.EventType) -> NSEvent? {
+                        NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                                           timestamp: ProcessInfo.processInfo.systemUptime,
+                                           windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                                           clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)
+                    }
+                    if let up = mouse(.leftMouseUp) { NSApp.postEvent(up, atStart: false) }
+                    if let down = mouse(.leftMouseDown) { NSApp.sendEvent(down) }
+                }
+                return W2S.json(["ok": true, "rows": list.numberOfRows, "table": String(describing: type(of: list)),
+                                 "key": window.isKeyWindow, "appActive": NSApp.isActive,
+                                 "responder": window.firstResponder.map { String(describing: type(of: $0)) } ?? "",
+                                 "hit": hit.map { String(describing: type(of: $0)) } ?? ""])
             }
             if event["t"] as? String == "realClick" {
                 // a mouse click at the view's centre through AppKit, as the mouse makes one:
