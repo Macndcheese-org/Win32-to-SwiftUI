@@ -1425,10 +1425,7 @@ static void tree_move_splitter( HWND hwnd, int want )
 
 static void tree_snapshot( struct w2s_control *ctl, struct json *j )
 {
-    HWND parent = GetParent( ctl->hwnd );
-    WCHAR parent_class[64] = { 0 };
     int budget = MAX_TREE_NODES;
-    RECT rc;
 
     HIMAGELIST himl = (HIMAGELIST)SendMessageW( ctl->hwnd, TVM_GETIMAGELIST, TVSIL_NORMAL, 0 );
     struct lv_data *data = ctl->data;
@@ -1445,11 +1442,7 @@ static void tree_snapshot( struct w2s_control *ctl, struct json *j )
     HeapFree( GetProcessHeap(), 0, images );
     if (data->more) PostMessageW( ctl->hwnd, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
     json_int( j, "selection", (INT_PTR)SendMessageW( ctl->hwnd, TVM_GETNEXTITEM, TVGN_CARET, 0 ) );
-    /* a tree along the left edge of a window is a sidebar (Finder's); in a dialog, a bordered list */
-    GetClassNameW( parent, parent_class, ARRAYSIZE(parent_class) );
-    GetWindowRect( ctl->hwnd, &rc );
-    MapWindowPoints( NULL, parent, (POINT *)&rc, 2 );
-    json_bool( j, "sidebar", wcscmp( parent_class, L"#32770" ) && rc.left <= 1 );
+    /* a tree along a main window's edge is the window's sidebar (Finder's) */
     {
         RECT tree;
         int pane;

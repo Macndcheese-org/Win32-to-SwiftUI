@@ -717,6 +717,9 @@ enum Debug {
                     out["sidebarCollapsed"] = side.isCollapsed
                     out["sidebarToggle"] = host.hosting?.window?.toolbar?.items
                         .contains { $0.itemIdentifier == .toggleSidebar } ?? false
+                    // what AppKit shows (not in the overflow menu)
+                    out["toolbarVisible"] = (host.hosting?.window?.toolbar?.visibleItems ?? []).map { $0.itemIdentifier.rawValue }
+                    out["toolbarItems"] = (host.hosting?.window?.toolbar?.items ?? []).map { $0.itemIdentifier.rawValue }
                 }
             }
             if host.entry == "toolbar", let frame = host.owned as? WindowToolbar {

@@ -1406,6 +1406,12 @@ static void selftest_frame_sidebar(void)
            "a tree along a main window's edge is the window's sidebar (a split view's sidebar item), up to the list" );
     check( query_int( tree, "sidebarSafeTop" ) >= query_int( tree, "layoutTop" ) && query_int( tree, "layoutTop" ) > 0,
            "the sidebar's content starts below the titlebar (the traffic lights)" );
+    /* narrower than a Mac sidebar can be: the app's splitter follows the sidebar */
+    split_pos = 97;
+    split_layout( win );
+    pump( 1000 );
+    check( query_int( tree, "sidebarWidth" ) > 100 && abs( split_pos + 3 - query_int( tree, "sidebarWidth" ) ) <= 1,
+           "a tree pane narrower than the sidebar's minimum: the app's splitter follows the sidebar" );
     if (getenv( "W2S_SIDEBAR_SHOT" ))
     {
         char json[512];
@@ -1428,6 +1434,8 @@ static void selftest_frame_sidebar(void)
     MapWindowPoints( NULL, win, (POINT *)&rc, 2 );
     check( query_has( tree, "\"sidebarCollapsed\":true" ) && split_pos <= 3 && rc.left <= 6,
            "hiding the sidebar moves the app's splitter to the edge: its list takes the window" );
+    check( query_has( tree, "\"toolbarVisible\":[\"NSToolbarToggleSidebarItem" ),
+           "hidden, the sidebar's button stays beside the traffic lights (not in the overflow menu)" );
     inject( tree, "{\"t\":\"toggleSidebar\"}" );
     pump( 1500 );
     check( query_has( tree, "\"sidebarCollapsed\":false" ) && abs( split_pos - 220 ) <= 2,
@@ -2599,6 +2607,13 @@ static int selftest(void)
     pFree = (void *)GetProcAddress( w2s, "W2SDebugFree" );
     pIsTranslated = (void *)GetProcAddress( w2s, "W2SIsTranslated" );
     pump( 1500 );
+    /* W2S_ONLY=sidebar: just that test, while working on it */
+    if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "sidebar" ))
+    {
+        selftest_frame_sidebar();
+        printf( "%d passed, %d failed\n", passes, failures );
+        return failures;
+    }
 
     for (i = 0; i < ARRAYSIZE(ids); i++)
     {

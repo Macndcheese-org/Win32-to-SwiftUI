@@ -1462,7 +1462,9 @@ struct TreeList: View {
             TreeRows(model: model, nodes: model.snap.nodes ?? [])
         }
         .modifier(DoubleClickRows(model: model))
-        if model.snap.sidebar ?? false {
+        // the sidebar's look only in the window's real sidebar (FrameSidebar); a tree
+        // anywhere else is an ordinary outline, not a sidebar look-alike
+        if model.snap.sidebarPane != nil {
             list.listStyle(.sidebar)
         } else {
             list.listStyle(.bordered)

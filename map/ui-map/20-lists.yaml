@@ -332,11 +332,13 @@ entries:
       NSSplitViewController sidebar item (winemac: w2sAttachSidebar) floating over wine's
       content on macOS 26+, full height under the titlebar, up to the pane the app laid out
       beside the tree. Dragging its divider drags the app's own splitter (the gap between the
-      tree and that pane), and the app lays itself out again. Elsewhere .sidebar is the list's
-      look; a tree inside a dialog uses .bordered. A native expansion is what a click on the
-      node's button does: TVN_ITEMEXPANDING (the app may veto or insert the children),
-      TVM_EXPAND, TVN_ITEMEXPANDED; a node's HTREEITEM is its id. TVS_CHECKBOXES trees stay
-      wine's until the rows show state images.
+      tree and that pane), and the app lays itself out again; a pane narrower than AppKit's
+      minimum sidebar width moves the app's splitter to that width. The toolbar has the Mac's
+      sidebar button, and hiding the sidebar moves the app's splitter to the edge. Any other
+      tree is an ordinary outline (.bordered), never a sidebar look-alike. A native expansion
+      is what a click on the node's button does: TVN_ITEMEXPANDING (the app may veto or
+      insert the children), TVM_EXPAND, TVN_ITEMEXPANDED; a node's HTREEITEM is its id.
+      TVS_CHECKBOXES trees stay wine's until the rows show state images.
 
   - id: header
     kind: control
