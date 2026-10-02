@@ -1739,6 +1739,212 @@ static INT_PTR CALLBACK replace_dlgproc( HWND hwnd, UINT msg, WPARAM wparam, LPA
     return FALSE;
 }
 
+/* ---------- IFileSaveDialog with the app's own controls (IFileDialogCustomize) ---------- */
+
+static struct
+{
+    IFileDialogEvents IFileDialogEvents_iface;
+    IFileDialogControlEvents IFileDialogControlEvents_iface;
+    IFileDialogCustomize *custom;
+    char log[512];
+} save_events;
+static BOOL save_controls_shown, save_controls_synced;
+
+static void save_log( const char *fmt, DWORD a, DWORD b )
+{
+    char line[64];
+    snprintf( line, sizeof(line), fmt, (unsigned)a, (unsigned)b );
+    if (strlen( save_events.log ) + strlen( line ) < sizeof(save_events.log)) strcat( save_events.log, line );
+}
+
+static HRESULT WINAPI fde_QueryInterface( IFileDialogEvents *iface, REFIID riid, void **out )
+{
+    if (IsEqualIID( riid, &IID_IUnknown ) || IsEqualIID( riid, &IID_IFileDialogEvents ))
+        *out = &save_events.IFileDialogEvents_iface;
+    else if (IsEqualIID( riid, &IID_IFileDialogControlEvents ))
+        *out = &save_events.IFileDialogControlEvents_iface;
+    else
+    {
+        *out = NULL;
+        return E_NOINTERFACE;
+    }
+    return S_OK;
+}
+static ULONG WINAPI fde_AddRef( IFileDialogEvents *iface ) { return 2; }
+static ULONG WINAPI fde_Release( IFileDialogEvents *iface ) { return 1; }
+static HRESULT WINAPI fde_OnFileOk( IFileDialogEvents *iface, IFileDialog *fd )
+{
+    BOOL checked = FALSE;
+    IFileDialogCustomize_GetCheckButtonState( save_events.custom, 5, &checked );
+    save_log( "ok %u;", checked, 0 );
+    return S_OK;
+}
+static HRESULT WINAPI fde_OnFolderChanging( IFileDialogEvents *iface, IFileDialog *fd, IShellItem *item ) { return S_OK; }
+static HRESULT WINAPI fde_OnFolderChange( IFileDialogEvents *iface, IFileDialog *fd ) { return S_OK; }
+static HRESULT WINAPI fde_OnSelectionChange( IFileDialogEvents *iface, IFileDialog *fd ) { return S_OK; }
+static HRESULT WINAPI fde_OnShareViolation( IFileDialogEvents *iface, IFileDialog *fd, IShellItem *item,
+                                            FDE_SHAREVIOLATION_RESPONSE *r ) { return S_OK; }
+static HRESULT WINAPI fde_OnTypeChange( IFileDialogEvents *iface, IFileDialog *fd ) { return S_OK; }
+static HRESULT WINAPI fde_OnOverwrite( IFileDialogEvents *iface, IFileDialog *fd, IShellItem *item,
+                                       FDE_OVERWRITE_RESPONSE *r ) { return S_OK; }
+static IFileDialogEventsVtbl fde_vtbl =
+{
+    fde_QueryInterface, fde_AddRef, fde_Release, fde_OnFileOk, fde_OnFolderChanging, fde_OnFolderChange,
+    fde_OnSelectionChange, fde_OnShareViolation, fde_OnTypeChange, fde_OnOverwrite
+};
+
+static HRESULT WINAPI fdce_QueryInterface( IFileDialogControlEvents *iface, REFIID riid, void **out )
+{
+    return fde_QueryInterface( &save_events.IFileDialogEvents_iface, riid, out );
+}
+static ULONG WINAPI fdce_AddRef( IFileDialogControlEvents *iface ) { return 2; }
+static ULONG WINAPI fdce_Release( IFileDialogControlEvents *iface ) { return 1; }
+static HRESULT WINAPI fdce_OnItemSelected( IFileDialogControlEvents *iface, IFileDialogCustomize *c, DWORD ctl, DWORD item )
+{
+    save_log( "sel %u %u;", ctl, item );
+    return S_OK;
+}
+static HRESULT WINAPI fdce_OnButtonClicked( IFileDialogControlEvents *iface, IFileDialogCustomize *c, DWORD ctl )
+{
+    save_log( "click %u;", ctl, 0 );
+    /* the app answers by changing its controls while the panel is up */
+    IFileDialogCustomize_SetControlLabel( c, 88, L"Clicked" );
+    IFileDialogCustomize_SetControlState( c, 33, CDCS_VISIBLE );
+    return S_OK;
+}
+static HRESULT WINAPI fdce_OnCheckButtonToggled( IFileDialogControlEvents *iface, IFileDialogCustomize *c, DWORD ctl,
+                                                 BOOL checked )
+{
+    save_log( "check %u %u;", ctl, checked );
+    return S_OK;
+}
+static HRESULT WINAPI fdce_OnControlActivating( IFileDialogControlEvents *iface, IFileDialogCustomize *c, DWORD ctl )
+{
+    return S_OK;
+}
+static IFileDialogControlEventsVtbl fdce_vtbl =
+{
+    fdce_QueryInterface, fdce_AddRef, fdce_Release, fdce_OnItemSelected, fdce_OnButtonClicked,
+    fdce_OnCheckButtonToggled, fdce_OnControlActivating
+};
+
+static void CALLBACK save_controls_second( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    KillTimer( hwnd, id );
+    save_controls_synced = query_object_has( NULL, 88, "\"title\":\"Clicked\"" ) &&
+                           query_object_has( NULL, 33, "\"enabled\":false" ) &&
+                           query_object_has( NULL, 5, "\"on\":false" ) &&
+                           query_object_has( NULL, 22, "\"on\":[200]" ) &&
+                           query_object_has( NULL, 11, "\"title\":\"UTF-8\"" );
+    /* ticked again just before Save: the app still gets it, before OnFileOk */
+    inject( NULL, "{\"t\":\"control\",\"v\":5}" );
+    inject( NULL, "{\"t\":\"choose\",\"s\":\"/tmp/w2s-gallery-save.txt\"}" );
+}
+
+static void CALLBACK save_controls_first( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    KillTimer( hwnd, id );
+    save_controls_shown = query_object_has( NULL, 5, "\"title\":\"Append extension\"" ) &&
+                          query_object_has( NULL, 5, "\"on\":true" ) &&
+                          query_object_has( NULL, 10, "\"title\":\"Encoding:\"" ) &&
+                          query_object_has( NULL, 11, "\"title\":\"UTF-16\"" ) &&
+                          query_object_has( NULL, 11, "\"items\":[\"UTF-8\",\"UTF-16\"]" ) &&
+                          query_object_has( NULL, 22, "\"on\":[201]" ) &&
+                          query_object_has( NULL, 33, "\"title\":\"note\"" ) &&
+                          query_object_has( NULL, 44, "\"title\":\"Options\xe2\x80\xa6\"" ) &&
+                          query_object_has( NULL, 88, "\"title\":\"Some text\"" ) &&
+                          query_object_has( NULL, 66, "\"hidden\":true" );
+    if (getenv( "W2S_CAPTURE" ))
+    {
+        char event[MAX_PATH + 32];
+        snprintf( event, sizeof(event), "{\"t\":\"capture\",\"s\":\"%s\"}", getenv( "W2S_CAPTURE" ) );
+        inject( NULL, event );
+    }
+    inject( NULL, "{\"t\":\"control\",\"v\":5}" );
+    inject( NULL, "{\"t\":\"control\",\"v\":11,\"a\":[100]}" );
+    inject( NULL, "{\"t\":\"control\",\"v\":22,\"a\":[200]}" );
+    inject( NULL, "{\"t\":\"control\",\"v\":33,\"s\":\"hello\"}" );
+    inject( NULL, "{\"t\":\"control\",\"v\":44}" );
+    SetTimer( hwnd, 35, 800, save_controls_second );
+}
+
+/* Notepad++'s Save As has an "Append extension" box: the native panel shows the
+ * app's own controls rather than falling back to wine's dialog */
+static void selftest_save_controls(void)
+{
+    static const COMDLG_FILTERSPEC types[] = { { L"Text", L"*.txt" }, { L"All", L"*.*" } };
+    IFileSaveDialog *dialog;
+    IFileDialogCustomize *custom;
+    IShellItem *item;
+    WCHAR *path = NULL, *text = NULL;
+    DWORD cookie, sel11 = 0, sel22 = 0;
+    BOOL checked = FALSE;
+    HRESULT hr;
+
+    CoInitialize( NULL );
+    save_events.IFileDialogEvents_iface.lpVtbl = &fde_vtbl;
+    save_events.IFileDialogControlEvents_iface.lpVtbl = &fdce_vtbl;
+    save_events.log[0] = 0;
+    hr = CoCreateInstance( &CLSID_FileSaveDialog, NULL, CLSCTX_INPROC_SERVER, &IID_IFileSaveDialog, (void **)&dialog );
+    if (FAILED(hr))
+    {
+        check( FALSE, "IFileSaveDialog can be created" );
+        return;
+    }
+    IFileSaveDialog_QueryInterface( dialog, &IID_IFileDialogCustomize, (void **)&custom );
+    save_events.custom = custom;
+    IFileSaveDialog_SetFileTypes( dialog, ARRAYSIZE(types), types );
+    IFileSaveDialog_SetFileName( dialog, L"w2s-gallery-save.txt" );
+    IFileDialogCustomize_AddCheckButton( custom, 5, L"&Append extension", TRUE );
+    IFileDialogCustomize_StartVisualGroup( custom, 10, L"&Encoding:" );
+    IFileDialogCustomize_AddComboBox( custom, 11 );
+    IFileDialogCustomize_AddControlItem( custom, 11, 100, L"UTF-8" );
+    IFileDialogCustomize_AddControlItem( custom, 11, 101, L"UTF-16" );
+    IFileDialogCustomize_SetSelectedControlItem( custom, 11, 101 );
+    IFileDialogCustomize_EndVisualGroup( custom );
+    IFileDialogCustomize_AddRadioButtonList( custom, 22 );
+    IFileDialogCustomize_AddControlItem( custom, 22, 200, L"Unix (LF)" );
+    IFileDialogCustomize_AddControlItem( custom, 22, 201, L"Windows (CRLF)" );
+    IFileDialogCustomize_SetSelectedControlItem( custom, 22, 201 );
+    IFileDialogCustomize_AddEditBox( custom, 33, L"note" );
+    IFileDialogCustomize_AddPushButton( custom, 44, L"Options..." );
+    IFileDialogCustomize_AddSeparator( custom, 77 );
+    IFileDialogCustomize_AddText( custom, 88, L"Some text" );
+    IFileDialogCustomize_AddCheckButton( custom, 66, L"Hidden one", FALSE );
+    IFileDialogCustomize_SetControlState( custom, 66, CDCS_ENABLED );
+    IFileSaveDialog_Advise( dialog, &save_events.IFileDialogEvents_iface, &cookie );
+
+    SetTimer( main_window, 34, 1500, save_controls_first );
+    hr = IFileSaveDialog_Show( dialog, main_window );
+    IFileDialogCustomize_GetCheckButtonState( custom, 5, &checked );
+    IFileDialogCustomize_GetSelectedControlItem( custom, 11, &sel11 );
+    IFileDialogCustomize_GetSelectedControlItem( custom, 22, &sel22 );
+    IFileDialogCustomize_GetEditBoxText( custom, 33, &text );
+    if (SUCCEEDED(hr) && SUCCEEDED(IFileSaveDialog_GetResult( dialog, &item )))
+    {
+        IShellItem_GetDisplayName( item, SIGDN_FILESYSPATH, &path );
+        IShellItem_Release( item );
+    }
+    printf( "      save dialog %#lx: %ls; events: %s\n", hr, path ? path : L"(none)", save_events.log );
+    printf( "      read back: checked %d, encoding %lu, line ends %lu, note %ls\n", checked, sel11, sel22,
+            text ? text : L"(none)" );
+    check( save_controls_shown, "a save dialog's own controls (IFileDialogCustomize) are in the native panel: "
+           "check box, a group's pop-up, radio buttons, edit box, button, text; a hidden one hidden" );
+    check( save_controls_synced, "the app changing its controls while the panel is up (in its events) shows in the panel" );
+    check( hr == S_OK && path && !_wcsicmp( path, L"Z:\\tmp\\w2s-gallery-save.txt" ) &&
+           strstr( save_events.log, "check 5 0;" ) && strstr( save_events.log, "sel 11 100;" ) &&
+           strstr( save_events.log, "sel 22 200;" ) && strstr( save_events.log, "click 44;" ) &&
+           strstr( save_events.log, "check 5 1;ok 1" ) &&
+           checked && sel11 == 100 && sel22 == 200 && text && !wcscmp( text, L"hello" ),
+           "what the user does in the panel reaches the app (its control events, in order, the last before OnFileOk) "
+           "and is what it reads back" );
+    CoTaskMemFree( path );
+    CoTaskMemFree( text );
+    IFileSaveDialog_Unadvise( dialog, cookie );
+    IFileDialogCustomize_Release( custom );
+    IFileSaveDialog_Release( dialog );
+}
+
 static void selftest_replace_dialog(void)
 {
     static const WCHAR *tabs[] = { L"Find", L"Replace", L"Find in Files", L"Find in Projects", L"Mark" };
@@ -3114,6 +3320,12 @@ static int selftest(void)
         printf( "%d passed, %d failed\n", passes, failures );
         return failures;
     }
+    if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "save" ))
+    {
+        selftest_save_controls();
+        printf( "%d passed, %d failed\n", passes, failures );
+        return failures;
+    }
     if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "replace" ))
     {
         selftest_replace_dialog();
@@ -3596,6 +3808,7 @@ static int selftest(void)
         printf( "      IFileOpenDialog returned %#lx: %ls\n", hr, path );
         check( hr == S_OK && !_wcsicmp( path, L"Z:\\tmp" ), "IFileOpenDialog (FOS_PICKFOLDERS) returns the chosen folder" );
     }
+    selftest_save_controls();
 
     selftest_pickers();
     selftest_pagesetup();

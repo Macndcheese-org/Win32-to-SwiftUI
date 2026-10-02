@@ -286,7 +286,8 @@ public func w2s_swift_request_poll(_ id: UInt64, _ buffer: UnsafeMutablePointer<
         done?.pointee = 1
         return 0
     }
-    if let result = request.result {
+    // the events raised before the panel closed first (a box ticked just before Save)
+    if let result = request.result, request.events.isEmpty {
         done?.pointee = 1
         let needed = W2S.copyOut(result, buffer, size)
         if needed <= size { W2S.requests.removeValue(forKey: id) }

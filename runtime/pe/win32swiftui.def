@@ -9,6 +9,7 @@ EXPORTS
     W2SIsTranslated
     W2STaskDialog
     W2SItemDialog
+    W2SItemDialogEx
     W2SBrowseForFolder
     W2STrackPopupMenu
     W2SChooseColor

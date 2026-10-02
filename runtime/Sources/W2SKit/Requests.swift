@@ -395,6 +395,7 @@ enum Requests {
             panel = o
         }
         panel.showsHiddenFiles = params["showHidden"] as? Bool ?? false
+        request.window = panel
         let message = params["message"] as? String ?? params["title"] as? String ?? ""
         var status = ""
         func showMessage() {
@@ -417,7 +418,7 @@ enum Requests {
         }
         var target: FilterTarget?
         var popupTitles: [String] = []
-        weak var filterPopup: NSPopUpButton?
+        var filterPopup: NSPopUpButton?
         if filters.count > 1 {
             // several filters: a pop-up like TextEdit's file-format menu, with the
             // formats' names; their patterns are the panel's filter already (the
@@ -442,12 +443,25 @@ enum Requests {
             popup.widthAnchor.constraint(lessThanOrEqualToConstant: 400).isActive = true
             popupTitles = popup.itemTitles
             filterPopup = popup
-            let box = NSStackView(views: [popup])
+        }
+        if !filters.isEmpty { applyFilter(filterIndex - 1) }
+        // the app's own controls (IFileDialogCustomize) under the file types
+        let custom = (params["controls"] as? [[String: Any]]).map { list -> FileDialogControls in
+            let c = FileDialogControls(request: request)
+            c.apply(list)
+            return c
+        }
+        if filterPopup != nil || custom != nil {
+            let box = NSStackView()
+            box.orientation = .vertical
+            box.alignment = .centerX
+            box.spacing = 12
             box.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+            if let popup = filterPopup { box.addArrangedSubview(popup) }
+            if let custom = custom { box.addArrangedSubview(custom.view) }
             panel.accessoryView = box
             if let open = panel as? NSOpenPanel { open.isAccessoryViewDisclosed = true }
         }
-        if !filters.isEmpty { applyFilter(filterIndex - 1) }
 
         let complete: (NSApplication.ModalResponse) -> Void = { response in
             var paths: [String] = []
@@ -458,6 +472,7 @@ enum Requests {
             finish(request, ["paths": paths, "filterIndex": filterIndex])
             _ = target
             _ = delegate
+            _ = custom
         }
         request.update = { p in
             // the app, while the panel is up (BFFM_SETSELECTION, BFFM_SETOKTEXT, ...)
@@ -465,6 +480,7 @@ enum Requests {
             if let prompt = p["prompt"] as? String { panel.prompt = prompt }
             if let text = p["status"] as? String { status = text; showMessage() }
             if let ok = p["okEnabled"] as? Bool { delegate.okEnabled = ok }
+            if let list = p["controls"] as? [[String: Any]] { custom?.apply(list) }
         }
         request.inject = { event in
             // tests: {"t":"choose","s":"/unix/path"} or {"t":"cancel"}
@@ -473,6 +489,8 @@ enum Requests {
                 if !delegate.okEnabled { return }
                 finish(request, ["paths": [path], "filterIndex": filterIndex])
                 panel.cancel(nil)
+            } else if e["t"] as? String == "control" {
+                custom?.inject(e)
             } else if e["t"] as? String == "look", let path = e["s"] as? String {
                 // what browsing to a folder reports
                 panel.directoryURL = URL(fileURLWithPath: path, isDirectory: true)
@@ -488,7 +506,8 @@ enum Requests {
              "okEnabled": delegate.okEnabled, "sheet": panel.sheetParent != nil,
              "filterTitles": popupTitles, "filterWidth": Int(filterPopup?.frame.width ?? 0),
              "accessoryWidth": Int(panel.accessoryView?.frame.width ?? 0), "panelWidth": Int(panel.frame.width),
-             "hidesOnDeactivate": panel.hidesOnDeactivate,
+             "hidesOnDeactivate": panel.hidesOnDeactivate, "controls": custom?.query() ?? [],
+             "nameField": (panel as? NSOpenPanel) == nil ? panel.nameFieldStringValue : "",
              "policy": ["regular", "accessory", "prohibited"][NSApp.activationPolicy().rawValue],
              "overOwner": Detached.ownerFrame(params).map { $0.contains(NSPoint(x: panel.frame.midX, y: panel.frame.midY)) } ?? false]
         }

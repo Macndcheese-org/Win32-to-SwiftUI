@@ -815,14 +815,132 @@ static void set_path_result( OPENFILENAMEW *ofn, const WCHAR *path )
     }
 }
 
-static BOOL file_dialog( OPENFILENAMEW *ofn, BOOL save, DWORD fos, BOOL *ret );
+/* IFileDialogCustomize's controls, as comdlg32's itemdlg.c describes them (the
+ * same layout there). They stay comdlg32's: the panel shows them as they are,
+ * and a change made in it goes back through them, with the app's events. */
+struct w2s_item_entry
+{
+    DWORD id;
+    DWORD state;            /* CDCS_* */
+    const WCHAR *label;
+};
+
+struct w2s_item_control
+{
+    DWORD id;
+    DWORD type;             /* itemdlg.c's ITEMDLG_CCTRL_TYPE: item_kinds below */
+    DWORD state;            /* CDCS_* */
+    UINT group;             /* in the visual group at this index + 1; 0: none */
+    const WCHAR *text;      /* its label; an edit box's text */
+    BOOL has_value;
+    DWORD value;            /* a check box's state; a combo box's or radio list's selected item */
+    UINT count;
+    const struct w2s_item_entry *items;
+};
+
+struct w2s_item_custom
+{
+    void *ctx;
+    UINT (CALLBACK *controls)( void *ctx, const struct w2s_item_control **list );
+    void (CALLBACK *changed)( void *ctx, DWORD id, DWORD value, const WCHAR *text );
+};
+
+static const char *const item_kinds[] =
+    { "menu", "button", "combo", "radios", "check", "edit", "separator", "text", "opendropdown", "group" };
+
+static void json_item_controls( struct json *j, const struct w2s_item_custom *custom )
+{
+    const struct w2s_item_control *list;
+    UINT count = custom->controls( custom->ctx, &list ), i, k;
+
+    json_arr_begin( j, "controls" );
+    for (i = 0; i < count; i++)
+    {
+        const struct w2s_item_control *c = &list[i];
+
+        json_obj_begin( j );
+        json_int( j, "id", c->id );
+        json_str_a( j, "kind", c->type < ARRAYSIZE(item_kinds) ? item_kinds[c->type] : "unknown" );
+        json_bool( j, "enabled", (c->state & CDCS_ENABLED) != 0 );
+        json_bool( j, "visible", (c->state & CDCS_VISIBLE) != 0 );
+        if (c->group && c->group <= count) json_int( j, "group", list[c->group - 1].id );
+        json_str( j, "text", c->text ? c->text : L"" );
+        if (c->has_value) json_int( j, "value", c->value );
+        if (c->count)
+        {
+            json_arr_begin( j, "items" );
+            for (k = 0; k < c->count; k++)
+            {
+                json_obj_begin( j );
+                json_int( j, "id", c->items[k].id );
+                json_str( j, "label", c->items[k].label ? c->items[k].label : L"" );
+                json_bool( j, "enabled", (c->items[k].state & CDCS_ENABLED) != 0 );
+                json_bool( j, "visible", (c->items[k].state & CDCS_VISIBLE) != 0 );
+                json_obj_end( j );
+            }
+            json_arr_end( j );
+        }
+        json_obj_end( j );
+    }
+    json_arr_end( j );
+}
+
+struct item_dialog
+{
+    struct w2s_request_handler handler;     /* first: the handler is the state */
+    const struct w2s_item_custom *custom;
+    char *sent;                             /* the controls as the panel has them */
+};
+
+static char *item_controls( const struct w2s_item_custom *custom )
+{
+    struct json j;
+    char *copy;
+
+    json_init( &j );
+    json_obj_begin( &j );
+    json_item_controls( &j, custom );
+    json_obj_end( &j );
+    copy = HeapAlloc( GetProcessHeap(), 0, strlen( j.buf ) + 1 );
+    strcpy( copy, j.buf );
+    json_free( &j );
+    return copy;
+}
+
+/* {"t":"control","a":[id,value],"s":text}: the user changed one (ids as signed 32-bit) */
+static void item_event( struct w2s_request_handler *handler, UINT64 id, const struct w2s_event *ev )
+{
+    struct item_dialog *dlg = (struct item_dialog *)handler;
+
+    if (strcmp( ev->type, "control" ) || ev->array_count < 2) return;
+    dlg->custom->changed( dlg->custom->ctx, (DWORD)ev->array[0], (DWORD)ev->array[1], ev->string );
+}
+
+/* the app changed its controls meanwhile (in its events, from a timer): the panel follows */
+static void item_idle( struct w2s_request_handler *handler, UINT64 id )
+{
+    struct item_dialog *dlg = (struct item_dialog *)handler;
+    char *now = item_controls( dlg->custom );
+
+    if (dlg->sent && !strcmp( now, dlg->sent ))
+    {
+        HeapFree( GetProcessHeap(), 0, now );
+        return;
+    }
+    w2s_request_update( id, now );
+    HeapFree( GetProcessHeap(), 0, dlg->sent );
+    dlg->sent = now;
+}
+
+static BOOL file_dialog( OPENFILENAMEW *ofn, BOOL save, DWORD fos, const struct w2s_item_custom *custom, BOOL *ret );
+BOOL WINAPI W2SItemDialogEx( OPENFILENAMEW *ofn, BOOL save, DWORD fos, const struct w2s_item_custom *custom, BOOL *ret );
 
 /***********************************************************************
  *      W2SFileDialog  (win32swiftui.@)
  */
 BOOL WINAPI W2SFileDialog( OPENFILENAMEW *ofn, BOOL save, BOOL *ret )
 {
-    return file_dialog( ofn, save, 0, ret );
+    return file_dialog( ofn, save, 0, NULL, ret );
 }
 
 /***********************************************************************
@@ -834,16 +952,29 @@ BOOL WINAPI W2SFileDialog( OPENFILENAMEW *ofn, BOOL save, BOOL *ret )
  */
 BOOL WINAPI W2SItemDialog( OPENFILENAMEW *ofn, BOOL save, DWORD fos, BOOL *ret )
 {
+    return W2SItemDialogEx( ofn, save, fos, NULL, ret );
+}
+
+/***********************************************************************
+ *      W2SItemDialogEx  (win32swiftui.@)
+ *
+ * The same, with the app's own controls (IFileDialogCustomize), shown under
+ * the panel's file list as a Mac app's would be (custom NULL: none).
+ */
+BOOL WINAPI W2SItemDialogEx( OPENFILENAMEW *ofn, BOOL save, DWORD fos, const struct w2s_item_custom *custom, BOOL *ret )
+{
     ofn->Flags = OFN_EXPLORER;
     if (fos & FOS_ALLOWMULTISELECT) ofn->Flags |= OFN_ALLOWMULTISELECT;
     if (fos & FOS_FORCESHOWHIDDEN) ofn->Flags |= OFN_FORCESHOWHIDDEN;
     if (fos & FOS_NODEREFERENCELINKS) ofn->Flags |= OFN_NODEREFERENCELINKS;
     if (fos & FOS_NOCHANGEDIR) ofn->Flags |= OFN_NOCHANGEDIR;
-    return file_dialog( ofn, save, fos, ret );
+    return file_dialog( ofn, save, fos, custom, ret );
 }
 
-static BOOL file_dialog( OPENFILENAMEW *ofn, BOOL save, DWORD fos, BOOL *ret )
+static BOOL file_dialog( OPENFILENAMEW *ofn, BOOL save, DWORD fos, const struct w2s_item_custom *custom, BOOL *ret )
 {
+    struct item_dialog dlg = { { item_event, item_idle } };
+    BOOL ok;
     struct json j;
     char *result;
     WCHAR **paths, *initial_dir = NULL, *slash, dir[MAX_PATH];
@@ -888,14 +1019,18 @@ static BOOL file_dialog( OPENFILENAMEW *ofn, BOOL save, DWORD fos, BOOL *ret )
     if (!initial_dir && GetCurrentDirectoryW( ARRAYSIZE(dir), dir )) initial_dir = strdupW( dir );
     json_unix_path( &j, "dir", initial_dir );
     if (initial_dir) HeapFree( GetProcessHeap(), 0, initial_dir );
+    if (custom)
+    {
+        json_item_controls( &j, custom );
+        dlg.custom = custom;
+        dlg.sent = item_controls( custom );
+    }
     json_obj_end( &j );
 
-    if (!w2s_run_request( save ? "save" : "open", ofn->hwndOwner, j.buf, &result ))
-    {
-        json_free( &j );
-        return FALSE;
-    }
+    ok = w2s_run_request_ex( save ? "save" : "open", ofn->hwndOwner, j.buf, custom ? &dlg.handler : NULL, &result );
     json_free( &j );
+    HeapFree( GetProcessHeap(), 0, dlg.sent );
+    if (!ok) return FALSE;
 
     count = json_get_str_array( result, "paths", &paths );
     if (json_get_num( result, "filterIndex", &filter_index )) ofn->nFilterIndex = (DWORD)filter_index;
