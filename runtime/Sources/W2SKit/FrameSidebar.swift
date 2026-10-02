@@ -47,6 +47,7 @@ final class FrameSidebar: NSObject, WindowChrome {
         }
         // the Mac's sidebar text, whatever the tree's Win32 size
         let view = ControlRoot(model: host.model, entry: host.entry, fixed: FormMetrics.metrics(scale: host.scale))
+            .environment(\.w2sInSidebar, true)
         let controller = NSHostingController(rootView: AnyView(view))
         controller.sizingOptions = []
         self.controller = controller
@@ -56,7 +57,9 @@ final class FrameSidebar: NSObject, WindowChrome {
                        with: ["controller": controller, "width": width, "target": self] as NSDictionary)
         FrameToolbar.setSidebarToggle(true, window: window)
         attachedAt = Date()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.fitRows() }
+        for delay in [0.2, 0.6, 1.2, 1.8] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.fitRows() }
+        }
     }
 
     /// The window's list in the sidebar (SwiftUI's outline view).
@@ -67,21 +70,15 @@ final class FrameSidebar: NSObject, WindowChrome {
     }
 
     /// The rows a window opens with are shown whole: in its first moments, the
-    /// sidebar widens to the widest row in view (never past half the window), and
-    /// the app's splitter follows, as after a drag. The app's own width is in
-    /// Win32 pixels, laid out for its text, not the Mac's sidebar text.
+    /// sidebar widens by what the rows on screen fall short of (never past half
+    /// the window), and the app's splitter follows, as after a drag. The app's
+    /// own width is in Win32 pixels, laid out for its text, not the Mac's.
     private func fitRows() {
-        guard Date().timeIntervalSince(attachedAt) < 2, dragged == nil, !collapsed,
-              let side = sidebarView, let window = side.window, let list = FrameSidebar.table(in: side) else { return }
-        var need: CGFloat = 0
-        let rows = list.rows(in: list.visibleRect)
-        for row in rows.location..<(rows.location + rows.length) {
-            guard let cell = list.view(atColumn: 0, row: row, makeIfNecessary: false) else { continue }
-            let frame = list.frameOfCell(atColumn: 0, row: row)
-            need = max(need, frame.minX + cell.fittingSize.width + (list.bounds.width - frame.maxX))
-        }
-        guard need > 0 else { return }
-        need = min(ceil(need + side.bounds.width - list.bounds.width), (window.frame.width / 2).rounded(.down))
+        guard Date().timeIntervalSince(attachedAt) < 2, dragged == nil, !collapsed, let host = host,
+              let side = sidebarView, let window = side.window else { return }
+        let short = host.model.rowShortfall.values.max() ?? 0
+        guard short > 0.5 else { return }
+        let need = min(ceil(side.bounds.width + short), (window.frame.width / 2).rounded(.down))
         guard need > side.bounds.width + 1, need > fitted else { return }
         fitted = need
         window.perform(NSSelectorFromString("w2sSetSidebarWidth:"), with: NSNumber(value: Double(need)))
@@ -115,5 +112,14 @@ final class FrameSidebar: NSObject, WindowChrome {
         window?.perform(NSSelectorFromString("w2sDetachSidebar"))
         controller = nil
         host?.hosting?.isHidden = false
+    }
+}
+
+struct InSidebarKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    /// in the window's sidebar (FrameSidebar), not the control's own place in the window
+    var w2sInSidebar: Bool {
+        get { self[InSidebarKey.self] }
+        set { self[InSidebarKey.self] = newValue }
     }
 }

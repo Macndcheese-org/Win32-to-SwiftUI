@@ -163,6 +163,10 @@ final class ControlModel: ObservableObject {
         self.emit = emit
     }
 
+    /// A tree in the window's sidebar: by how much each row on screen falls short
+    /// of showing its name whole (main thread; TreeRows, FrameSidebar).
+    var rowShortfall: [Int: CGFloat] = [:]
+
     /// Icons of an icon view, sent once each (main thread).
     var images: [Int: NSImage] = [:]
     /// Which of them are stock icons shown as macOS images (for the tests).

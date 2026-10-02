@@ -707,15 +707,9 @@ enum Debug {
             if host.entry == "treeview", let sidebar = host.owned as? FrameSidebar {
                 out["frameSidebar"] = sidebar.attached
                 out["scaleMilli"] = Int((host.scale * 1000).rounded())     // points per Win32 pixel
-                // rows in view whose text doesn't fit (shown with "...")
-                if let side = sidebar.sidebarView, let list = FrameSidebar.table(in: side) {
-                    let rows = list.rows(in: list.visibleRect)
-                    out["truncatedRows"] = (rows.location..<(rows.location + rows.length)).filter { row in
-                        guard let cell = list.view(atColumn: 0, row: row, makeIfNecessary: false) else { return false }
-                        return cell.frame.width + 0.5 < cell.fittingSize.width
-                    }.count
-                    out["visibleRows"] = rows.length
-                }
+                // rows on screen whose name doesn't fit (shown with "...")
+                out["truncatedRows"] = host.model.rowShortfall.values.filter { $0 > 0.5 }.count
+                out["shownRows"] = host.model.rowShortfall.count
                 if let v = sidebar.sidebarView, let w = v.window {
                     out["sidebarSafeTop"] = Int(v.safeAreaInsets.top)
                     out["layoutTop"] = Int(w.frame.height - w.contentLayoutRect.maxY)

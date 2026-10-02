@@ -1470,7 +1470,7 @@ static void selftest_frame_sidebar(void)
     split_layout( win );
     ShowWindow( win, SW_SHOW );
     pump( 2500 );
-    check( query_int( tree, "visibleRows" ) >= 7 && query_int( tree, "truncatedRows" ) == 0,
+    check( query_int( tree, "shownRows" ) >= 7 && query_int( tree, "truncatedRows" ) == 0,
            "the sidebar opens wide enough for the rows in view: no name cut short" );
     /* the sidebar up to the pane beside the tree (in Retina mode a Win32 pixel is half a point) */
     check( pIsTranslated( tree ) && query_has( tree, "\"frameSidebar\":true" ) && query_has( tree, "\"sidebarItem\":true" ) &&
@@ -1524,7 +1524,7 @@ static void selftest_frame_sidebar(void)
     {
         char json[512];
         char *q = pQuery( tree );
-        printf( "      sidebar: %s\n", q ? strstr( q, "\"layoutTop\"" ) ? strstr( q, "\"layoutTop\"" ) : q : "(null)" );
+        printf( "      sidebar: %s\n", q ? q : "(null)" );
         if (q) pFree( q );
         snprintf( json, sizeof(json), "{\"t\":\"capture\",\"s\":\"%s\"}", getenv( "W2S_SIDEBAR_SHOT" ) );
         inject( tree, json );

@@ -1475,6 +1475,7 @@ struct TreeList: View {
 struct TreeRows: View {
     @ObservedObject var model: ControlModel
     let nodes: [Snapshot.TreeNode]
+    @Environment(\.w2sInSidebar) private var inSidebar
 
     var body: some View {
         ForEach(nodes) { node in
@@ -1498,10 +1499,20 @@ struct TreeRows: View {
         }
     }
 
-    /// A node as a native outline shows it: its icon (wine's folders as the
-    /// Finder's, icons.c) before its title.
+    /// A node as a native outline shows it; in the window's sidebar, it also
+    /// tells how much of its name doesn't fit (FrameSidebar widens to that).
     @ViewBuilder
     func row(_ node: Snapshot.TreeNode) -> some View {
+        if inSidebar {
+            label(node).background(RowShortfall(model: model, id: node.id, whole: label(node)))
+        } else {
+            label(node)
+        }
+    }
+
+    /// Its icon (wine's folders as the Finder's, icons.c) before its title.
+    @ViewBuilder
+    func label(_ node: Snapshot.TreeNode) -> some View {
         if let index = node.img, let image = model.images[index] {
             Label {
                 Text(node.text).lineLimit(1)
@@ -1519,6 +1530,27 @@ struct TreeRows: View {
             if node.id == id { node.open = open }
             else if let children = node.children { node.children = setting(id, open: open, in: children) }
             return node
+        }
+    }
+}
+
+/// How much wider a row would have to be for its name to show whole: its own
+/// copy at its ideal width against the width the list gives it. Rows on screen
+/// only (a row going off screen takes its number away).
+struct RowShortfall<Whole: View>: View {
+    let model: ControlModel
+    let id: Int
+    let whole: Whole
+
+    var body: some View {
+        GeometryReader { shown in
+            whole.fixedSize().hidden().background(GeometryReader { ideal in
+                let short = max(0, ideal.size.width - shown.size.width)
+                Color.clear
+                    .onAppear { model.rowShortfall[id] = short }
+                    .onChange(of: short) { model.rowShortfall[id] = $0 }
+                    .onDisappear { model.rowShortfall[id] = nil }
+            })
         }
     }
 }
