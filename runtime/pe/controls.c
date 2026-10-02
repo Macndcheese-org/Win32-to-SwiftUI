@@ -3156,29 +3156,79 @@ static void rebar_snapshot( struct w2s_control *ctl, struct json *j )
     }
 }
 
-/* RB_SHOWBAND for the band whose toolbar is in the window frame: the app shows
- * or hides the frame's toolbar; the band itself stays out of the window */
-static BOOL rebar_answer( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM lparam, LRESULT *ret )
+/* a band's toolbar, translated: data is set when that toolbar is in the window
+ * frame from this rebar */
+static struct w2s_control *band_toolbar( struct w2s_control *ctl, UINT band, struct tb_data **data )
 {
     REBARBANDINFOW info = { sizeof(info), RBBIM_CHILD };
     struct w2s_control *tb;
+
+    *data = NULL;
+    if (!CallWindowProcW( ctl->orig, ctl->hwnd, RB_GETBANDINFOW, band, (LPARAM)&info ) || !info.hwndChild ||
+        !(tb = w2s_control_of( info.hwndChild )) || strcmp( tb->kind->entry, "toolbar" ))
+        return NULL;
+    if (tb->data && ((struct tb_data *)tb->data)->frame && ((struct tb_data *)tb->data)->rebar == ctl->hwnd)
+        *data = tb->data;
+    return tb;
+}
+
+/* The band whose toolbar is in the window frame stays out of the window; the app
+ * showing or hiding it (RB_SHOWBAND, or its style through RB_SETBANDINFO: Notepad++'s
+ * "hide the toolbar") shows or hides the frame's toolbar, and reading it back tells
+ * the app what it set. Another band shown: its toolbar may go in the frame now. */
+static BOOL rebar_answer( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM lparam, LRESULT *ret )
+{
+    struct w2s_control *tb;
     struct tb_data *data;
 
-    if (msg != RB_SHOWBAND) return FALSE;
-    if (!SendMessageW( ctl->hwnd, RB_GETBANDINFOW, wparam, (LPARAM)&info ) || !info.hwndChild ||
-        !(tb = w2s_control_of( info.hwndChild )) || strcmp( tb->kind->entry, "toolbar" ))
-        return FALSE;
-    if (!(data = tb->data) || !data->frame || data->rebar != ctl->hwnd)
+    switch (msg)
     {
-        /* the app showing a band it put in hidden (Notepad++'s toolbar): its toolbar may go in
-         * the frame now, once the rebar has shown it */
-        PostMessageW( info.hwndChild, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
-        return FALSE;
+    case RB_SHOWBAND:
+        if (!(tb = band_toolbar( ctl, wparam, &data ))) return FALSE;
+        if (!data)
+        {
+            PostMessageW( tb->hwnd, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
+            return FALSE;
+        }
+        if (lparam != W2S_HIDE_BAND) data->band_shown = lparam != 0;    /* else ours, as it went to the frame */
+        *ret = CallWindowProcW( ctl->orig, ctl->hwnd, RB_SHOWBAND, wparam, FALSE );
+        w2s_push( tb, TRUE );
+        return TRUE;
+
+    case RB_SETBANDINFOA:
+    case RB_SETBANDINFOW:
+    {
+        const REBARBANDINFOW *in = (const REBARBANDINFOW *)lparam;
+        REBARBANDINFOW copy;
+
+        /* the style's offset is the same in both structures */
+        if (!in || !(in->fMask & RBBIM_STYLE) || !(tb = band_toolbar( ctl, wparam, &data ))) return FALSE;
+        if (!data)
+        {
+            PostMessageW( tb->hwnd, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
+            return FALSE;
+        }
+        data->band_shown = !(in->fStyle & RBBS_HIDDEN);
+        memcpy( &copy, in, min( in->cbSize, sizeof(copy) ) );
+        copy.fStyle |= RBBS_HIDDEN;
+        *ret = CallWindowProcW( ctl->orig, ctl->hwnd, msg, wparam, (LPARAM)&copy );
+        w2s_push( tb, TRUE );
+        return TRUE;
     }
-    if (lparam != W2S_HIDE_BAND) data->band_shown = lparam != 0;    /* else ours, as it went to the frame */
-    *ret = CallWindowProcW( ctl->orig, ctl->hwnd, RB_SHOWBAND, wparam, FALSE );
-    w2s_push( tb, TRUE );
-    return TRUE;
+
+    case RB_GETBANDINFOA:
+    case RB_GETBANDINFOW:
+    {
+        REBARBANDINFOW *out = (REBARBANDINFOW *)lparam;
+
+        if (!out || !(out->fMask & RBBIM_STYLE) || !band_toolbar( ctl, wparam, &data ) || !data) return FALSE;
+        *ret = CallWindowProcW( ctl->orig, ctl->hwnd, msg, wparam, lparam );
+        if (data->band_shown) out->fStyle &= ~RBBS_HIDDEN;
+        else out->fStyle |= RBBS_HIDDEN;
+        return TRUE;
+    }
+    }
+    return FALSE;
 }
 
 static const struct w2s_kind kind_rebar =

@@ -219,7 +219,7 @@ entries:
         code: "Color.clear"
     glass: none
     state_in: [RB_INSERTBAND, RB_SETBANDINFO, RB_DELETEBAND, RB_MAXIMIZEBAND, WM_SIZE, WM_PARENTNOTIFY]
-    answers: [RB_SHOWBAND]
+    answers: [RB_SHOWBAND, RB_SETBANDINFO, RB_GETBANDINFO]
     events_out: {layout: RBN_HEIGHTCHANGE, chevron: RBN_CHEVRONPUSHED}
     notes: >-
       A rebar is only a background with bands; each band's child (toolbar, combo box) is

@@ -2307,16 +2307,17 @@ static void selftest_frame_toolbar(void)
         GetWindowRect( rebar, &after );
         band.fMask = RBBIM_STYLE;
         SendMessageW( rebar, RB_GETBANDINFOW, 0, (LPARAM)&band );
-        check( pIsTranslated( tb ) && query_has( tb, "\"frameToolbar\":true" ) && (band.fStyle & RBBS_HIDDEN) &&
+        check( pIsTranslated( tb ) && query_has( tb, "\"frameToolbar\":true" ) && !(band.fStyle & RBBS_HIDDEN) &&
                after.bottom - after.top < before.bottom - before.top,
-               "a rebar's first-band toolbar is the frame's toolbar; its band leaves the rebar, which shrinks" );
+               "a rebar's first-band toolbar is the frame's toolbar; its band leaves the rebar, which shrinks "
+               "(the app still reads its band as shown)" );
         SendMessageW( rebar, RB_SHOWBAND, 0, FALSE );
         pump( 400 );
         check( query_has( tb, "\"frameToolbar\":false" ), "the app hiding that band (View > Toolbar) hides the frame's toolbar" );
         SendMessageW( rebar, RB_SHOWBAND, 0, TRUE );
         pump( 400 );
-        SendMessageW( rebar, RB_GETBANDINFOW, 0, (LPARAM)&band );
-        check( query_has( tb, "\"frameToolbar\":true" ) && (band.fStyle & RBBS_HIDDEN),
+        GetWindowRect( rebar, &after );
+        check( query_has( tb, "\"frameToolbar\":true" ) && after.bottom - after.top < before.bottom - before.top,
                "showing it again shows the frame's toolbar; the band stays out of the window" );
         DestroyWindow( win );
         pump( 200 );
@@ -2358,6 +2359,27 @@ static void selftest_frame_toolbar(void)
         pump( 800 );
         check( pIsTranslated( tb ) && query_has( tb, "\"frameToolbar\":true" ),
                "a rebar the app places across the top itself (Notepad++'s) puts its toolbar in the frame too" );
+        /* Notepad++'s "hide the toolbar": the band's style, read and set again */
+        band.fMask = RBBIM_STYLE;
+        SendMessageW( rebar, RB_GETBANDINFOW, 0, (LPARAM)&band );
+        band.fStyle |= RBBS_HIDDEN;
+        SendMessageW( rebar, RB_SETBANDINFOW, 0, (LPARAM)&band );
+        pump( 500 );
+        band.fStyle = 0;
+        SendMessageW( rebar, RB_GETBANDINFOW, 0, (LPARAM)&band );
+        check( query_has( tb, "\"frameToolbar\":false" ) && (band.fStyle & RBBS_HIDDEN),
+               "the app hiding its band through the band's style hides the frame's toolbar" );
+        band.fStyle &= ~RBBS_HIDDEN;
+        SendMessageW( rebar, RB_SETBANDINFOW, 0, (LPARAM)&band );
+        pump( 500 );
+        {
+            RECT rb;
+            GetWindowRect( rebar, &rb );
+            band.fStyle = 0;
+            SendMessageW( rebar, RB_GETBANDINFOW, 0, (LPARAM)&band );
+            check( query_has( tb, "\"frameToolbar\":true" ) && !(band.fStyle & RBBS_HIDDEN) && rb.bottom - rb.top <= 2,
+                   "showing it again: the frame's toolbar comes back, the band stays out of the window (no gap)" );
+        }
         DestroyWindow( win );
         pump( 200 );
     }
