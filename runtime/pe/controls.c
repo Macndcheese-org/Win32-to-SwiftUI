@@ -1064,7 +1064,6 @@ static void listbox_apply( struct w2s_control *ctl, const struct w2s_event *ev )
     }
 }
 
-static const struct w2s_kind kind_listbox_single = { "listbox.single", listbox_snapshot, listbox_apply };
 static const struct w2s_kind kind_listbox_multi = { "listbox.multi", listbox_snapshot, listbox_apply };
 
 /* ---------- ListView (list and report modes) ---------- */
@@ -1797,7 +1796,7 @@ static BOOL form_entry( const char *entry )
     {
         "static.text", "static.image", "static.separator", "static.frame",
         "button.push", "button.default", "button.checkbox", "button.radio", "button.3state", "button.groupbox",
-        "button.pushlike", "edit.single", "edit.password", "edit.number", "edit.readonly", "edit.multiline",
+        "button.pushlike", "button.split", "button.commandlink", "edit.single", "edit.password", "edit.number", "edit.readonly", "edit.multiline",
         "combobox.dropdownlist", "combobox.editable", "comboboxex", "listbox.single", "listbox.multi",
         "listview.list", "listview.report", "listview.checkboxes", "listview.icon", "treeview",
         "trackbar", "trackbar.vertical", "updown", "progress", "datetime", "syslink",
@@ -2064,20 +2063,18 @@ static void tab_snapshot( struct w2s_control *ctl, struct json *j )
     json_arr_end( j );
 }
 
-static void tab_apply( struct w2s_control *ctl, const struct w2s_event *ev )
+/* the settings form's own events: the app's windows into its slots, its size */
+static BOOL form_apply( struct w2s_control *ctl, HWND sheet, HWND page, struct tab_data *data,
+                        const struct w2s_event *ev )
 {
-    NMHDR nm = { 0 };
-
     if (!strcmp( ev->type, "formSlots" ) && ev->array_count % 3 == 0)
     {
         /* the app's windows into the form's slots: the page covers the sheet (it is
          * under the form), each window at its slot [hwnd, x, y] in the sheet */
-        struct tab_data *data = tab_layout( ctl, FALSE );
-        HWND sheet = GetParent( ctl->hwnd ), page = (HWND)SendMessageW( sheet, PSM_GETCURRENTPAGEHWND, 0, 0 );
         RECT client, rc;
         int i, k;
 
-        if (!data->form || !page) return;
+        if (!data->form || !page) return TRUE;
         if (data->page != page)
         {
             form_unslot( data );
@@ -2103,17 +2100,15 @@ static void tab_apply( struct w2s_control *ctl, const struct w2s_event *ev )
             }
             SetWindowPos( hwnd, 0, ev->array[i + 1], ev->array[i + 2], 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE );
         }
-        return;
+        return TRUE;
     }
     if (!strcmp( ev->type, "formSize" ) && ev->array_count == 2)
     {
         /* the form's size: the sheet's client area, the window kept centred on where it was */
-        struct tab_data *data = tab_layout( ctl, FALSE );
-        HWND sheet = GetParent( ctl->hwnd );
         RECT win, rc = { 0, 0, ev->array[0], ev->array[1] };
         BOOL first = !data->centred;
 
-        if (!data->form || ev->array[0] <= 0 || ev->array[1] <= 0) return;
+        if (!data->form || ev->array[0] <= 0 || ev->array[1] <= 0) return TRUE;
         GetWindowRect( sheet, &win );
         if (!data->resized)
         {
@@ -2125,8 +2120,18 @@ static void tab_apply( struct w2s_control *ctl, const struct w2s_event *ev )
         AdjustWindowRectEx( &rc, GetWindowLongW( sheet, GWL_STYLE ), FALSE, GetWindowLongW( sheet, GWL_EXSTYLE ) );
         form_resize( sheet, rc.right - rc.left, rc.bottom - rc.top, first );
         w2s_push( ctl, TRUE );
-        return;
+        return TRUE;
     }
+    return FALSE;
+}
+
+static void tab_apply( struct w2s_control *ctl, const struct w2s_event *ev )
+{
+    HWND sheet = GetParent( ctl->hwnd );
+    NMHDR nm = { 0 };
+
+    if (form_apply( ctl, sheet, (HWND)SendMessageW( sheet, PSM_GETCURRENTPAGEHWND, 0, 0 ), tab_layout( ctl, FALSE ), ev ))
+        return;
     if (strcmp( ev->type, "select" ) || !ev->has_value) return;
     if ((int)SendMessageW( ctl->hwnd, TCM_GETCURSEL, 0, 0 ) == (int)ev->value) return;
     if (w2s_notify_parent( ctl->hwnd, TCN_SELCHANGING, &nm )) return; /* vetoed */
@@ -2159,6 +2164,172 @@ static void tab_release( struct w2s_control *ctl )
 
 static const struct w2s_kind kind_tab = { "tab", tab_snapshot, tab_apply, tab_answer,
                                                   NULL, NULL, tab_observe, tab_release };
+
+/* ---------- A list of a settings window's panes ---------- */
+
+/* A list box whose items are its dialog's pages: child dialogs in one place
+ * beside it, one shown at a time (Notepad++'s Preferences). It's the Mac's
+ * settings window, as a property sheet is: the panes in the window's toolbar,
+ * the page shown laid out again as a settings form, the dialog's buttons
+ * below. *page: the page shown (NULL while the app switches). */
+static BOOL pane_list( HWND list, HWND *page )
+{
+    HWND dlg = GetParent( list ), child;
+    DWORD style = GetWindowLongW( list, GWL_STYLE ), dlg_style;
+    WCHAR cls[16];
+    RECT list_rc, rc, place = { 0 };
+    int pages = 0;
+
+    *page = NULL;
+    if (w2s_os_major < 13 || !dlg || !(style & LBS_NOTIFY) || (style & (LBS_MULTIPLESEL | LBS_EXTENDEDSEL))) return FALSE;
+    dlg_style = GetWindowLongW( dlg, GWL_STYLE );
+    if (!GetClassNameW( dlg, cls, ARRAYSIZE(cls) ) || wcscmp( cls, L"#32770" ) || (dlg_style & WS_CHILD) ||
+        (dlg_style & WS_CAPTION) != WS_CAPTION || SendMessageW( list, LB_GETCOUNT, 0, 0 ) < 2)
+        return FALSE;
+    GetWindowRect( list, &list_rc );
+    for (child = GetWindow( dlg, GW_CHILD ); child; child = GetWindow( child, GW_HWNDNEXT ))
+    {
+        if (!GetClassNameW( child, cls, ARRAYSIZE(cls) ) || wcscmp( cls, L"#32770" ) ||
+            !(GetWindowLongW( child, GWL_STYLE ) & WS_CHILD))
+            continue;
+        GetWindowRect( child, &rc );
+        if (rc.left < list_rc.right - 2) return FALSE;              /* beside the list */
+        if (pages && (abs( rc.left - place.left ) > 2 || abs( rc.top - place.top ) > 2)) return FALSE;
+        if (!pages) place = rc;
+        pages++;
+        if (GetWindowLongW( child, GWL_STYLE ) & WS_VISIBLE)
+        {
+            if (*page) return FALSE;                                 /* one at a time */
+            *page = child;
+        }
+    }
+    return pages >= 2;
+}
+
+/* the dialog's own windows besides the list and the pages: only its buttons
+ * (they go below the form); *blocker names one the form can't show */
+static BOOL pane_dialog_ok( HWND list, WCHAR *blocker )
+{
+    HWND dlg = GetParent( list ), child;
+    struct w2s_control *ctl;
+    WCHAR cls[16];
+
+    for (child = GetWindow( dlg, GW_CHILD ); child; child = GetWindow( child, GW_HWNDNEXT ))
+    {
+        if (child == list || !(GetWindowLongW( child, GWL_STYLE ) & WS_VISIBLE)) continue;
+        GetClassNameW( child, cls, ARRAYSIZE(cls) );
+        if (!wcscmp( cls, L"#32770" )) continue;
+        if ((ctl = w2s_control_of( child )) &&
+            (!strcmp( ctl->kind->entry, "button.push" ) || !strcmp( ctl->kind->entry, "button.default" ) ||
+             !strcmp( ctl->kind->entry, "static.separator" ) || !strcmp( ctl->kind->entry, "static.frame" )))
+            continue;
+        lstrcpynW( blocker, cls, 64 );
+        return FALSE;
+    }
+    return TRUE;
+}
+
+static void panes_snapshot( struct w2s_control *ctl, struct json *j )
+{
+    struct tab_data *data = ctl->data;
+    HWND dlg = GetParent( ctl->hwnd ), page, child;
+    WCHAR blocker[64];
+    RECT rc, client;
+
+    listbox_snapshot( ctl, j );
+    if (!pane_list( ctl->hwnd, &page ))
+    {
+        if (data && data->form)
+        {
+            data->form = FALSE;
+            form_restore( ctl, data );
+        }
+        return;
+    }
+    if (!data) data = ctl->data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data) );
+    if (!data->sheet)
+    {
+        /* its pages' windows coming and going lay the form out again (w2s_form_child_changed) */
+        data->sheet = TRUE;
+        SetPropW( dlg, form_prop, ctl->hwnd );
+        TRACE( "%p: the pane list of %p\n", ctl->hwnd, dlg );
+    }
+    blocker[0] = 0;
+    if (!pane_dialog_ok( ctl->hwnd, blocker )) data->form = FALSE;
+    else
+    {
+        /* between two pages (the list's selection comes before the page shows) the mode stays */
+        int formable = form_page( dlg, page, NULL, blocker, data );
+        if (formable >= 0) data->form = formable;
+    }
+    if (blocker[0]) json_str( j, "formBlocker", blocker );
+    if (!data->form)
+    {
+        form_restore( ctl, data );
+        return;
+    }
+
+    /* as a property sheet's (tab_snapshot): the dialog, where the list is, the page, the buttons */
+    json_str_a( j, "mode", "form" );
+    GetClientRect( dlg, &client );
+    GetWindowRect( ctl->hwnd, &rc );
+    MapWindowPoints( NULL, dlg, (POINT *)&rc, 2 );
+    json_arr_begin( j, "sheetPx" );
+    json_int( j, NULL, client.right );
+    json_int( j, NULL, client.bottom );
+    json_arr_end( j );
+    json_arr_begin( j, "tabRect" );
+    json_int( j, NULL, rc.left );
+    json_int( j, NULL, rc.top );
+    json_int( j, NULL, rc.right - rc.left );
+    json_int( j, NULL, rc.bottom - rc.top );
+    json_arr_end( j );
+    json_arr_begin( j, "page" );
+    if (page) form_page( dlg, page, j, NULL, data );
+    json_arr_end( j );
+    json_arr_begin( j, "sheetButtons" );
+    for (child = GetWindow( dlg, GW_CHILD ); child; child = GetWindow( child, GW_HWNDNEXT ))
+    {
+        struct w2s_control *b = w2s_control_of( child );
+        POINT none = { 0, 0 };
+        if (b && (GetWindowLongW( child, GWL_STYLE ) & WS_VISIBLE) &&
+            (!strcmp( b->kind->entry, "button.push" ) || !strcmp( b->kind->entry, "button.default" )))
+            form_item( j, b, dlg, none );
+    }
+    json_arr_end( j );
+}
+
+static void panes_apply( struct w2s_control *ctl, const struct w2s_event *ev )
+{
+    struct tab_data *data = ctl->data;
+    HWND page;
+
+    if (data && data->sheet && pane_list( ctl->hwnd, &page ) && form_apply( ctl, GetParent( ctl->hwnd ), page, data, ev ))
+        return;
+    /* the page going away gets its windows back where they were */
+    if (data && !strcmp( ev->type, "select" )) form_unslot( data );
+    listbox_apply( ctl, ev );
+}
+
+static void panes_observe( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    struct tab_data *data = ctl->data;
+
+    if (msg == LB_SETCURSEL && data && data->sheet) form_unslot( data );
+}
+
+static void panes_release( struct w2s_control *ctl )
+{
+    struct tab_data *data = ctl->data;
+    HWND dlg = GetParent( ctl->hwnd );
+
+    if (data) form_unslot( data );
+    if (data && data->sheet && dlg && GetPropW( dlg, form_prop ) == ctl->hwnd) RemovePropW( dlg, form_prop );
+    HeapFree( GetProcessHeap(), 0, data );
+}
+
+static const struct w2s_kind kind_listbox_single = { "listbox.single", panes_snapshot, panes_apply, NULL,
+                                                     NULL, NULL, panes_observe, panes_release };
 
 /* ---------- Wizard (map: propsheet.wizard) ---------- */
 
@@ -2612,16 +2783,30 @@ static BOOL toolbar_frame( struct w2s_control *ctl )
         if (!top || (GetWindowLongW( top, GWL_STYLE ) & WS_CHILD)) return FALSE;
         GetClassNameW( top, cls, ARRAYSIZE(cls) );
         if (!wcscmp( cls, L"#32770" ) || (GetWindowLongW( rebar, GWL_STYLE ) & CCS_VERT)) return FALSE;
-        if (GetWindow( ctl->hwnd, GW_CHILD ) || SendMessageW( ctl->hwnd, TB_BUTTONCOUNT, 0, 0 ) <= 0) return FALSE;
-        if (rebar_band_of( rebar, ctl->hwnd ) != 0) return FALSE;
+        if (GetWindow( ctl->hwnd, GW_CHILD ) || SendMessageW( ctl->hwnd, TB_BUTTONCOUNT, 0, 0 ) <= 0)
+        {
+            TRACE( "%p: not in the frame: no buttons yet\n", ctl->hwnd );
+            return FALSE;
+        }
+        if (rebar_band_of( rebar, ctl->hwnd ) != 0)
+        {
+            TRACE( "%p: not in the frame: not the rebar's first band (%d)\n", ctl->hwnd, rebar_band_of( rebar, ctl->hwnd ) );
+            return FALSE;
+        }
         if ((owner = GetPropW( top, frame_toolbar_prop )) && owner != ctl->hwnd && IsWindow( owner )) return FALSE;
         /* along the top, across the window: the app may place it itself (CCS_NOPARENTALIGN,
          * Notepad++'s) */
         GetWindowRect( rebar, &rc );
         MapWindowPoints( NULL, top, (POINT *)&rc, 2 );
         GetClientRect( top, &client );
-        if (rc.top > 4 || (rc.right - rc.left) * 4 < client.right * 3) return FALSE;
+        if (rc.top > 4 || (rc.right - rc.left) * 4 < client.right * 3)
+        {
+            TRACE( "%p: not in the frame: rebar at %ld,%ld-%ld,%ld in %ldx%ld\n", ctl->hwnd, rc.left, rc.top, rc.right,
+                   rc.bottom, client.right, client.bottom );
+            return FALSE;
+        }
         SendMessageW( rebar, RB_GETBANDINFOW, 0, (LPARAM)&info );
+        if (info.fStyle & RBBS_HIDDEN) TRACE( "%p: not in the frame: band hidden\n", ctl->hwnd );
         return !(info.fStyle & RBBS_HIDDEN);
     }
     if (!parent || (GetWindowLongW( parent, GWL_STYLE ) & WS_CHILD)) return FALSE;
@@ -2951,9 +3136,24 @@ static const struct w2s_kind kind_toolbar =
  * bands' windows are translated or stay the app's (the region) */
 static void rebar_snapshot( struct w2s_control *ctl, struct json *j )
 {
+    int i, count = (int)SendMessageW( ctl->hwnd, RB_GETBANDCOUNT, 0, 0 );
     HRGN rgn;
-    json_int( j, "bands", (int)SendMessageW( ctl->hwnd, RB_GETBANDCOUNT, 0, 0 ) );
+
+    json_int( j, "bands", count );
     if ((rgn = children_region( ctl->hwnd, j ))) DeleteObject( rgn );
+    /* its bands changed (one the app put in hidden shown by RB_SETBANDINFO, Notepad++'s
+     * toolbar): a toolbar not in the window frame yet may go there now */
+    for (i = 0; i < count; i++)
+    {
+        REBARBANDINFOW info = { sizeof(info), RBBIM_CHILD };
+        struct w2s_control *tb;
+        struct tb_data *data;
+
+        if (SendMessageW( ctl->hwnd, RB_GETBANDINFOW, i, (LPARAM)&info ) && info.hwndChild &&
+            (tb = w2s_control_of( info.hwndChild )) && !strcmp( tb->kind->entry, "toolbar" ) &&
+            (!(data = tb->data) || !data->frame))
+            PostMessageW( info.hwndChild, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
+    }
 }
 
 /* RB_SHOWBAND for the band whose toolbar is in the window frame: the app shows
@@ -2966,9 +3166,15 @@ static BOOL rebar_answer( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPAR
 
     if (msg != RB_SHOWBAND) return FALSE;
     if (!SendMessageW( ctl->hwnd, RB_GETBANDINFOW, wparam, (LPARAM)&info ) || !info.hwndChild ||
-        !(tb = w2s_control_of( info.hwndChild )) || strcmp( tb->kind->entry, "toolbar" ) ||
-        !(data = tb->data) || !data->frame || data->rebar != ctl->hwnd)
+        !(tb = w2s_control_of( info.hwndChild )) || strcmp( tb->kind->entry, "toolbar" ))
         return FALSE;
+    if (!(data = tb->data) || !data->frame || data->rebar != ctl->hwnd)
+    {
+        /* the app showing a band it put in hidden (Notepad++'s toolbar): its toolbar may go in
+         * the frame now, once the rebar has shown it */
+        PostMessageW( info.hwndChild, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
+        return FALSE;
+    }
     if (lparam != W2S_HIDE_BAND) data->band_shown = lparam != 0;    /* else ours, as it went to the frame */
     *ret = CallWindowProcW( ctl->orig, ctl->hwnd, RB_SHOWBAND, wparam, FALSE );
     w2s_push( tb, TRUE );

@@ -39,8 +39,8 @@ enum PaneIcons {
     /// Apple's own search index of SF Symbols (as the SF Symbols app searches it) for
     /// the whole title, one character shorter at a time down to four ("Coloration"
     /// -> ... "Color"); else a settings pane's generic symbol.
-    static func symbol(for title: String) -> String {
-        let folded = fold(stripMnemonic(title))
+    static func symbol(for title: String, mnemonics: Bool = true) -> String {
+        let folded = fold(mnemonics ? stripMnemonic(title) : title)
         let words = folded.split(whereSeparator: { !$0.isLetter && !$0.isNumber && $0 != "-" }).map(String.init)
             .filter { !small.contains($0) && !$0.allSatisfy(\.isNumber) }
         var candidates = [folded]

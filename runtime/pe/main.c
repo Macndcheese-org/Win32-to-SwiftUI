@@ -578,11 +578,17 @@ static LRESULT CALLBACK show_hook( int code, WPARAM wparam, LPARAM lparam )
 {
     const CWPRETSTRUCT *cwp = (const CWPRETSTRUCT *)lparam;
 
-    if (code == HC_ACTION && deferred_count > 0 && cwp->message == WM_WINDOWPOSCHANGED &&
-        (((const WINDOWPOS *)cwp->lParam)->flags & SWP_SHOWWINDOW))
+    if (code == HC_ACTION && cwp->message == WM_WINDOWPOSCHANGED)
     {
-        activate_shown_child( cwp->hwnd, 0 );
-        EnumChildWindows( cwp->hwnd, activate_shown_child, 0 );
+        UINT flags = ((const WINDOWPOS *)cwp->lParam)->flags;
+
+        if ((flags & SWP_SHOWWINDOW) && deferred_count > 0)
+        {
+            activate_shown_child( cwp->hwnd, 0 );
+            EnumChildWindows( cwp->hwnd, activate_shown_child, 0 );
+        }
+        /* a settings window's page shown or hidden: its form lays out again */
+        if (flags & (SWP_SHOWWINDOW | SWP_HIDEWINDOW)) w2s_form_child_changed( cwp->hwnd );
     }
     return CallNextHookEx( NULL, code, wparam, lparam );
 }

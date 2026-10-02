@@ -260,6 +260,12 @@ final class PassThroughHostingView<Content: View>: NSHostingView<Content> {
                 let s = ScrollGeometry.scale(snap, height: size.height)
                 return (snap.bars ?? []).contains { ScrollGeometry.frame($0, snap, scale: s).contains(point) }
             }
+        case "listbox.single":
+            // a pane list as the settings form: the form, but for the app's own windows in its slots
+            return { [weak model] point, _ in
+                guard let model = model, model.snap.mode == "form" else { return true }
+                return !(FormPlaces.holes[W2S.handle(of: model)] ?? []).contains { $0.contains(point) }
+            }
         case "tab":
             return { [weak model] point, size in
                 guard let snap = model?.snap else { return false }

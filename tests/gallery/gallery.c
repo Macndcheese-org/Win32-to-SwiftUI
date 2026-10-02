@@ -1660,6 +1660,73 @@ static void selftest_menu_order(void)
     pump( 200 );
 }
 
+/* Notepad++'s Preferences: a list box of panes, the pages child dialogs in one
+ * place beside it (one shown), a Close button: a Mac settings window */
+static HWND pane_pages[5], pane_checks[5];
+
+static INT_PTR CALLBACK panes_dlgproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    if (msg == WM_COMMAND && LOWORD( wparam ) == 1 && HIWORD( wparam ) == LBN_SELCHANGE)
+    {
+        int i, sel = (int)SendMessageW( (HWND)lparam, LB_GETCURSEL, 0, 0 );
+        for (i = 0; i < 5; i++) ShowWindow( pane_pages[i], i == sel ? SW_SHOW : SW_HIDE );
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static void selftest_pane_list(void)
+{
+    static const WCHAR *panes[] = { L"General", L"Toolbar", L"Dark Mode", L"Search", L"Print & Export" };
+    HWND dlg, list, close;
+    RECT client;
+    int i;
+
+    dlg = CreateWindowExW( WS_EX_CONTROLPARENT | WS_EX_DLGMODALFRAME, WC_DIALOG, L"Preferences",
+                           WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_SETFONT, 260, 220, 640, 380, main_window, NULL,
+                           GetModuleHandleW( NULL ), NULL );
+    SetWindowLongPtrW( dlg, DWLP_DLGPROC, (LONG_PTR)panes_dlgproc );
+    list = CreateWindowExW( WS_EX_CLIENTEDGE, L"ListBox", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | LBS_NOTIFY |
+                            LBS_NOINTEGRALHEIGHT, 10, 10, 150, 300, dlg, (HMENU)1, GetModuleHandleW( NULL ), NULL );
+    for (i = 0; i < 5; i++) SendMessageW( list, LB_ADDSTRING, 0, (LPARAM)panes[i] );
+    close = CreateWindowExW( 0, L"Button", L"Close", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 500, 320, 75, 23, dlg,
+                             (HMENU)IDCANCEL, GetModuleHandleW( NULL ), NULL );
+    for (i = 0; i < 5; i++)
+    {
+        WCHAR text[64];
+        HWND box;
+        pane_pages[i] = CreateWindowExW( WS_EX_CONTROLPARENT, WC_DIALOG, panes[i], WS_CHILD | DS_CONTROL | (i ? 0 : WS_VISIBLE),
+                                         170, 10, 450, 300, dlg, NULL, GetModuleHandleW( NULL ), NULL );
+        swprintf( text, ARRAYSIZE(text), L"%s options", panes[i] );
+        box = CreateWindowExW( 0, L"Button", text, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 10, 10, 300, 80, pane_pages[i],
+                               NULL, GetModuleHandleW( NULL ), NULL );
+        swprintf( text, ARRAYSIZE(text), L"Enable %s", panes[i] );
+        pane_checks[i] = CreateWindowExW( 0, L"Button", text, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 20, 35, 200, 18,
+                                          pane_pages[i], NULL, GetModuleHandleW( NULL ), NULL );
+        (void)box;
+    }
+    SendMessageW( list, LB_SETCURSEL, 0, 0 );
+    ShowWindow( dlg, SW_SHOW );
+    pump( 1500 );
+    GetClientRect( dlg, &client );
+    check( pIsTranslated( list ) && query_has( list, "\"mode\":\"form\"" ) && query_has( list, "\"paneToolbar\":true" ) &&
+           query_has( list, "\"panes\":[\"General\",\"Toolbar\",\"Dark Mode\",\"Search\",\"Print & Export\"]" ),
+           "a list box of its dialog's pages (Notepad++'s Preferences) is a settings window: its items the toolbar's panes" );
+    check( query_has( list, "\"paneIcons\":[\"gearshape\",\"menubar.rectangle\",\"moon\",\"magnifyingglass\",\"printer\"]" ),
+           "each pane with its icon (General, Toolbar, Dark Mode, Search, Print); a list item's & is text" );
+    check( query_has( list, "\"formSections\":1" ) && query_has( pane_checks[0], "\"formHidden\":true" ),
+           "the page shown, laid out again as the form (its group box a section, its check box in it)" );
+    check( query_has( close, "\"formHidden\":true" ), "the dialog's Close button is the form's" );
+    inject( list, "{\"t\":\"select\",\"v\":2}" );
+    pump( 1200 );
+    check( IsWindowVisible( pane_pages[2] ) && !IsWindowVisible( pane_pages[0] ) && query_has( list, "\"paneSelected\":2" ) &&
+           query_has( list, "\"windowTitle\":\"Dark Mode\"" ) && query_has( pane_checks[2], "\"formHidden\":true" ),
+           "a pane chosen in the toolbar: the app shows its page (LBN_SELCHANGE), the form and the title follow" );
+    DestroyWindow( dlg );
+    pump( 200 );
+    (void)client;
+}
+
 /* Notepad++'s Find/Replace dialog: buttons, then a tab control made after them,
  * their sibling under them across the dialog; translucent (layered) while it isn't
  * the active window */
@@ -2261,7 +2328,8 @@ static void selftest_frame_toolbar(void)
         HWND rebar;
         RECT rc;
 
-        win = CreateWindowExW( 0, L"W2SToolbarWindow", L"Notepad", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+        /* built hidden, shown once ready, as Notepad++ does */
+        win = CreateWindowExW( 0, L"W2SToolbarWindow", L"Notepad", WS_OVERLAPPEDWINDOW,
                                170, 170, 480, 300, NULL, NULL, GetModuleHandleW( NULL ), NULL );
         GetClientRect( win, &rc );
         rebar = CreateWindowExW( WS_EX_TOOLWINDOW, REBARCLASSNAMEW, NULL, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS |
@@ -2273,12 +2341,20 @@ static void selftest_frame_toolbar(void)
         SendMessageW( tb, TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0 );
         SendMessageW( tb, TB_ADDBITMAP, 0, (LPARAM)&bitmap );
         SendMessageW( tb, TB_ADDBUTTONSW, ARRAYSIZE(buttons), (LPARAM)buttons );
+        /* the band put in hidden, shown once the app is set up (as Notepad++ does) */
         band.fMask = RBBIM_CHILD | RBBIM_CHILDSIZE | RBBIM_STYLE | RBBIM_ID;
-        band.fStyle = RBBS_NOGRIPPER;
+        band.fStyle = RBBS_NOGRIPPER | RBBS_HIDDEN;
         band.hwndChild = tb;
         band.cyMinChild = 25;
         band.wID = 1;
         SendMessageW( rebar, RB_INSERTBANDW, -1, (LPARAM)&band );
+        ShowWindow( win, SW_SHOW );
+        pump( 400 );
+        check( query_has( tb, "\"hostHidden\":true" ),
+               "its band hidden, the rebar no higher than nothing: the toolbar's view doesn't show (wine clips it away)" );
+        band.fMask = RBBIM_STYLE;         /* shown again as Notepad++ does it: the band's style */
+        band.fStyle = RBBS_NOGRIPPER;
+        SendMessageW( rebar, RB_SETBANDINFOW, 0, (LPARAM)&band );
         pump( 800 );
         check( pIsTranslated( tb ) && query_has( tb, "\"frameToolbar\":true" ),
                "a rebar the app places across the top itself (Notepad++'s) puts its toolbar in the frame too" );
@@ -3010,6 +3086,12 @@ static int selftest(void)
     pIsTranslated = (void *)GetProcAddress( w2s, "W2SIsTranslated" );
     pump( 1500 );
     /* W2S_ONLY=sidebar|shortcut: just that test, while working on it */
+    if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "panes" ))
+    {
+        selftest_pane_list();
+        printf( "%d passed, %d failed\n", passes, failures );
+        return failures;
+    }
     if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "replace" ))
     {
         selftest_replace_dialog();
@@ -3505,6 +3587,7 @@ static int selftest(void)
     selftest_menu_order();
     selftest_menu_shortcut();
     selftest_replace_dialog();
+    selftest_pane_list();
     selftest_frame_sidebar();
     selftest_about();
     selftest_taskbar();

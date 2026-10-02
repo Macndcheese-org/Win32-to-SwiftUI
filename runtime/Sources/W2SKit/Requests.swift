@@ -770,14 +770,15 @@ enum Debug {
                     out["toolbarStyle"] = window?.toolbarStyle == .unified ? "unified" : "other"
                 }
             }
-            if host.entry == "tab", host.model.snap.mode == "form", let hostView = host.hosting?.superview {
+            if host.entry == "tab" || host.entry == "listbox.single", host.model.snap.mode == "form",
+               let hostView = host.hosting?.superview {
                 // the settings form: what it covers, what it shows
                 out["formCover"] = [Int(hostView.frame.width), Int(hostView.frame.height)]
                 out["formFront"] = hostView.superview?.subviews.last === hostView
                 if let panes = (host.owned as? SettingsFormController)?.panes {
                     out["paneToolbar"] = panes.attached
                     out["panes"] = panes.toolbar.items.map { $0.label }
-                    out["paneIcons"] = panes.toolbar.items.map { PaneIcons.symbol(for: $0.label) }
+                    out["paneIcons"] = panes.toolbar.items.map { PaneIcons.symbol(for: $0.label, mnemonics: false) }
                     out["paneSelected"] = panes.selected ?? -1
                     out["paneStyle"] = hostView.window?.toolbarStyle.rawValue ?? -1
                     out["windowTitle"] = hostView.window?.title ?? ""
@@ -817,6 +818,7 @@ enum Debug {
                 out["passThrough"] = hosting.hitTest(NSPoint(x: hosting.frame.midX, y: hosting.frame.midY)) == nil
                 out["appearance"] = hosting.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])?.rawValue ?? ""
                 out["titleBar"] = hosting.window?.styleMask.contains(.titled) ?? false
+                out["hostHidden"] = hosting.superview?.isHidden ?? true
             }
             return W2S.json(out)
         case "inject":

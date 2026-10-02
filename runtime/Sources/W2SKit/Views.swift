@@ -169,6 +169,9 @@ struct ControlRoot: View {
         case "combobox.editable":
             EditableCombo(model: model, fontSize: metrics.fontSize, controlSize: metrics.controlSize)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        case "listbox.single" where snap.mode == "form":
+            // a settings window's pane list (Notepad++'s Preferences): the window's settings form
+            if #available(macOS 13, *) { SettingsSheet(model: model) } else { ListBoxView(model: model, multi: false) }
         case "listbox.single", "listbox.multi":
             ListBoxView(model: model, multi: entry == "listbox.multi")
         case "listview.list":
@@ -2003,6 +2006,22 @@ struct DateTimePicker: View {
 
 // MARK: - tab (map: tab)
 
+/// The whole sheet as a settings form (a property sheet's tab control, a pane
+/// list): this view covers the sheet (outsets), the panes are the toolbar
+@available(macOS 13, *)
+struct SettingsSheet: View {
+    @ObservedObject var model: ControlModel
+
+    var body: some View {
+        GeometryReader { geo in
+            let sheet = model.snap.sheetPx ?? []
+            let s = sheet.count == 2 && sheet[1] > 0 ? geo.size.height / CGFloat(sheet[1]) : 1
+            SettingsForm(model: model, scale: s.isFinite && s > 0 ? s : 1, form: W2S.handle(of: model))
+                .frame(width: geo.size.width, height: geo.size.height)
+        }
+    }
+}
+
 /// Only the strip is native: a Win32 tab control's pages are separate windows
 /// the app shows and hides, drawn under this view, so the rest stays clear.
 struct TabStrip: View {
@@ -2010,13 +2029,7 @@ struct TabStrip: View {
 
     var body: some View {
         if model.snap.mode == "form", #available(macOS 13, *) {
-            // the whole sheet as a settings form: this view covers the sheet (outsets)
-            GeometryReader { geo in
-                let sheet = model.snap.sheetPx ?? []
-                let s = sheet.count == 2 && sheet[1] > 0 ? geo.size.height / CGFloat(sheet[1]) : 1
-                SettingsForm(model: model, scale: s.isFinite && s > 0 ? s : 1, form: W2S.handle(of: model))
-                    .frame(width: geo.size.width, height: geo.size.height)
-            }
+            SettingsSheet(model: model)
         } else if model.snap.mode == "wizard" {
             WizardSteps(model: model)
         } else {

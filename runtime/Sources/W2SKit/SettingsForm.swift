@@ -192,6 +192,10 @@ enum FormMetrics {
         switch item.e {
         case "button.push", "button.default", "button.pushlike":
             return CGSize(width: max(w, textWidth(text) + 32), height: 24)
+        case "button.split":
+            return CGSize(width: max(w, textWidth(text) + 52), height: 24)    // and its menu's arrow
+        case "button.commandlink":
+            return CGSize(width: max(w, textWidth(text) + 40), height: max(h, 40))
         case "button.checkbox", "button.radio", "button.3state":
             return CGSize(width: max(w, textWidth(text) + 26), height: 20)
         case "static.text", "syslink":
@@ -499,8 +503,9 @@ final class SettingsToolbar: NSObject, NSToolbarDelegate {
         }
     }
 
-    func update(titles new: [String], selection: Int) {
-        let names = new.map { stripMnemonic($0) }
+    /// mnemonics: a tab control's titles have access keys ("&General"), a list box's items don't
+    func update(titles new: [String], selection: Int, mnemonics: Bool) {
+        let names = mnemonics ? new.map { stripMnemonic($0) } : new
         if names != titles {
             titles = names
             while !toolbar.items.isEmpty { toolbar.removeItem(at: 0) }
@@ -527,7 +532,8 @@ final class SettingsToolbar: NSObject, NSToolbarDelegate {
         let item = NSToolbarItem(itemIdentifier: identifier)
         item.label = titles[i]
         item.paletteLabel = titles[i]
-        item.image = NSImage(systemSymbolName: PaneIcons.symbol(for: titles[i]), accessibilityDescription: titles[i])
+        item.image = NSImage(systemSymbolName: PaneIcons.symbol(for: titles[i], mnemonics: false),
+                             accessibilityDescription: titles[i])
         item.tag = i
         item.target = self
         item.action = #selector(chosen(_:))
@@ -582,7 +588,7 @@ final class SettingsFormController: WindowChrome {
                 host.model.emit(["t": "select", "v": i])
             }
         }
-        panes?.update(titles: snap.items ?? [], selection: snap.selection ?? 0)
+        panes?.update(titles: snap.items ?? [], selection: snap.selection ?? 0, mnemonics: host.entry == "tab")
 
         // the page's and the sheet's controls show in the form, not in their own views
         let shown = Set((snap.page ?? []).map { $0.h } + (snap.sheetButtons ?? []).map { $0.h })

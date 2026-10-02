@@ -118,7 +118,8 @@ public func w2s_swift_control_create(_ hostView: UInt64, _ window: UInt64, _ pos
         host.hosting = hosting
         if entryID == "button.groupbox" { GroupBoxTitle.apply(host) }
         // what a control puts in its window's frame lives exactly as long as the control
-        if entryID == "tab" {
+        if entryID == "tab" || entryID == "listbox.single" {
+            // a property sheet's tab control or a pane list: the window's settings form
             let form = SettingsFormController(host: host)
             host.owned = form
             form.update()
