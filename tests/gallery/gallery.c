@@ -1345,6 +1345,12 @@ static void selftest_look(void)
 static int split_pos = 150;
 static BOOL split_drag;
 static int split_selchanged;
+static int split_sorted[3], split_sort_column = -1, split_sort_down;
+
+static int CALLBACK split_compare( LPARAM a, LPARAM b, LPARAM down )
+{
+    return down ? (int)(b - a) : (int)(a - b);
+}
 
 static void split_layout( HWND hwnd )
 {
@@ -1363,6 +1369,15 @@ static LRESULT CALLBACK splitwin_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
     case WM_SIZE: split_layout( hwnd ); return 0;
     case WM_NOTIFY:
         if (((NMHDR *)lparam)->code == TVN_SELCHANGEDW) split_selchanged++;
+        /* regedit's: a click on the sorted column's header turns the order around */
+        if (((NMHDR *)lparam)->code == LVN_COLUMNCLICK)
+        {
+            int column = ((NMLISTVIEW *)lparam)->iSubItem;
+            split_sort_down = column == split_sort_column ? !split_sort_down : 0;
+            split_sort_column = column;
+            if (column >= 0 && column < 3) split_sorted[column]++;
+            SendMessageW( ((NMHDR *)lparam)->hwndFrom, LVM_SORTITEMS, split_sort_down, (LPARAM)split_compare );
+        }
         /* regedit's: a key's subkeys are added the first time it opens */
         if (((NMHDR *)lparam)->code == TVN_ITEMEXPANDINGW)
         {
@@ -1449,6 +1464,27 @@ static void selftest_frame_sidebar(void)
                             win, (HMENU)1, GetModuleHandleW( NULL ), NULL );
     list = CreateWindowExW( 0, WC_LISTVIEWW, NULL, WS_CHILD | WS_VISIBLE | LVS_REPORT, 0, 0, 0, 0, win, (HMENU)2,
                             GetModuleHandleW( NULL ), NULL );
+    {
+        static const WCHAR *titles[] = { L"Name", L"Type", L"Data" };
+        LVCOLUMNW col = { LVCF_TEXT | LVCF_WIDTH };
+        LVITEMW item = { LVIF_TEXT };
+        int i;
+        for (i = 0; i < 3; i++)
+        {
+            col.pszText = (WCHAR *)titles[i];
+            col.cx = 120;
+            SendMessageW( list, LVM_INSERTCOLUMNW, i, (LPARAM)&col );
+        }
+        item.mask = LVIF_TEXT | LVIF_PARAM;
+        for (i = 0; i < 3; i++)
+        {
+            static const WCHAR *names[] = { L"(Default)", L"Language", L"SteamPath" };
+            item.iItem = i;
+            item.lParam = i;
+            item.pszText = (WCHAR *)names[i];
+            SendMessageW( list, LVM_INSERTITEMW, 0, (LPARAM)&item );
+        }
+    }
     /* regedit's: opened on the last key it showed */
     computer = tree_add( tree, TVI_ROOT, L"Computer" );
     tree_add( tree, computer, L"HKEY_CLASSES_ROOT" );
@@ -1491,6 +1527,27 @@ static void selftest_frame_sidebar(void)
                "and another" );
     }
     else printf( "      the window isn't in front (another app is): the row click checks are skipped\n" );
+    /* the list's headers: each click on the sorted column turns its arrow around,
+     * as the app turns its order around */
+    if (sidebar_click( list, "{\"t\":\"headerClick\",\"v\":2,\"s\":\"makeKey\"}" ))
+    {
+        char *r;
+        BOOL flips = TRUE;
+        int n;
+        pump( 1200 );
+        for (n = 1; n <= 4; n++)
+        {
+            /* the reply has the arrow after the clicks so far: up after the first, then turned around */
+            const char *want = n % 2 ? ":true\"]" : ":false\"]";
+            r = pInject( list, n < 4 ? "{\"t\":\"headerClick\",\"v\":2}" : "{\"t\":\"headerClick\",\"v\":-1}" );
+            printf( "      after %d header clicks: %s (app: column %d, %s)\n", n, r ? r : "(null)", split_sort_column,
+                    split_sort_down ? "down" : "up" );
+            if (!r || !strstr( r, want )) flips = FALSE;
+            pFree( r );
+            pump( 1200 );       /* not a double click */
+        }
+        check( split_sorted[2] == 4 && flips, "each click on the sorted column's header turns its arrow around (LVN_COLUMNCLICK)" );
+    }
     /* opening a key whose subkeys the app adds then, and clicking around in them */
     inject( tree, "{\"t\":\"sidebarRowClick\",\"v\":5,\"s\":\"disclosure\"}" );
     pump( 800 );

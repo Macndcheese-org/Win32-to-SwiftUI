@@ -822,6 +822,33 @@ enum Debug {
                 else if let action = item.action { NSApp.sendAction(action, to: item.target, from: item) }
                 return "{\"ok\":true}"
             }
+            if event["t"] as? String == "headerClick" {
+                // tests: a mouse click on column v's header of a report list, through AppKit;
+                // the reply has the sort arrow after the previous clicks
+                guard let view = host.hosting, let window = view.window, let table = FrameSidebar.table(in: view),
+                      let header = table.headerView, let column = event["v"] as? Int, column < table.numberOfColumns
+                else { return "{\"error\":\"no header\"}" }
+                let rect = header.convert(header.headerRect(ofColumn: max(column, 0)), to: nil)
+                let point = NSPoint(x: rect.midX, y: rect.midY)
+                // v -1: only the arrows
+                if column >= 0 && event["s"] as? String == "makeKey" && !window.isKeyWindow { window.makeKey() }
+                if column >= 0 { DispatchQueue.main.async {
+                    func mouse(_ type: NSEvent.EventType) -> NSEvent? {
+                        NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                                           timestamp: ProcessInfo.processInfo.systemUptime,
+                                           windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                                           clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)
+                    }
+                    if let up = mouse(.leftMouseUp) { NSApp.postEvent(up, atStart: false) }
+                    if let down = mouse(.leftMouseDown) { NSApp.sendEvent(down) }
+                } }
+                let arrows = table.tableColumns.enumerated().compactMap { n, c -> String? in
+                    guard let image = table.indicatorImage(in: c) else { return nil }
+                    return "\(n):\(image.name() ?? "?")"
+                }
+                return W2S.json(["ok": true, "key": window.isKeyWindow, "appActive": NSApp.isActive, "arrows": arrows,
+                                 "sort": table.sortDescriptors.map { "\($0.key ?? "-"):\($0.ascending)" }])
+            }
             if event["t"] as? String == "sidebarRowClick" {
                 // tests: a mouse click on row v of the window's sidebar, through AppKit as the
                 // mouse makes one (winemac's routing, the list's own tracking)
