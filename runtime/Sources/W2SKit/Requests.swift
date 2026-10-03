@@ -905,6 +905,12 @@ enum Debug {
                 bar.debugInject(event)
                 return "{\"ok\":true}"
             }
+            if event["t"] as? String == "appName" {
+                // tests: what macOS and the application menu call the program
+                let top = NSApp.mainMenu?.items.first
+                return W2S.json(["name": AppName.name, "display": NSRunningApplication.current.localizedName ?? "",
+                                 "menu": top?.title ?? "", "items": top?.submenu?.items.map { $0.title } ?? []])
+            }
             if event["t"] as? String == "dock" {
                 // tests: the Dock tile's progress ({"t":"dock","s":<png path>} also draws it)
                 return W2S.json(DockProgress.debug(capture: event["s"] as? String))

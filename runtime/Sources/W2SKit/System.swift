@@ -9,8 +9,52 @@ public func w2s_swift_app_state(_ json: UnsafePointer<CChar>?, _ len: UInt32) {
         case "progress":
             DockProgress.show(state: spec["state"] as? String ?? "none",
                               value: (spec["value"] as? NSNumber)?.doubleValue ?? 0)
+        case "name":
+            AppName.set(spec["name"] as? String ?? "")
         default:
             break
+        }
+    }
+}
+
+/// A program started through wine is a process called "wine" to macOS, which has no
+/// bundle to take another name from. LaunchServices' display name is what the Dock,
+/// the app switcher and the menu bar use, and a process can set its own; the
+/// application menu's title and its Hide and Quit follow.
+enum AppName {
+    private(set) static var name = ""
+
+    static func set(_ new: String) {
+        guard !new.isEmpty, new != name else { return }
+        name = new
+        typealias GetASN = @convention(c) () -> Unmanaged<CFTypeRef>?
+        typealias SetItem = @convention(c) (Int32, CFTypeRef?, CFString, CFString?, UnsafeMutableRawPointer?) -> Int32
+        let all = UnsafeMutableRawPointer(bitPattern: -2)    // RTLD_DEFAULT
+        if let g = dlsym(all, "_LSGetCurrentApplicationASN"), let s = dlsym(all, "_LSSetApplicationInformationItem") {
+            let asn = unsafeBitCast(g, to: GetASN.self)()?.takeUnretainedValue()
+            _ = unsafeBitCast(s, to: SetItem.self)(-2, asn, "LSDisplayName" as CFString, new as CFString, nil)
+        }
+        apply()
+        // winemac makes its application menu when the first window shows, which may be later
+        for delay in [0.5, 2.0, 5.0] { DispatchQueue.main.asyncAfter(deadline: .now() + delay) { apply() } }
+    }
+
+    /// The application menu named after the program: its title, Hide <name>, Quit <name>
+    static func apply() {
+        guard !name.isEmpty, let top = NSApp.mainMenu?.items.first, let menu = top.submenu else { return }
+        if top.title != name { top.title = name }
+        if menu.title != name { menu.title = name }
+        for item in menu.items {
+            let format: String?
+            switch item.action {
+            case #selector(NSApplication.hide(_:)): format = MenuWords.local("Hide %@", ["MainMenu"])
+            case #selector(NSApplication.terminate(_:)): format = MenuWords.local("Quit %@", ["MainMenu"])
+            default: format = nil
+            }
+            if let format = format, format.contains("%@") {
+                let title = format.replacingOccurrences(of: "%@", with: name)
+                if item.title != title { item.title = title }
+            }
         }
     }
 }

@@ -2082,6 +2082,31 @@ static LRESULT CALLBACK menuhost_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
     return DefWindowProcW( hwnd, msg, wparam, lparam );
 }
 
+/* the process is called after the program, not wine: the Dock, the app switcher and the menu bar */
+static void selftest_app_name(void)
+{
+    WCHAR exe[MAX_PATH], *base, *dot;
+    char program[MAX_PATH], *r, key[MAX_PATH + 32];
+    BOOL ok;
+
+    GetModuleFileNameW( NULL, exe, ARRAYSIZE(exe) );
+    base = wcsrchr( exe, '\\' ) ? wcsrchr( exe, '\\' ) + 1 : exe;
+    if ((dot = wcsrchr( base, '.' ))) *dot = 0;
+    WideCharToMultiByte( CP_UTF8, 0, base, -1, program, sizeof(program), NULL, NULL );
+    pump( 1500 );
+    r = pInject( NULL, "{\"t\":\"appName\"}" );
+    printf( "      %s\n", r ? r : "(null)" );
+    snprintf( key, sizeof(key), "\"display\":\"%s\"", program );
+    ok = r && strstr( r, key );
+    snprintf( key, sizeof(key), "\"menu\":\"%s\"", program );
+    ok = ok && strstr( r, key );
+    snprintf( key, sizeof(key), "%s\"", program );
+    ok = ok && strstr( r, "\"items\":[" ) && strstr( strstr( r, "\"items\":[" ), key );
+    pFree( r );
+    check( ok, "the process is named after the program (macOS's name for it, the application menu and its Hide and Quit), "
+           "not wine" );
+}
+
 /* the app's About (Help > About ...) is the application menu's first item */
 static void selftest_about_item(void)
 {
@@ -3656,6 +3681,12 @@ static int selftest(void)
         printf( "%d passed, %d failed\n", passes, failures );
         return failures;
     }
+    if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "appname" ))
+    {
+        selftest_app_name();
+        printf( "%d passed, %d failed\n", passes, failures );
+        return failures;
+    }
     if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "about" ))
     {
         selftest_about_item();
@@ -4147,6 +4178,7 @@ static int selftest(void)
     selftest_menu_order();
     selftest_menu_shortcut();
     selftest_about_item();
+    selftest_app_name();
     selftest_replace_dialog();
     selftest_pane_list();
     selftest_frame_sidebar();

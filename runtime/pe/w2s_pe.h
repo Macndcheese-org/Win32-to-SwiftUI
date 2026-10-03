@@ -197,5 +197,6 @@ BOOL w2s_run_request( const char *kind, HWND owner, const char *json, char **res
 BOOL w2s_run_request_ex( const char *kind, HWND owner, const char *json, struct w2s_request_handler *handler,
                          char **result );
 void w2s_request_update( UINT64 id, const char *json );
+void w2s_announce_app_name( void );     /* system.c: the program's name, for the Dock and the menu bar */
 
 #endif

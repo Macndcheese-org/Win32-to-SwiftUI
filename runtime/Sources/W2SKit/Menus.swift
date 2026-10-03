@@ -441,6 +441,7 @@ final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
         let helpIndex = specs.lastIndex(where: MenuBuild.isHelp)
         let editIndex = specs.firstIndex(where: MenuBuild.isEdit)
         var index = min(1, main.items.count)          // after the application menu
+        AppName.apply()
         moveSettings(specs, taken: taken)
         moveAbout(specs)
         for (n, spec) in specs.enumerated() {

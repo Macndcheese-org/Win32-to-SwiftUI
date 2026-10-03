@@ -114,3 +114,56 @@ void WINAPI W2STaskbarProgress( HWND hwnd, BOOL set_state, TBPFLAG state, ULONGL
     show_progress();
     ReleaseSRWLockExclusive( &progress_lock );
 }
+
+
+/* ---------- the program's name ---------- */
+
+/* a string of the program's version resource, in its first language */
+static WCHAR *product_string( void *info, const WCHAR *name )
+{
+    struct { WORD lang, codepage; } *trans;
+    WCHAR path[80], *value;
+    UINT len;
+
+    if (!VerQueryValueW( info, L"\\VarFileInfo\\Translation", (void **)&trans, &len ) || len < sizeof(*trans)) return NULL;
+    wsprintfW( path, L"\\StringFileInfo\\%04x%04x\\%s", trans->lang, trans->codepage, name );
+    if (!VerQueryValueW( info, path, (void **)&value, &len ) || !len || !value[0]) return NULL;
+    return value;
+}
+
+/* A program started through wine is a process called "wine" to macOS: its Dock icon,
+ * the app switcher and the menu bar say so. Tell the native side the program's name:
+ * its ProductName ("Notepad++", "Steam"), else the image's file name without .exe
+ * (a system tool's ProductName is the OS's). Once, at the program's first window. */
+void w2s_announce_app_name(void)
+{
+    static LONG announced;
+    WCHAR module[MAX_PATH], name[MAX_PATH], *base, *dot, *value;
+    struct w2s_app_state_params params;
+    void *info = NULL;
+    DWORD size, handle;
+    struct json j;
+
+    if (InterlockedCompareExchange( &announced, 1, 0 )) return;
+    if (!GetModuleFileNameW( NULL, module, MAX_PATH )) return;
+    base = wcsrchr( module, '\\' ) ? wcsrchr( module, '\\' ) + 1 : module;
+    lstrcpynW( name, base, MAX_PATH );
+    if ((dot = wcsrchr( name, '.' ))) *dot = 0;
+
+    if ((size = GetFileVersionInfoSizeW( module, &handle )) && (info = HeapAlloc( GetProcessHeap(), 0, size )) &&
+        GetFileVersionInfoW( module, 0, size, info ) && (value = product_string( info, L"ProductName" )) &&
+        wcslen( value ) < 40 && !wcsstr( value, L"Operating System" ))
+        lstrcpynW( name, value, MAX_PATH );
+    if (info) HeapFree( GetProcessHeap(), 0, info );
+
+    json_init( &j );
+    json_obj_begin( &j );
+    json_str_a( &j, "t", "name" );
+    json_str( &j, "name", name );
+    json_obj_end( &j );
+    params.json = W2S_PTR( j.buf );
+    params.json_len = strlen( j.buf );
+    params.pad = 0;
+    w2s_call( unix_w2s_app_state, &params );
+    json_free( &j );
+}

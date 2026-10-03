@@ -688,6 +688,7 @@ void WINAPI W2SWindowCreated( HWND hwnd )
     }
     if (!(GetWindowLongW( hwnd, GWL_STYLE ) & WS_CHILD))
     {
+        w2s_announce_app_name();        /* system.c: the Dock and the menu bar name the program, not wine */
         w2s_sync_look();                /* look.c: wine's colours follow macOS */
         w2s_frame_created( hwnd );      /* menus.c: its menu goes to the Mac menu bar */
         return;
