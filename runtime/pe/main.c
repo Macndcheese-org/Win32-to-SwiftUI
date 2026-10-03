@@ -672,6 +672,24 @@ static void release_combo_parts( HWND hwnd )
     }
 }
 
+/* A column header of a program's own (winefile's) stays wine's: its theme paints it light whatever
+ * the system colours are, with the text in the system's, which in a dark appearance is light too.
+ * Without the theme it is drawn from the system colours. */
+static void classic_header_in_dark( HWND hwnd )
+{
+    DWORD face = GetSysColor( COLOR_BTNFACE );
+    HRESULT (WINAPI *set_theme)( HWND, LPCWSTR, LPCWSTR );
+    HMODULE uxtheme;
+
+    if ((GetRValue( face ) * 30 + GetGValue( face ) * 59 + GetBValue( face ) * 11) / 100 >= 128) return;
+    if (!(uxtheme = LoadLibraryW( L"uxtheme.dll" ))) return;
+    set_theme = (void *)GetProcAddress( uxtheme, "SetWindowTheme" );
+    if (set_theme) set_theme( hwnd, L" ", L" " );      /* wine refuses empty names */
+    /* comctl32 keeps the system colours it drew with when it loaded, until a window hears of a change */
+    SendMessageW( hwnd, WM_SYSCOLORCHANGE, 0, 0 );
+    InvalidateRect( hwnd, NULL, TRUE );
+}
+
 /***********************************************************************
  *      W2SWindowCreated  (win32swiftui.@)
  */
@@ -695,6 +713,7 @@ void WINAPI W2SWindowCreated( HWND hwnd )
     }
     if (!(kind = w2s_select_kind( hwnd )))
     {
+        if (wcsstr( name, L"SysHeader32" )) classic_header_in_dark( hwnd );
         release_combo_parts( hwnd );
         return;
     }
