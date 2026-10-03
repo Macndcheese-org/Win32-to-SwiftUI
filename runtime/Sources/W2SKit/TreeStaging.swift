@@ -9,32 +9,6 @@ import Foundation
 /// That snapshot is shown in two steps: the node closed with the children it had,
 /// then, an update later, without them.
 enum TreeStaging {
-    struct Known { var uid: Int; var text: String; var parent: Int }
-
-    /// Gives each row an identity: the one it had when it is still the same item (same
-    /// handle, name and parent), a new one when a handle came back for another item.
-    static func identify(_ nodes: [Snapshot.TreeNode]?, known: inout [Int: Known], next: inout Int) -> [Snapshot.TreeNode]? {
-        guard let nodes = nodes else { return nil }
-        var seen: [Int: Known] = [:]
-        func walk(_ nodes: [Snapshot.TreeNode], parent: Int) -> [Snapshot.TreeNode] {
-            nodes.map { node in
-                var node = node
-                if let was = known[node.id], was.text == node.text, was.parent == parent {
-                    node.uid = was.uid
-                } else {
-                    node.uid = next
-                    next += 1
-                }
-                seen[node.id] = Known(uid: node.uid!, text: node.text, parent: parent)
-                if let children = node.children { node.children = walk(children, parent: node.id) }
-                return node
-            }
-        }
-        let result = walk(nodes, parent: 0)
-        known = seen
-        return result
-    }
-
     /// `new` with, under every node it closes, the children the node had open in
     /// `old`; nil when no node closes with children going.
     static func stage(old: [Snapshot.TreeNode]?, new: [Snapshot.TreeNode]?) -> [Snapshot.TreeNode]? {

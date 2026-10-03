@@ -193,12 +193,12 @@ private func dumpTree(_ snap: Snapshot) {
 /// debugging: the rows that were open in `old` and are gone from `new` (an open row removed)
 private func goneOpen(_ old: [Snapshot.TreeNode]?, _ new: [Snapshot.TreeNode]?) -> String {
     var now = Set<Int>()
-    func collect(_ ns: [Snapshot.TreeNode]) { for n in ns { now.insert(n.key); if let c = n.children { collect(c) } } }
+    func collect(_ ns: [Snapshot.TreeNode]) { for n in ns { now.insert(n.id); if let c = n.children { collect(c) } } }
     collect(new ?? [])
     var gone: [String] = []
     func walk(_ ns: [Snapshot.TreeNode], visible: Bool) {
         for n in ns {
-            if visible, n.open ?? false, !now.contains(n.key) { gone.append(n.text) }
+            if visible, n.open ?? false, !now.contains(n.id) { gone.append(n.text) }
             if let c = n.children { walk(c, visible: visible && (n.open ?? false)) }
         }
     }
@@ -259,8 +259,7 @@ private func closeTreeNode(_ host: ControlHost, _ id: Int) {
 
 /// A tree snapshot, in steps when it closes nodes that have open nodes below them.
 private func applyTree(_ host: ControlHost, _ incoming: Snapshot) {
-    var snap = incoming
-    snap.nodes = TreeStaging.identify(incoming.nodes, known: &host.treeKnown, next: &host.treeNextUID)
+    let snap = incoming
     // steps are being shown: this is the newer state, shown when they are over
     if host.treeBusy { traceTree("hold   \(treeSummary(snap.nodes)) sel=\(snap.selection ?? 0)"); host.treeFinal = snap; return }
     guard host.model.snap != snap else { return }

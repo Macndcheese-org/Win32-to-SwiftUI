@@ -1482,7 +1482,7 @@ struct TreeRows: View {
     @Environment(\.w2sInSidebar) private var inSidebar
 
     var body: some View {
-        ForEach(nodes, id: \.key) { node in
+        ForEach(nodes) { node in
             if node.kids ?? false {
                 DisclosureGroup(isExpanded: Binding(
                     get: { node.open ?? false },

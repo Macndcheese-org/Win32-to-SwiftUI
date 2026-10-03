@@ -18,10 +18,6 @@ struct Snapshot: Codable, Equatable {
         var open: Bool?
         var img: Int?           // its image list index (ControlModel.images)
         var children: [TreeNode]?
-        var uid: Int?           // not in the snapshot: the row's identity (TreeStaging.identify)
-        /// What SwiftUI knows the row by. A HTREEITEM is reused as soon as its item is
-        /// deleted, and a row a list remembers as open must not come back as another item.
-        var key: Int { uid ?? id }
     }
 
     var entry: String?
@@ -307,8 +303,6 @@ final class ControlHost {
     var owned: AnyObject?                   // main thread: what the view keeps alive (a menu bar)
     var treeFinal: Snapshot?                // main thread: the newest tree snapshot, shown when the steps are over
     var treeBusy = false                    // main thread: tree steps are being shown
-    var treeKnown: [Int: TreeStaging.Known] = [:]   // main thread: the rows of the last tree snapshot
-    var treeNextUID = 1
 
     init(handle: UInt64, entry: String, hostView: UnsafeMutableRawPointer, postWake: PostWake?) {
         self.handle = handle
