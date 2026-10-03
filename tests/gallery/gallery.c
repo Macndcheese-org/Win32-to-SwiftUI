@@ -2830,6 +2830,81 @@ static void selftest_edited_mark(void)
            "not in the Mac title; the Win32 title keeps it" );
 }
 
+/* a title that is a file's path: the Mac title is the name, the path the window's file;
+ * and no title carries the app's own name ("name - App": the HIG's rule) */
+static void selftest_document_title(void)
+{
+    /* %ls: the program's own name, as the title has it; mac: what the Mac window shows */
+    static const struct { const WCHAR *title; const char *mac; const char *file; BOOL edited; } cases[] =
+    {
+        { L"Z:\\tmp\\w2s-gallery-test.txt - Elsewhere", "w2s-gallery-test.txt - Elsewhere", "/tmp/w2s-gallery-test.txt", FALSE },
+        { L"*Z:\\tmp\\w2s-gallery-test.txt - Elsewhere", "w2s-gallery-test.txt - Elsewhere", "/tmp/w2s-gallery-test.txt", TRUE },
+        { L"Z:\\tmp\\w2s-gallery-test.txt* - Elsewhere", "w2s-gallery-test.txt - Elsewhere", "/tmp/w2s-gallery-test.txt", TRUE },
+        { L"Z:\\tmp\\w2s a - b.txt - Elsewhere", "w2s a - b.txt - Elsewhere", "/tmp/w2s a - b.txt", FALSE },
+        { L"Z:\\tmp\\w2s-gallery-test.txt", "w2s-gallery-test.txt", "/tmp/w2s-gallery-test.txt", FALSE },
+        { L"Z:\\tmp\\does-not-exist.txt - Elsewhere", "Z:\\\\tmp\\\\does-not-exist.txt - Elsewhere", "", FALSE },
+        { L"Elsewhere - Z:\\tmp\\w2s-gallery-test.txt", "Elsewhere - Z:\\\\tmp\\\\w2s-gallery-test.txt", "", FALSE },
+        { L"Elsewhere", "Elsewhere", "", FALSE },
+        /* the program's own name at the end goes: */
+        { L"Z:\\tmp\\w2s-gallery-test.txt - %ls", "w2s-gallery-test.txt", "/tmp/w2s-gallery-test.txt", FALSE },
+        { L"*Z:\\tmp\\w2s-gallery-test.txt - %ls", "w2s-gallery-test.txt", "/tmp/w2s-gallery-test.txt", TRUE },
+        { L"untitled 1 - %ls", "untitled 1", "", FALSE },
+        { L"*untitled 1 - %ls", "untitled 1", "", TRUE },
+        { L"untitled 1* - %ls", "untitled 1", "", TRUE },
+        /* and only that: */
+        { L"Report - Q3", "Report - Q3", "", FALSE },
+        { L"%ls", "%ls", "", FALSE },
+        { L"%ls - Elsewhere", "%ls - Elsewhere", "", FALSE },
+    };
+    WCHAR saved[256], now[256], exe[MAX_PATH], app[64], title[512], *base, *dot;
+    char mac[512], want_mac[256], want_file[256];
+    BOOL ok = TRUE;
+    unsigned int i;
+
+    GetModuleFileNameW( NULL, exe, ARRAYSIZE(exe) );
+    base = wcsrchr( exe, '\\' ) ? wcsrchr( exe, '\\' ) + 1 : exe;
+    if ((dot = wcsrchr( base, '.' ))) *dot = 0;
+    lstrcpynW( app, base, ARRAYSIZE(app) );
+    /* in the title as an app writes it: capitalised */
+    if (app[0] >= 'a' && app[0] <= 'z') app[0] -= 32;
+
+    CloseHandle( CreateFileW( L"Z:\\tmp\\w2s-gallery-test.txt", GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL ) );
+    CloseHandle( CreateFileW( L"Z:\\tmp\\w2s a - b.txt", GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL ) );
+    GetWindowTextW( main_window, saved, ARRAYSIZE(saved) );
+    for (i = 0; i < ARRAYSIZE(cases); i++)
+    {
+        char key[600];
+        BOOL here;
+
+        wsprintfW( title, cases[i].title, app );
+        if (strstr( cases[i].mac, "%ls" )) snprintf( want_mac, sizeof(want_mac), "%ls%s", app,
+                                                        strstr( cases[i].mac, " - " ) ? " - Elsewhere" : "" );
+        else snprintf( want_mac, sizeof(want_mac), "%s", cases[i].mac );
+        snprintf( want_file, sizeof(want_file), "%s", cases[i].file );
+        SetWindowTextW( main_window, title );
+        pump( 300 );
+        GetWindowTextW( main_window, now, ARRAYSIZE(now) );
+        snprintf( key, sizeof(key), "\"macTitle\":\"%s\"", want_mac );
+        snprintf( mac, sizeof(mac), "\"representedFilename\":\"%s\"", want_file );
+        for (char *c = mac; *c; c++) if (*c == '/') { memmove( c + 1, c, strlen( c ) + 1 ); *c++ = '\\'; }
+        here = query_has( ctl[ID_EDIT], key ) && query_has( ctl[ID_EDIT], mac ) &&
+               query_has( ctl[ID_EDIT], cases[i].edited ? "\"documentEdited\":true" : "\"documentEdited\":false" ) &&
+               !wcscmp( now, title );
+        if (!here)
+        {
+            printf( "      %ls\n", title );
+            ok = FALSE;
+        }
+    }
+    SetWindowTextW( main_window, saved );
+    pump( 300 );
+    DeleteFileW( L"Z:\\tmp\\w2s a - b.txt" );
+    check( ok && query_has( ctl[ID_EDIT], "\"representedFilename\":\"\"" ),
+           "a title that is a file's path (\"Z:\\dir\\name - App\"; with the unsaved mark too): the Mac title is the name "
+           "and the path the window's file, only when the file exists; the program's own name at the end of a title "
+           "goes, nothing else; the Win32 title keeps all of it" );
+}
+
 /* FlashWindowEx: a Dock bounce (winemac). Nothing to read back: this only goes
  * through the calls (WINEDEBUG=trace+macdrv shows them arrive) */
 static void selftest_flash(void)
@@ -3390,6 +3465,12 @@ static int selftest(void)
         printf( "%d passed, %d failed\n", passes, failures );
         return failures;
     }
+    if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "document" ))
+    {
+        selftest_document_title();
+        printf( "%d passed, %d failed\n", passes, failures );
+        return failures;
+    }
     if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "edited" ))
     {
         selftest_edited_mark();
@@ -3904,6 +3985,7 @@ static int selftest(void)
     selftest_taskbar();
     selftest_flash();
     selftest_edited_mark();
+    selftest_document_title();
     selftest_look();
 
     printf( "%d passed, %d failed\n", passes, failures );

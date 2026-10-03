@@ -881,6 +881,7 @@ enum Debug {
                 out["titleBar"] = hosting.window?.styleMask.contains(.titled) ?? false
                 out["macTitle"] = hosting.window?.title ?? ""
                 out["documentEdited"] = hosting.window?.isDocumentEdited ?? false
+                out["representedFilename"] = hosting.window?.representedFilename ?? ""
                 out["hostHidden"] = hosting.superview?.isHidden ?? true
             }
             return W2S.json(out)
