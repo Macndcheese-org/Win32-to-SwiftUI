@@ -2851,7 +2851,10 @@ static void selftest_document_title(void)
         { L"untitled 1 - %ls", "untitled 1", "", FALSE },
         { L"*untitled 1 - %ls", "untitled 1", "", TRUE },
         { L"untitled 1* - %ls", "untitled 1", "", TRUE },
+        { L"Z:\\tmp\\w2s-gallery-test.txt - %ls [Administrator]", "w2s-gallery-test.txt", "/tmp/w2s-gallery-test.txt", FALSE },
+        { L"untitled 1 - %ls [Administrator]", "untitled 1", "", FALSE },
         /* and only that: */
+        { L"untitled 1 - %ls [Administrator] x", "untitled 1 - %ls [Administrator] x", "", FALSE },
         { L"Report - Q3", "Report - Q3", "", FALSE },
         { L"%ls", "%ls", "", FALSE },
         { L"%ls - Elsewhere", "%ls - Elsewhere", "", FALSE },
@@ -2877,9 +2880,21 @@ static void selftest_document_title(void)
         BOOL here;
 
         wsprintfW( title, cases[i].title, app );
-        if (strstr( cases[i].mac, "%ls" )) snprintf( want_mac, sizeof(want_mac), "%ls%s", app,
-                                                        strstr( cases[i].mac, " - " ) ? " - Elsewhere" : "" );
-        else snprintf( want_mac, sizeof(want_mac), "%s", cases[i].mac );
+        {   /* the program's name where the expectation says %ls */
+            const char *in = cases[i].mac;
+            char *out = want_mac;
+
+            while (*in && out < want_mac + sizeof(want_mac) - 80)
+            {
+                if (!strncmp( in, "%ls", 3 ))
+                {
+                    out += snprintf( out, 80, "%ls", app );
+                    in += 3;
+                }
+                else *out++ = *in++;
+            }
+            *out = 0;
+        }
         snprintf( want_file, sizeof(want_file), "%s", cases[i].file );
         SetWindowTextW( main_window, title );
         pump( 300 );
