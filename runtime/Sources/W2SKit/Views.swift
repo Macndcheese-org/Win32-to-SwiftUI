@@ -1465,6 +1465,7 @@ struct TreeList: View {
             TreeRows(model: model, nodes: model.snap.nodes ?? [])
         }
         .modifier(DoubleClickRows(model: model))
+        .transaction { $0.animation = nil }
         // the sidebar's look only in the window's real sidebar (FrameSidebar); a tree
         // anywhere else is an ordinary outline, not a sidebar look-alike
         if model.snap.sidebarPane != nil {
@@ -1481,13 +1482,14 @@ struct TreeRows: View {
     @Environment(\.w2sInSidebar) private var inSidebar
 
     var body: some View {
-        ForEach(nodes) { node in
+        ForEach(nodes, id: \.key) { node in
             if node.kids ?? false {
                 DisclosureGroup(isExpanded: Binding(
                     get: { node.open ?? false },
                     set: { open in
                         guard open != (node.open ?? false) else { return }
-                        model.snap.nodes = TreeRows.setting(node.id, open: open, in: model.snap.nodes ?? [])
+                        if open { model.snap.nodes = TreeRows.setting(node.id, open: true, in: model.snap.nodes ?? []) }
+                        else { model.closeNode(node.id) }
                         model.emit(["t": open ? "expand" : "collapse", "v": node.id])
                     })) {
                     // the recursion goes through AnyView so the view type stays finite

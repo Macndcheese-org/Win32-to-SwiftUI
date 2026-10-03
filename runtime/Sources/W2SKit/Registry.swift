@@ -18,6 +18,10 @@ struct Snapshot: Codable, Equatable {
         var open: Bool?
         var img: Int?           // its image list index (ControlModel.images)
         var children: [TreeNode]?
+        var uid: Int?           // not in the snapshot: the row's identity (TreeStaging.identify)
+        /// What SwiftUI knows the row by. A HTREEITEM is reused as soon as its item is
+        /// deleted, and a row a list remembers as open must not come back as another item.
+        var key: Int { uid ?? id }
     }
 
     var entry: String?
@@ -154,6 +158,8 @@ final class ControlModel: ObservableObject {
     /// the Win32 control has the focus (a view made later takes the keyboard too)
     var hasWin32Focus = false
     let emit: ([String: Any]) -> Void
+    /// A tree: close a node the way the list takes it (TreeStaging), set by the host.
+    var closeNode: (Int) -> Void = { _ in }
     /// What the Win32 control answers its `answers` queries from (main thread).
     var publish: ([String: Any]) -> Void = { _ in }
     private var clickQueued = false
@@ -299,6 +305,10 @@ final class ControlHost {
     var published: String?                 // guarded by W2S.lock: for the entry's answers
     var publishedVersion: UInt64 = 0        // guarded by W2S.lock
     var owned: AnyObject?                   // main thread: what the view keeps alive (a menu bar)
+    var treeFinal: Snapshot?                // main thread: the newest tree snapshot, shown when the steps are over
+    var treeBusy = false                    // main thread: tree steps are being shown
+    var treeKnown: [Int: TreeStaging.Known] = [:]   // main thread: the rows of the last tree snapshot
+    var treeNextUID = 1
 
     init(handle: UInt64, entry: String, hostView: UnsafeMutableRawPointer, postWake: PostWake?) {
         self.handle = handle

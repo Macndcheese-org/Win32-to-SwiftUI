@@ -1566,6 +1566,138 @@ static void selftest_nested_sidebar(void)
     pump( 300 );
 }
 
+/* a sidebar tree that loses a lot of open rows at once (a folder with everything below it open
+ * collapses and is reset, as winefile's tree does): the list must take it */
+static void selftest_big_collapse(void)
+{
+    WNDCLASSW wc = { 0 };
+    HTREEITEM chain[12], leaf = NULL, root;
+    HWND win, tree, list;
+    int level, k, round, rows = 0;
+    BOOL alive = TRUE;
+
+    wc.lpfnWndProc = splitwin_proc;
+    wc.hInstance = GetModuleHandleW( NULL );
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpszClassName = L"W2SSplitWindow";
+    RegisterClassW( &wc );
+    win = CreateWindowExW( 0, L"W2SSplitWindow", L"Folders", WS_OVERLAPPEDWINDOW, 240, 140, 900, 520,
+                           NULL, NULL, GetModuleHandleW( NULL ), NULL );
+    tree = CreateWindowExW( 0, WC_TREEVIEWW, NULL, WS_CHILD | WS_VISIBLE | TVS_HASBUTTONS | TVS_LINESATROOT, 0, 0, 0, 0,
+                            win, (HMENU)1, GetModuleHandleW( NULL ), NULL );
+    list = CreateWindowExW( 0, WC_LISTVIEWW, NULL, WS_CHILD | WS_VISIBLE | LVS_REPORT, 0, 0, 0, 0, win, (HMENU)2,
+                            GetModuleHandleW( NULL ), NULL );
+    /* a deep chain, each level with a dozen folders, one of them the next level (a file system's) */
+    root = chain[0] = tree_add( tree, TVI_ROOT, L"Desktop" );
+    for (level = 1; level < 9; level++)
+    {
+        WCHAR name[32];
+        for (k = 0; k < 12; k++)
+        {
+            HTREEITEM item;
+            wsprintfW( name, L"Level %d folder %d", level, k );
+            item = tree_add( tree, chain[level - 1], name );
+            if (k == 3) chain[level] = item;
+            else
+            {
+                /* a folder not read yet: it may have some */
+                TVITEMW lazy = { TVIF_CHILDREN, item };
+                lazy.cChildren = 1;
+                SendMessageW( tree, TVM_SETITEMW, 0, (LPARAM)&lazy );
+            }
+        }
+    }
+    leaf = chain[8];
+    split_layout( win );
+    ShowWindow( win, SW_SHOW );
+    pump( 1500 );
+    for (round = 0; round < 6; round++)
+    {
+        for (level = 0; level < 9; level++) SendMessageW( tree, TVM_EXPAND, TVE_EXPAND, (LPARAM)chain[level] );
+        SendMessageW( tree, TVM_SELECTITEM, TVGN_CARET, (LPARAM)leaf );
+        pump( 600 );
+        rows = (int)SendMessageW( tree, TVM_GETCOUNT, 0, 0 );
+        /* the whole chain closes at once, from the top */
+        SendMessageW( tree, TVM_EXPAND, TVE_COLLAPSE, (LPARAM)root );
+        pump( 600 );
+        alive = pIsTranslated( tree ) != 0;
+        if (!alive) break;
+    }
+    check( alive && rows > 90, "a sidebar tree whose top node closes with open nodes down to the ninth level keeps working" );
+    DestroyWindow( win );
+    (void)list;
+}
+
+/* a sidebar tree rebuilt from a W2S_TREE_DUMP file (the tree a program had when the list trapped),
+ * then its top node closed */
+static void selftest_replay_tree(const char *file)
+{
+    WNDCLASSW wc = { 0 };
+    HTREEITEM stack[64] = { 0 }, items[2000], selected = NULL;
+    BOOL open[2000] = { 0 };
+    HWND win, tree, list;
+    char line[1024];
+    FILE *f;
+    int count = 0, i, round;
+    BOOL alive = TRUE;
+
+    wc.lpfnWndProc = splitwin_proc;
+    wc.hInstance = GetModuleHandleW( NULL );
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpszClassName = L"W2SSplitWindow";
+    RegisterClassW( &wc );
+    win = CreateWindowExW( 0, L"W2SSplitWindow", L"Folders", WS_OVERLAPPEDWINDOW, 240, 140, 900, 520,
+                           NULL, NULL, GetModuleHandleW( NULL ), NULL );
+    tree = CreateWindowExW( 0, WC_TREEVIEWW, NULL, WS_CHILD | WS_VISIBLE | TVS_HASBUTTONS | TVS_LINESATROOT, 0, 0, 0, 0,
+                            win, (HMENU)1, GetModuleHandleW( NULL ), NULL );
+    list = CreateWindowExW( 0, WC_LISTVIEWW, NULL, WS_CHILD | WS_VISIBLE | LVS_REPORT, 0, 0, 0, 0, win, (HMENU)2,
+                            GetModuleHandleW( NULL ), NULL );
+    f = fopen( file, "r" );
+    check( f != NULL, "the tree dump can be read" );
+    while (f && fgets( line, sizeof(line), f ) && count < 2000)
+    {
+        int depth, is_open, kids, sel;
+        char *p = line, *name;
+        WCHAR wide[300];
+        HTREEITEM item;
+
+        depth = strtol( p, &p, 10 ); is_open = strtol( p, &p, 10 ); kids = strtol( p, &p, 10 ); sel = strtol( p, &p, 10 );
+        name = p + 1;
+        name[strcspn( name, "\r\n" )] = 0;
+        MultiByteToWideChar( CP_UTF8, 0, name, -1, wide, ARRAYSIZE(wide) );
+        item = tree_add( tree, depth ? stack[depth - 1] : TVI_ROOT, wide );
+        if (kids)
+        {
+            TVITEMW lazy = { TVIF_CHILDREN, item };
+            lazy.cChildren = 1;
+            SendMessageW( tree, TVM_SETITEMW, 0, (LPARAM)&lazy );
+        }
+        stack[depth] = item;
+        items[count] = item;
+        open[count] = is_open;
+        if (sel) selected = item;
+        count++;
+    }
+    if (f) fclose( f );
+    split_layout( win );
+    ShowWindow( win, SW_SHOW );
+    pump( 1500 );
+    for (round = 0; round < 3 && count; round++)
+    {
+        /* children first: a node opens once it has them */
+        for (i = count - 1; i >= 0; i--) if (open[i]) SendMessageW( tree, TVM_EXPAND, TVE_EXPAND, (LPARAM)items[i] );
+        if (selected) SendMessageW( tree, TVM_SELECTITEM, TVGN_CARET, (LPARAM)selected );
+        pump( 800 );
+        SendMessageW( tree, TVM_EXPAND, TVE_COLLAPSE, (LPARAM)items[0] );
+        pump( 800 );
+        alive = pIsTranslated( tree ) != 0;
+        if (!alive) break;
+    }
+    check( alive && count > 0, "the replayed tree closes without the list trapping" );
+    DestroyWindow( win );
+    (void)list;
+}
+
 static void selftest_frame_sidebar(void)
 {
     WNDCLASSW wc = { 0 };
@@ -3819,6 +3951,18 @@ static int selftest(void)
     if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "nested" ))
     {
         selftest_nested_sidebar();
+        printf( "%d passed, %d failed\n", passes, failures );
+        return failures;
+    }
+    if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "replay" ) && getenv( "W2S_TREE_REPLAY" ))
+    {
+        selftest_replay_tree( getenv( "W2S_TREE_REPLAY" ) );
+        printf( "%d passed, %d failed\n", passes, failures );
+        return failures;
+    }
+    if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "bigcollapse" ))
+    {
+        selftest_big_collapse();
         printf( "%d passed, %d failed\n", passes, failures );
         return failures;
     }

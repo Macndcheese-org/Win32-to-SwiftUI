@@ -104,6 +104,9 @@ public func w2s_swift_control_create(_ hostView: UInt64, _ window: UInt64, _ pos
     let handle = W2S.newID()
     let host = ControlHost(handle: handle, entry: entryID, hostView: viewPtr, postWake: wake)
     host.model = ControlModel(snap: snap) { [weak host] event in host?.emit(event) }
+    if host.entry == "treeview" {
+        host.model.closeNode = { [weak host] id in if let host = host { closeTreeNode(host, id) } }
+    }
     host.model.publish = { [weak host] state in host?.publish(state) }
     host.model.absorbImages(snap)
 
@@ -161,6 +164,117 @@ private func createMenuBar(_ viewPtr: UnsafeMutableRawPointer, _ postWake: UInt6
     return handle
 }
 
+/// A tree snapshot, in two steps when it closes nodes and drops their children (TreeStaging).
+/// debugging: W2S_TREE_TRACE=<file> appends what each tree snapshot does to the list
+private func traceTree(_ line: @autoclosure () -> String) {
+    guard let path = ProcessInfo.processInfo.environment["W2S_TREE_TRACE"], !path.isEmpty else { return }
+    if let handle = FileHandle(forWritingAtPath: path) ?? { FileManager.default.createFile(atPath: path, contents: nil); return FileHandle(forWritingAtPath: path) }() {
+        handle.seekToEndOfFile()
+        handle.write((line() + "\n").data(using: .utf8)!)
+        try? handle.close()
+    }
+}
+
+/// debugging: W2S_TREE_DUMP=<file> keeps the tree shown before the latest update, one row a line
+/// (depth, open, kids, selected, name), for tests/gallery's replay
+private func dumpTree(_ snap: Snapshot) {
+    guard let path = ProcessInfo.processInfo.environment["W2S_TREE_DUMP"], !path.isEmpty else { return }
+    var lines: [String] = []
+    func walk(_ nodes: [Snapshot.TreeNode], depth: Int) {
+        for n in nodes {
+            lines.append("\(depth)\t\(n.open ?? false ? 1 : 0)\t\(n.kids ?? false ? 1 : 0)\t\(n.id == snap.selection ? 1 : 0)\t\(n.text)")
+            if let c = n.children { walk(c, depth: depth + 1) }
+        }
+    }
+    walk(snap.nodes ?? [], depth: 0)
+    try? (lines.joined(separator: "\n") + "\n").write(toFile: path, atomically: true, encoding: .utf8)
+}
+
+/// debugging: the rows that were open in `old` and are gone from `new` (an open row removed)
+private func goneOpen(_ old: [Snapshot.TreeNode]?, _ new: [Snapshot.TreeNode]?) -> String {
+    var now = Set<Int>()
+    func collect(_ ns: [Snapshot.TreeNode]) { for n in ns { now.insert(n.key); if let c = n.children { collect(c) } } }
+    collect(new ?? [])
+    var gone: [String] = []
+    func walk(_ ns: [Snapshot.TreeNode], visible: Bool) {
+        for n in ns {
+            if visible, n.open ?? false, !now.contains(n.key) { gone.append(n.text) }
+            if let c = n.children { walk(c, visible: visible && (n.open ?? false)) }
+        }
+    }
+    walk(old ?? [], visible: true)
+    return gone.isEmpty ? "" : " GONE-OPEN[\(gone.prefix(5).joined(separator: ","))]"
+}
+
+private func treeSummary(_ nodes: [Snapshot.TreeNode]?) -> String {
+    var total = 0, open = 0, shown = 0
+    func walk(_ ns: [Snapshot.TreeNode], visible: Bool) {
+        for n in ns {
+            total += 1
+            if visible { shown += 1 }
+            if n.open ?? false { open += 1 }
+            if let c = n.children { walk(c, visible: visible && (n.open ?? false)) }
+        }
+    }
+    walk(nodes ?? [], visible: true)
+    return "nodes=\(total) open=\(open) shown=\(shown)"
+}
+
+/// Show `steps` one after the other (TreeStaging), then the newest snapshot that came meanwhile.
+private func showTreeSteps(_ host: ControlHost, _ steps: [[Snapshot.TreeNode]], _ index: Int, _ base: Snapshot) {
+    var step = base
+    step.nodes = steps[index]
+    traceTree("  step \(index + 1)/\(steps.count) \(treeSummary(step.nodes))")
+    withTransaction(Transaction(animation: nil)) { host.model.snap = step }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak host] in
+        guard let host = host else { return }
+        if index + 1 < steps.count { showTreeSteps(host, steps, index + 1, base); return }
+        host.treeBusy = false
+        guard let final = host.treeFinal else { return }
+        host.treeFinal = nil
+        applyTree(host, final)
+    }
+}
+
+/// The user closes a node: the list has to close what is open below it first.
+private func closeTreeNode(_ host: ControlHost, _ id: Int) {
+    if host.treeBusy { return }
+    guard let nodes = host.model.snap.nodes else { return }
+    func closed(_ ns: [Snapshot.TreeNode]) -> [Snapshot.TreeNode] {
+        ns.map { n in
+            var n = n
+            if n.id == id { n.open = false; n.children = nil }
+            else if let c = n.children { n.children = closed(c) }
+            return n
+        }
+    }
+    let steps = TreeStaging.steps(old: nodes, new: closed(nodes))
+    guard !steps.isEmpty else {
+        withTransaction(Transaction(animation: nil)) { host.model.snap.nodes = TreeRows.setting(id, open: false, in: nodes) }
+        return
+    }
+    host.treeBusy = true
+    showTreeSteps(host, steps, 0, host.model.snap)
+}
+
+/// A tree snapshot, in steps when it closes nodes that have open nodes below them.
+private func applyTree(_ host: ControlHost, _ incoming: Snapshot) {
+    var snap = incoming
+    snap.nodes = TreeStaging.identify(incoming.nodes, known: &host.treeKnown, next: &host.treeNextUID)
+    // steps are being shown: this is the newer state, shown when they are over
+    if host.treeBusy { traceTree("hold   \(treeSummary(snap.nodes)) sel=\(snap.selection ?? 0)"); host.treeFinal = snap; return }
+    guard host.model.snap != snap else { return }
+    traceTree("apply  \(treeSummary(snap.nodes)) sel=\(snap.selection ?? 0) was \(treeSummary(host.model.snap.nodes)) sel=\(host.model.snap.selection ?? 0)\(goneOpen(host.model.snap.nodes, snap.nodes))")
+    let steps = TreeStaging.steps(old: host.model.snap.nodes, new: snap.nodes)
+    guard !steps.isEmpty else {
+        withTransaction(Transaction(animation: nil)) { host.model.snap = snap }
+        return
+    }
+    host.treeBusy = true
+    host.treeFinal = snap
+    showTreeSteps(host, steps, 0, snap)
+}
+
 @_cdecl("w2s_swift_control_update")
 public func w2s_swift_control_update(_ handle: UInt64, _ json: UnsafePointer<CChar>?, _ jsonLen: UInt32) {
     if let host = W2S.control(handle), let bar = host.owned as? MenuBar {
@@ -177,7 +291,9 @@ public func w2s_swift_control_update(_ handle: UInt64, _ json: UnsafePointer<CCh
             (host.owned as? WindowChrome)?.update()
             return
         }
-        if host.model.snap != snap {
+        if host.entry == "treeview" {
+            applyTree(host, snap)
+        } else if host.model.snap != snap {
             let titleMoved = snap.titleAbove != host.model.snap.titleAbove || snap.text != host.model.snap.text
             host.model.snap = snap
             if titleMoved && host.entry == "button.groupbox" { GroupBoxTitle.apply(host) }
