@@ -837,6 +837,8 @@ enum Debug {
                 out["passThrough"] = hosting.hitTest(NSPoint(x: hosting.frame.midX, y: hosting.frame.midY)) == nil
                 out["appearance"] = hosting.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])?.rawValue ?? ""
                 out["titleBar"] = hosting.window?.styleMask.contains(.titled) ?? false
+                out["macTitle"] = hosting.window?.title ?? ""
+                out["documentEdited"] = hosting.window?.isDocumentEdited ?? false
                 out["hostHidden"] = hosting.superview?.isHidden ?? true
             }
             return W2S.json(out)

@@ -2760,6 +2760,41 @@ static BOOL dock_has( const char *needle )
     return ok;
 }
 
+/* a title's unsaved-changes mark is the Mac close button's dot; GetWindowText keeps it */
+static void selftest_edited_mark(void)
+{
+    static const struct { const WCHAR *title; const char *mac; BOOL edited; } cases[] =
+    {
+        { L"*nouveau 1 - Notepad++", "\"macTitle\":\"nouveau 1 - Notepad++\"", TRUE },
+        { L"Report.txt* - Editor", "\"macTitle\":\"Report.txt - Editor\"", TRUE },
+        { L"Drawing*", "\"macTitle\":\"Drawing\"", TRUE },
+        { L"Gallery - saved", "\"macTitle\":\"Gallery - saved\"", FALSE },
+    };
+    WCHAR saved[256], now[256];
+    BOOL ok = TRUE;
+    unsigned int i;
+
+    GetWindowTextW( main_window, saved, ARRAYSIZE(saved) );
+    for (i = 0; i < ARRAYSIZE(cases); i++)
+    {
+        SetWindowTextW( main_window, cases[i].title );
+        pump( 300 );
+        GetWindowTextW( main_window, now, ARRAYSIZE(now) );
+        if (!query_has( ctl[ID_EDIT], cases[i].mac ) ||
+            !query_has( ctl[ID_EDIT], cases[i].edited ? "\"documentEdited\":true" : "\"documentEdited\":false" ) ||
+            wcscmp( now, cases[i].title ))
+        {
+            printf( "      %ls\n", cases[i].title );
+            ok = FALSE;
+        }
+    }
+    SetWindowTextW( main_window, saved );
+    pump( 300 );
+    check( ok && query_has( ctl[ID_EDIT], "\"documentEdited\":false" ),
+           "a title's unsaved mark (\"*name - App\", \"name* - App\", \"name*\") is the close button's dot, "
+           "not in the Mac title; the Win32 title keeps it" );
+}
+
 /* FlashWindowEx: a Dock bounce (winemac). Nothing to read back: this only goes
  * through the calls (WINEDEBUG=trace+macdrv shows them arrive) */
 static void selftest_flash(void)
@@ -3320,6 +3355,12 @@ static int selftest(void)
         printf( "%d passed, %d failed\n", passes, failures );
         return failures;
     }
+    if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "edited" ))
+    {
+        selftest_edited_mark();
+        printf( "%d passed, %d failed\n", passes, failures );
+        return failures;
+    }
     if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "save" ))
     {
         selftest_save_controls();
@@ -3827,6 +3868,7 @@ static int selftest(void)
     selftest_about();
     selftest_taskbar();
     selftest_flash();
+    selftest_edited_mark();
     selftest_look();
 
     printf( "%d passed, %d failed\n", passes, failures );

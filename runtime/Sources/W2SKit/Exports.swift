@@ -10,8 +10,14 @@ public func w2s_swift_init(_ version: UInt32, _ osMajor: UnsafeMutablePointer<UI
     osMajor?.pointee = UInt32(os.major)
     osMinor?.pointee = UInt32(os.minor)
     guard version == W2S.protocolVersion else { return -1 }
-    // wine's system colours follow the macOS appearance from now on
-    DispatchQueue.main.async { Look.start() }
+    DispatchQueue.main.async {
+        // wine's system colours follow the macOS appearance from now on
+        Look.start()
+        // winemac: a title's unsaved-changes mark ("*name - App") is the close button's dot
+        let wineWindow: AnyObject? = NSClassFromString("WineWindow")
+        let on = NSSelectorFromString("w2sNativeUIOn")
+        if wineWindow?.responds(to: on) == true { _ = wineWindow?.perform(on) }
+    }
     // debugging: W2S_CAPTURE_DIR=<dir> draws this process's windows there every few
     // seconds (offscreen: works with the screen locked)
     if let dir = ProcessInfo.processInfo.environment["W2S_CAPTURE_DIR"], !dir.isEmpty {
