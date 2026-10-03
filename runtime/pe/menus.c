@@ -90,8 +90,17 @@ static char *menu_snapshot( HMENU menu, const char *entry )
 
     json_init( &j );
     json_obj_begin( &j );
+    WCHAR module[MAX_PATH], *base, *dot;
+
     json_str_a( &j, "entry", entry );
     json_int( &j, "menu", (INT64)(UINT_PTR)menu );
+    /* the program's name (its image's file name without .exe): About <program> */
+    if (GetModuleFileNameW( NULL, module, MAX_PATH ))
+    {
+        base = wcsrchr( module, '\\' ) ? wcsrchr( module, '\\' ) + 1 : module;
+        if ((dot = wcsrchr( base, '.' ))) *dot = 0;
+        json_str( &j, "program", base );
+    }
     json_menu( &j, menu, 0 );
     json_obj_end( &j );
     copy = HeapAlloc( GetProcessHeap(), 0, j.len + 1 );
@@ -259,6 +268,23 @@ static void menu_shortcut( struct w2s_frame *frame, UINT id )
     send_menu( frame, FALSE );      /* the states the app set there */
 }
 
+
+BOOL WINAPI W2SShellAbout( HWND owner, const WCHAR *app, const WCHAR *other, HICON icon, BOOL *ret );
+
+/* The application menu's About <program> for an app that has no About of its own: the
+ * standard panel, with the program's name, version and copyright */
+static void menu_about( HWND hwnd )
+{
+    WCHAR module[MAX_PATH], name[MAX_PATH], *base, *dot;
+    BOOL ret;
+
+    if (!GetModuleFileNameW( NULL, module, MAX_PATH )) return;
+    base = wcsrchr( module, '\\' );
+    lstrcpynW( name, base ? base + 1 : module, MAX_PATH );
+    if ((dot = wcsrchr( name, '.' ))) *dot = 0;
+    W2SShellAbout( hwnd, name, NULL, NULL, &ret );
+}
+
 static void apply_menu_events( struct w2s_frame *frame )
 {
     struct w2s_pop_events_params params;
@@ -290,6 +316,7 @@ static void apply_menu_events( struct w2s_frame *frame )
             PostMessageW( frame->hwnd, WM_COMMAND, MAKEWPARAM( (UINT)ev->value, 0 ), 0 );
         }
         else if (!strcmp( ev->type, "menuKey" ) && ev->has_value) menu_shortcut( frame, (UINT)ev->value );
+        else if (!strcmp( ev->type, "about" )) menu_about( frame->hwnd );
         else if (!strcmp( ev->type, "menuOpen" ) && ev->array_count >= 2)
         {
             /* a submenu is about to open: let the app update it, then send it

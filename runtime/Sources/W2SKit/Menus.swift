@@ -25,8 +25,10 @@ enum MenuWords {
     private static func table(_ name: String) -> [String: [String: String]] {
         if let t = tables[name] { return t }
         var out: [String: [String: String]] = [:]
-        if let path = Bundle(for: NSApplication.self).path(forResource: name, ofType: "loctable"),
-           let dict = NSDictionary(contentsOfFile: path) as? [String: Any] {
+        // AppKit's tables; the application menu's words ("About %@") are SwiftUI's
+        let path = Bundle(for: NSApplication.self).path(forResource: name, ofType: "loctable")
+            ?? Bundle(path: "/System/Library/Frameworks/SwiftUI.framework")?.path(forResource: name, ofType: "loctable")
+        if let path = path, let dict = NSDictionary(contentsOfFile: path) as? [String: Any] {
             for (lang, value) in dict { if let words = value as? [String: String] { out[lang] = words } }
         }
         tables[name] = out
@@ -66,6 +68,30 @@ enum MenuWords {
     /// an app's settings item, in every language AppKit has, and Windows' "Options"
     static let settings: Set<String> = Set(all("Settings\u{2026}", ["MenuCommands"]).union(all("Preferences\u{2026}", ["MenuCommands"]))
         .map { bare($0) }).union(["options", "preferences", "settings"])
+    /// "About %@" in every language the Mac has, as the words before and after the app's name
+    /// ("À propos de", "") ("", "について"); an app's About item, with or without its name
+    static let about: [(before: String, after: String)] = {
+        var out: [(String, String)] = [("about", "")]
+        let quotes = CharacterSet(charactersIn: "\u{201e}\u{201c}\u{201d}\u{201a}\u{2018}\u{2019}\u{ab}\u{bb}\u{2039}\u{203a}\"'")
+        for words in table("MainMenu").values {
+            guard let w = words["About %@"], let range = w.range(of: "%@") else { continue }
+            func clean(_ x: Substring) -> String { bare(String(x).components(separatedBy: quotes).joined()) }
+            out.append((clean(w[..<range.lowerBound]), clean(w[range.upperBound...])))
+        }
+        return out.filter { !$0.0.isEmpty || !$0.1.isEmpty }
+    }()
+
+    /// whether a menu item's title (without dots) is an About item: the words around
+    /// an app's name, or alone
+    static func isAbout(_ title: String) -> Bool {
+        about.contains { before, after in
+            guard title.count >= before.count + after.count,
+                  before.isEmpty || title.hasPrefix(before), after.isEmpty || title.hasSuffix(after) else { return false }
+            // a word, not the start of one ("aboutness")
+            return before.isEmpty || title.count == before.count || title.dropFirst(before.count).first == " "
+        }
+    }
+
     // "?" is a Help menu's title in many Windows apps
     static let help = all("Help", ["MenuCommands", "HelpManager"]).union(["?"])
 }
@@ -201,6 +227,12 @@ enum MenuBuild {
             MenuWords.settings.contains(MenuWords.bare(split(spec["text"] as? String ?? "").title))
     }
 
+    /// the app's About item: a command whose title is About, with or without the app's name
+    static func isAbout(_ spec: [String: Any]) -> Bool {
+        spec["sub"] == nil && (spec["id"] as? Int ?? 0) != 0 &&
+            MenuWords.isAbout(MenuWords.bare(split(spec["text"] as? String ?? "").title))
+    }
+
     /// the first item anywhere in the tree, in menu order
     static func firstItem(_ items: [[String: Any]], _ test: ([String: Any]) -> Bool) -> [String: Any]? {
         for spec in items {
@@ -265,6 +297,8 @@ final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
     private var helpItem: NSMenuItem?             // the app's Help menu, last (after Window)
     private var appMenuItems: [NSMenuItem] = []   // ours in the application menu: Settings…
     private var settingsID = 0                    // the app's settings command, moved there
+    private var aboutID = 0                       // the app's About command, moved there
+    static let genericAbout = -9001               // an About of ours, for an app that has none
     private var previousHelp: NSMenu?
     private var shown = false
     private var tracking = 0
@@ -336,6 +370,47 @@ final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
         for item in appMenuItems { item.menu?.removeItem(item) }
         appMenuItems = []
         settingsID = 0
+        aboutID = 0
+    }
+
+    /// The program's name, as Windows has it: its image's file name without .exe
+    private func programName() -> String {
+        W2S.lock.lock()
+        defer { W2S.lock.unlock() }
+        return spec["program"] as? String ?? ProcessInfo.processInfo.processName
+    }
+
+    /// The app's About item (Help > About Notepad++...) is the application menu's first
+    /// item, About <app> (HIG: the app menu), and leaves its own menu. An app without
+    /// one gets the standard About panel, from the program's version information.
+    private func moveAbout(_ specs: [[String: Any]]) {
+        guard let appMenu = NSApp.mainMenu?.items.first?.submenu else { return }
+        let helpFirst = specs.filter(MenuBuild.isHelp).compactMap { ($0["sub"] as? [String: Any])?["items"] as? [[String: Any]] }
+        let found = helpFirst.lazy.compactMap { MenuBuild.firstItem($0, MenuBuild.isAbout) }.first
+            ?? MenuBuild.firstItem(specs, MenuBuild.isAbout)
+        let aboutFormat = MenuWords.local("About %@", ["MainMenu"])
+        let item: W2SMenuItem
+        if let spec = found, let id = spec["id"] as? Int {
+            var title = MenuBuild.split(spec["text"] as? String ?? "").title
+            while let last = title.last, "\u{2026}. ".contains(last) { title.removeLast() }
+            // "About..." alone is About <the program>
+            if MenuWords.about.contains(where: { MenuWords.bare(title) == $0.before && $0.after.isEmpty }) {
+                title = aboutFormat.replacingOccurrences(of: "%@", with: programName())
+            }
+            item = W2SMenuItem(title: title, action: #selector(choose(_:)), keyEquivalent: "")
+            item.tag = id
+            item.appEnabled = spec["disabled"] as? Bool != true
+            aboutID = id
+        } else {
+            item = W2SMenuItem(title: aboutFormat.replacingOccurrences(of: "%@", with: programName()),
+                               action: #selector(choose(_:)), keyEquivalent: "")
+            item.tag = MenuBar.genericAbout
+        }
+        item.target = self
+        let separator = NSMenuItem.separator()
+        appMenu.insertItem(item, at: 0)
+        appMenu.insertItem(separator, at: 1)
+        appMenuItems += [item, separator]
     }
 
     /// The app's Settings (Préférences..., Tools > Options...) is the application
@@ -367,6 +442,7 @@ final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
         let editIndex = specs.firstIndex(where: MenuBuild.isEdit)
         var index = min(1, main.items.count)          // after the application menu
         moveSettings(specs, taken: taken)
+        moveAbout(specs)
         for (n, spec) in specs.enumerated() {
             guard let sub = spec["sub"] as? [String: Any] else { continue }
             let title = MenuBuild.split(spec["text"] as? String ?? "").title
@@ -380,6 +456,7 @@ final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
             submenu.textCommands = n == editIndex && !MenuBuild.hasCopyPaste(subItems)
             MenuBuild.fill(submenu, items: subItems, target: self, action: #selector(choose(_:)), delegate: self)
             if settingsID != 0 { MenuBar.dropEverywhere(tag: settingsID, in: submenu) }
+            if aboutID != 0 { MenuBar.dropEverywhere(tag: aboutID, in: submenu) }
             MenuBar.validated(submenu)
             if submenu.textCommands { MenuBuild.addTextCommands(submenu, taken: taken) }
             top.submenu = submenu
@@ -427,6 +504,7 @@ final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
     }
 
     @objc func choose(_ item: NSMenuItem) {
+        if item.tag == MenuBar.genericAbout { host.emit(["t": "about"]); return }
         // a shortcut: the app checks the item first (menuKey); a click: it was up to date
         host.emit(["t": NSApp.currentEvent?.type == .keyDown && tracking == 0 ? "menuKey" : "menu", "v": item.tag])
     }
@@ -457,6 +535,10 @@ final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
             (menu?.items ?? []).contains { ($0.tag == tag && $0.submenu == nil) || has($0.submenu, tag) }
         }
         out["settingsInAppMenus"] = settingsID != 0 && items.contains { has($0.submenu, settingsID) }
+        out["aboutInAppMenus"] = aboutID != 0 && items.contains { has($0.submenu, aboutID) }
+        let appItems = NSApp.mainMenu?.items.first?.submenu?.items ?? []
+        let aboutItem = appItems.first { ($0.tag == aboutID && aboutID != 0) || $0.tag == MenuBar.genericAbout }
+        out["aboutTitle"] = aboutItem?.title ?? ""
         return out
     }
 
@@ -464,7 +546,10 @@ final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
     /// the index-th top-level menu opened (the WM_INITMENUPOPUP round trip)
     func debugInject(_ event: [String: Any]) {
         switch event["t"] as? String {
-        case "menu": host.emit(["t": "menu", "v": event["v"] as? Int ?? 0])
+        case "menu":
+            // the application menu's own About (an app with none): as chosen there
+            if event["v"] as? Int == MenuBar.genericAbout { host.emit(["t": "about"]) }
+            else { host.emit(["t": "menu", "v": event["v"] as? Int ?? 0]) }
         case "shortcut":
             // ⌘ and a key, matched against the menu bar as AppKit does for a key press
             let key = event["s"] as? String ?? ""

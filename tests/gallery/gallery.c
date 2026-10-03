@@ -2082,6 +2082,86 @@ static LRESULT CALLBACK menuhost_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
     return DefWindowProcW( hwnd, msg, wparam, lparam );
 }
 
+/* the app's About (Help > About ...) is the application menu's first item */
+static void selftest_about_item(void)
+{
+    static const struct { const WCHAR *help; const WCHAR *about; const char *title; } cases[] =
+    {
+        { L"?", L"&About Notepad++...", "About Notepad++" },
+        { L"Aide", L"À propos de Notepad++...", "À propos de Notepad++" },
+        { L"Hilfe", L"Über Notepad++...", "Über Notepad++" },
+        { L"&Help", L"About...", "About %s" },
+    };
+    WNDCLASSW wc = { 0 };
+    unsigned int n;
+
+    wc.lpfnWndProc = menuhost_proc;
+    wc.hInstance = GetModuleHandleW( NULL );
+    wc.lpszClassName = L"W2SMenuHost";
+    RegisterClassW( &wc );
+    for (n = 0; n < ARRAYSIZE(cases); n++)
+    {
+        HMENU bar = CreateMenu(), file = CreatePopupMenu(), help = CreatePopupMenu();
+        WCHAR exe[MAX_PATH], *base, *dot;
+        char want[160], program[MAX_PATH];
+        HWND win;
+
+        GetModuleFileNameW( NULL, exe, ARRAYSIZE(exe) );
+        base = wcsrchr( exe, '\\' ) ? wcsrchr( exe, '\\' ) + 1 : exe;
+        if ((dot = wcsrchr( base, '.' ))) *dot = 0;
+        WideCharToMultiByte( CP_UTF8, 0, base, -1, program, sizeof(program), NULL, NULL );
+        AppendMenuW( file, MF_STRING, 9401, L"&Open" );
+        AppendMenuW( help, MF_STRING, 9402, L"&Contents" );
+        AppendMenuW( help, MF_SEPARATOR, 0, NULL );
+        AppendMenuW( help, MF_STRING, 9403, cases[n].about );
+        AppendMenuW( bar, MF_POPUP, (UINT_PTR)file, L"&File" );
+        AppendMenuW( bar, MF_POPUP, (UINT_PTR)help, cases[n].help );
+        win = CreateWindowExW( 0, L"W2SMenuHost", L"About", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 240, 240, 400, 300,
+                               NULL, bar, GetModuleHandleW( NULL ), NULL );
+        pump( 600 );
+        {
+            char key[200], *q = pQuery( win ), *t;
+            BOOL title_ok;
+
+            /* "About..." alone is About <the program> in the Mac's language: it has the program's name */
+            snprintf( key, sizeof(key), "\"aboutTitle\":\"" );
+            t = q ? strstr( q, key ) : NULL;
+            if (strstr( cases[n].title, "%s" ))
+                title_ok = t && strstr( t, program ) && strstr( t, program ) < strchr( t + strlen( key ), '"' );
+            else
+            {
+                snprintf( want, sizeof(want), "\"aboutTitle\":\"%s\"", cases[n].title );
+                title_ok = q && strstr( q, want );
+            }
+            if (!title_ok) printf( "      query: %s\n", q ? q : "(null)" );
+            pFree( q );
+            check( query_has( win, "\"aboutInAppMenus\":false" ) && title_ok &&
+                   query_has( win, "\"appMenu\":[\"9403:\",\"-\"" ),
+                   "the app's About item (Help menu; English, French, German, or alone) is the application menu's first, "
+                   "About <app>, and no longer in the app's own menu" );
+        }
+        menu_commands[9403] = 0;
+        inject( win, "{\"t\":\"menu\",\"v\":9403}" );
+        pump( 300 );
+        check( menu_commands[9403] == 1, "choosing the application menu's About sends the app's own About command" );
+        DestroyWindow( win );
+        pump( 200 );
+    }
+}
+
+static BOOL generic_about_ok;
+static char generic_about_program[MAX_PATH];
+
+static void CALLBACK generic_about_close( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    char name[MAX_PATH + 16];
+
+    KillTimer( hwnd, id );
+    snprintf( name, sizeof(name), "\"%s\"", generic_about_program );
+    generic_about_ok = query_has( NULL, "\"visible\":true" ) && query_has( NULL, name );
+    inject( NULL, "{\"t\":\"close\"}" );
+}
+
 static void selftest_menu_shortcut(void)
 {
     WNDCLASSW wc = { 0 };
@@ -2136,11 +2216,24 @@ static void selftest_menu_shortcut(void)
     check( menu_commands[9198] == 0, "a grayed item's shortcut does nothing" );
     inject( win, "{\"t\":\"open\",\"v\":4}" );         /* the app's menu refreshed as it opens */
     pump( 400 );
-    check( query_has( win, "\"appMenu\":[\"9197:,\",\"-\"" ) && query_has( win, "\"settingsInAppMenus\":false" ),
-           "the app's Pr\u00e9f\u00e9rences... is the application menu's Settings\u2026, \u2318, (HIG), not in the app's menu" );
+    check( query_has( win, "\"appMenu\":[\"-9001:\",\"-\",\"9197:,\",\"-\"" ) && query_has( win, "\"settingsInAppMenus\":false" ),
+           "the app's Pr\u00e9f\u00e9rences... is the application menu's Settings\u2026, \u2318, (HIG), not in the app's menu; "
+           "an app with no About gets the standard one, first" );
     inject( win, "{\"t\":\"shortcut\",\"s\":\",\"}" );
     pump( 1000 );
     check( menu_commands[9197] == 1, "\u2318, opens the app's settings" );
+    {
+        WCHAR exe[MAX_PATH], *base, *dot;
+
+        GetModuleFileNameW( NULL, exe, ARRAYSIZE(exe) );
+        base = wcsrchr( exe, '\\' ) ? wcsrchr( exe, '\\' ) + 1 : exe;
+        if ((dot = wcsrchr( base, '.' ))) *dot = 0;
+        WideCharToMultiByte( CP_UTF8, 0, base, -1, generic_about_program, sizeof(generic_about_program), NULL, NULL );
+    }
+    SetTimer( main_window, 37, 1200, generic_about_close );
+    inject( win, "{\"t\":\"menu\",\"v\":-9001}" );
+    pump( 2500 );
+    check( generic_about_ok, "the application menu's About, for an app with none: the About panel with the program's name" );
     DestroyWindow( win );
     pump( 200 );
 }
@@ -3563,6 +3656,12 @@ static int selftest(void)
         printf( "%d passed, %d failed\n", passes, failures );
         return failures;
     }
+    if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "about" ))
+    {
+        selftest_about_item();
+        printf( "%d passed, %d failed\n", passes, failures );
+        return failures;
+    }
     if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "shortcut" ))
     {
         selftest_menu_shortcut();
@@ -4047,6 +4146,7 @@ static int selftest(void)
     selftest_groupbox_room();
     selftest_menu_order();
     selftest_menu_shortcut();
+    selftest_about_item();
     selftest_replace_dialog();
     selftest_pane_list();
     selftest_frame_sidebar();
