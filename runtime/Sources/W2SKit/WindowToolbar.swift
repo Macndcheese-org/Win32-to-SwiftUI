@@ -199,8 +199,18 @@ final class WindowToolbar: NSObject, WindowChrome {
             return NSImage(systemSymbolName: String(sym.dropFirst(3)), accessibilityDescription: b.tip ?? b.text)
         }
         if let sym = sym, let image = Icons.image(sym, size: NSSize(width: 18, height: 18)) { return image }
-        if let index = b.img, let image = host?.model.images[index] { return image }
+        if let index = b.img, let image = host?.model.images[index] { return inPoints(image) }
         return nil
+    }
+
+    /// A Win32 image is as many pixels as the app drew; a pixel is not a point when the app
+    /// is DPI aware on a Retina display (32 px icons for 16 pt buttons), and the image's
+    /// size is in points. The pixels stay, so they are drawn one to one.
+    private func inPoints(_ image: NSImage) -> NSImage {
+        let scale = host?.scale ?? 1
+        guard scale > 0, abs(scale - 1) > 0.01, let copy = image.copy() as? NSImage else { return image }
+        copy.size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
+        return copy
     }
 
     /// the enabled and checked states the Win32 toolbar has now

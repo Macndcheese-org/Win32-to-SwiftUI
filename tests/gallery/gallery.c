@@ -2420,6 +2420,53 @@ static LRESULT CALLBACK tbwin_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     return DefWindowProcW( hwnd, msg, wparam, lparam );
 }
 
+/* a toolbar's own image: as many pixels as the app drew, and as many points as those are
+ * on this display (a DPI aware app on a Retina display draws 32 px for a 16 pt button) */
+static void selftest_toolbar_image_scale(void)
+{
+    TBBUTTON button = { 0, 200, TBSTATE_ENABLED, BTNS_BUTTON };
+    DWORD bits[16 * 16];
+    HBITMAP bitmap;
+    TBADDBITMAP add;
+    WNDCLASSW wc = { 0 };
+    HWND win, tb;
+    RECT rc;
+    char want[64];
+    int scale, points, i;
+
+    for (i = 0; i < 16 * 16; i++) bits[i] = 0xff3070d0;
+    bitmap = CreateBitmap( 16, 16, 1, 32, bits );
+    add.hInst = NULL;
+    add.nID = (UINT_PTR)bitmap;
+    wc.lpfnWndProc = tbwin_proc;
+    wc.hInstance = GetModuleHandleW( NULL );
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpszClassName = L"W2SToolbarWindow";
+    RegisterClassW( &wc );
+    win = CreateWindowExW( 0, L"W2SToolbarWindow", L"Toolbar image window", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                           150, 150, 480, 300, NULL, NULL, GetModuleHandleW( NULL ), NULL );
+    tb = CreateWindowExW( 0, TOOLBARCLASSNAMEW, NULL, WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, win, (HMENU)1,
+                          GetModuleHandleW( NULL ), NULL );
+    SendMessageW( tb, TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0 );
+    SendMessageW( tb, TB_SETBITMAPSIZE, 0, MAKELPARAM( 16, 16 ) );
+    SendMessageW( tb, TB_ADDBITMAP, 1, (LPARAM)&add );
+    SendMessageW( tb, TB_ADDBUTTONSW, 1, (LPARAM)&button );
+    CreateWindowExW( 0, L"Edit", L"", WS_CHILD | WS_VISIBLE | ES_MULTILINE, 0, 0, 0, 0, win, (HMENU)2,
+                     GetModuleHandleW( NULL ), NULL );
+    GetClientRect( win, &rc );
+    SendMessageW( win, WM_SIZE, SIZE_RESTORED, MAKELPARAM( rc.right, rc.bottom ) );
+    pump( 800 );
+    scale = query_int( tb, "frameScaleMilli" );
+    points = (16 * scale + 500) / 1000;
+    snprintf( want, sizeof(want), "\"frameImagePoints\":[[%d,%d]]", points, points );
+    printf( "      points per Win32 pixel %d/1000: a 16 px image is %d pt\n", scale, points );
+    check( query_has( tb, "\"frameToolbar\":true" ) && query_has( tb, "\"imageSize\":[16,16]" ) && query_has( tb, want ),
+           "a frame toolbar's own image (16 px) is as many points as those pixels are (16 pt, or 8 pt where a pixel is half a point)" );
+    DestroyWindow( win );
+    DeleteObject( bitmap );
+    pump( 300 );
+}
+
 static void selftest_frame_toolbar(void)
 {
     TBBUTTON buttons[4] =
@@ -3504,6 +3551,12 @@ static int selftest(void)
         printf( "%d passed, %d failed\n", passes, failures );
         return failures;
     }
+    if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "toolimg" ))
+    {
+        selftest_toolbar_image_scale();
+        printf( "%d passed, %d failed\n", passes, failures );
+        return failures;
+    }
     if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "toolbar" ))
     {
         selftest_frame_toolbar();
@@ -3987,6 +4040,7 @@ static int selftest(void)
     selftest_find();
     selftest_document();
     selftest_frame_toolbar();
+    selftest_toolbar_image_scale();
     selftest_scrollbars();
     selftest_strips();
     selftest_superclass();

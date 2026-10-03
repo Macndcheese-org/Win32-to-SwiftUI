@@ -827,6 +827,10 @@ enum Debug {
                     out["frameEnabled"] = buttons.map { ($0.view as? NSButton)?.isEnabled ?? $0.isEnabled }
                     out["frameChecked"] = buttons.compactMap { ($0.view as? NSButton)?.state == .on ? $0.tag : nil }
                     out["frameLabels"] = buttons.map { $0.label }
+                    // an item's image: its size in points, and its pixels
+                    out["frameImagePoints"] = buttons.compactMap { $0.image.map { [Int($0.size.width.rounded()), Int($0.size.height.rounded())] } }
+                    out["frameImagePixels"] = buttons.compactMap { $0.image?.representations.first.map { [$0.pixelsWide, $0.pixelsHigh] } }
+                    out["frameScaleMilli"] = Int((host.scale * 1000).rounded())
                     out["frameTitles"] = buttons.map { ($0.view as? NSButton)?.title ?? $0.title }
                     out["toolbarStyle"] = window?.toolbarStyle == .unified ? "unified" : "other"
                 }
