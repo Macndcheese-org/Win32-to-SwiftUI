@@ -840,9 +840,14 @@ struct w2s_item_control
 
 struct w2s_item_custom
 {
+    UINT size;              /* sizeof, for what later versions add */
     void *ctx;
     UINT (CALLBACK *controls)( void *ctx, const struct w2s_item_control **list );
     void (CALLBACK *changed)( void *ctx, DWORD id, DWORD value, const WCHAR *text );
+    /* the user picked another file type (from 1); name: the file name the panel shows then */
+    void (CALLBACK *type_changed)( void *ctx, UINT index, const WCHAR *name );
+    /* the file name as the dialog has it now (the app's IFileDialog::SetFileName), or NULL */
+    const WCHAR *(CALLBACK *file_name)( void *ctx );
 };
 
 static const char *const item_kinds[] =
@@ -889,8 +894,20 @@ struct item_dialog
 {
     struct w2s_request_handler handler;     /* first: the handler is the state */
     const struct w2s_item_custom *custom;
-    char *sent;                             /* the controls as the panel has them */
+    char *sent;                             /* the controls as the panel has them, NULL: none */
+    WCHAR *name;                            /* the file name as the panel has it */
 };
+
+static BOOL item_has_names( const struct w2s_item_custom *custom )
+{
+    return custom->size >= offsetof( struct w2s_item_custom, file_name ) + sizeof(custom->file_name);
+}
+
+static void item_set_name( struct item_dialog *dlg, const WCHAR *name )
+{
+    HeapFree( GetProcessHeap(), 0, dlg->name );
+    dlg->name = strdupW( name ? name : L"" );
+}
 
 static char *item_controls( const struct w2s_item_custom *custom )
 {
@@ -907,22 +924,48 @@ static char *item_controls( const struct w2s_item_custom *custom )
     return copy;
 }
 
-/* {"t":"control","a":[id,value],"s":text}: the user changed one (ids as signed 32-bit) */
+/* {"t":"control","a":[id,value],"s":text}: the user changed one (ids as signed 32-bit);
+ * {"t":"type","v":index,"s":name}: picked another file type */
 static void item_event( struct w2s_request_handler *handler, UINT64 id, const struct w2s_event *ev )
 {
     struct item_dialog *dlg = (struct item_dialog *)handler;
 
-    if (strcmp( ev->type, "control" ) || ev->array_count < 2) return;
-    dlg->custom->changed( dlg->custom->ctx, (DWORD)ev->array[0], (DWORD)ev->array[1], ev->string );
+    if (!strcmp( ev->type, "control" ) && ev->array_count >= 2)
+        dlg->custom->changed( dlg->custom->ctx, (DWORD)ev->array[0], (DWORD)ev->array[1], ev->string );
+    else if (!strcmp( ev->type, "type" ) && ev->has_value && item_has_names( dlg->custom ))
+    {
+        item_set_name( dlg, ev->string );
+        dlg->custom->type_changed( dlg->custom->ctx, (UINT)ev->value, ev->string );
+    }
 }
 
-/* the app changed its controls meanwhile (in its events, from a timer): the panel follows */
+/* the app changed its controls or the file name meanwhile (in its events, from a
+ * timer): the panel follows */
 static void item_idle( struct w2s_request_handler *handler, UINT64 id )
 {
     struct item_dialog *dlg = (struct item_dialog *)handler;
-    char *now = item_controls( dlg->custom );
+    char *now;
 
-    if (dlg->sent && !strcmp( now, dlg->sent ))
+    if (item_has_names( dlg->custom ))
+    {
+        const WCHAR *name = dlg->custom->file_name( dlg->custom->ctx );
+        if (name && dlg->name && wcscmp( name, dlg->name ))
+        {
+            struct json j;
+
+            item_set_name( dlg, name );
+            TRACE( "file name now %ls\n", name );
+            json_init( &j );
+            json_obj_begin( &j );
+            json_str( &j, "name", name );
+            json_obj_end( &j );
+            w2s_request_update( id, j.buf );
+            json_free( &j );
+        }
+    }
+    if (!dlg->sent) return;
+    now = item_controls( dlg->custom );
+    if (!strcmp( now, dlg->sent ))
     {
         HeapFree( GetProcessHeap(), 0, now );
         return;
@@ -1021,15 +1064,22 @@ static BOOL file_dialog( OPENFILENAMEW *ofn, BOOL save, DWORD fos, const struct 
     if (initial_dir) HeapFree( GetProcessHeap(), 0, initial_dir );
     if (custom)
     {
-        json_item_controls( &j, custom );
+        const struct w2s_item_control *list;
+
         dlg.custom = custom;
-        dlg.sent = item_controls( custom );
+        if (custom->controls( custom->ctx, &list ))
+        {
+            json_item_controls( &j, custom );
+            dlg.sent = item_controls( custom );
+        }
+        if (item_has_names( custom )) item_set_name( &dlg, custom->file_name( custom->ctx ) );
     }
     json_obj_end( &j );
 
     ok = w2s_run_request_ex( save ? "save" : "open", ofn->hwndOwner, j.buf, custom ? &dlg.handler : NULL, &result );
     json_free( &j );
     HeapFree( GetProcessHeap(), 0, dlg.sent );
+    HeapFree( GetProcessHeap(), 0, dlg.name );
     if (!ok) return FALSE;
 
     count = json_get_str_array( result, "paths", &paths );

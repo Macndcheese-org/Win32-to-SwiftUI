@@ -410,6 +410,25 @@ enum Requests {
         delegate.okEnabled = params["okEnabled"] as? Bool ?? true
         panel.delegate = delegate
 
+        // A name set while the panel is up: the panel (its service, out of process)
+        // keeps a new base name only when the extension stays; when that changes too,
+        // it answers with the base it opened with ("c.md" -> "a.md", measured on
+        // macOS 27). Once it has answered, the same name again sticks.
+        func setName(_ name: String) {
+            let ext = (name as NSString).pathExtension.lowercased()
+            let changesExt = (panel.nameFieldStringValue as NSString).pathExtension.lowercased() != ext
+            panel.nameFieldStringValue = name
+            guard changesExt else { return }
+            var tries = 0
+            Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { timer in
+                tries += 1
+                let now = panel.nameFieldStringValue
+                guard now != name || tries >= 25 else { return }
+                timer.invalidate()
+                if now != name, (now as NSString).pathExtension.lowercased() == ext { panel.nameFieldStringValue = name }
+            }
+        }
+
         func applyFilter(_ index: Int) {
             filterIndex = index + 1
             let types = index < filters.count ? contentTypes(filters[index]) : []
@@ -432,7 +451,23 @@ enum Requests {
                 popup.menu?.addItem(item)
             }
             popup.selectItem(at: filterIndex - 1)
-            target = FilterTarget { applyFilter($0) }
+            target = FilterTarget { index in
+                // the user picked another type: as in TextEdit, a name
+                // with the old type's extension gets the new one's ("x.txt" -> "x.py");
+                // then the app hears of it (IFileDialogEvents::OnTypeChange), and may rename
+                let old = filterIndex - 1
+                if save, old != index, index < filters.count {
+                    let name = panel.nameFieldStringValue as NSString
+                    let ext = name.pathExtension.lowercased()
+                    let was = (filters[old]["exts"] as? [String] ?? []).map { $0.lowercased() }
+                    if !ext.isEmpty, was.contains(ext), let new = (filters[index]["exts"] as? [String])?.first,
+                       new.lowercased() != ext {
+                        setName(name.deletingPathExtension + "." + new)
+                    }
+                }
+                applyFilter(index)
+                request.emit(["t": "type", "v": index + 1, "s": panel.nameFieldStringValue])
+            }
             popup.target = target
             popup.action = #selector(FilterTarget.changed(_:))
             popup.sizeToFit()
@@ -481,6 +516,8 @@ enum Requests {
             if let text = p["status"] as? String { status = text; showMessage() }
             if let ok = p["okEnabled"] as? Bool { delegate.okEnabled = ok }
             if let list = p["controls"] as? [[String: Any]] { custom?.apply(list) }
+            // the app renamed (IFileDialog::SetFileName, as in its OnTypeChange)
+            if save, let name = p["name"] as? String { setName(name) }
         }
         request.inject = { event in
             // tests: {"t":"choose","s":"/unix/path"} or {"t":"cancel"}
@@ -491,6 +528,11 @@ enum Requests {
                 panel.cancel(nil)
             } else if e["t"] as? String == "control" {
                 custom?.inject(e)
+            } else if e["t"] as? String == "type", let index = e["v"] as? Int, let popup = filterPopup,
+                      index >= 1, index <= popup.numberOfItems {
+                // tests: the user picks the type at that index (from 1)
+                popup.selectItem(at: index - 1)
+                _ = popup.sendAction(popup.action, to: popup.target)
             } else if e["t"] as? String == "look", let path = e["s"] as? String {
                 // what browsing to a folder reports
                 panel.directoryURL = URL(fileURLWithPath: path, isDirectory: true)
@@ -862,7 +904,7 @@ enum Debug {
                 // tests: the Dock tile's progress ({"t":"dock","s":<png path>} also draws it)
                 return W2S.json(DockProgress.debug(capture: event["s"] as? String))
             }
-            if handle == 0 || ["alertButton", "choose", "cancel", "press", "look", "popupChoose"].contains(event["t"] as? String ?? "") {
+            if handle == 0 || ["alertButton", "choose", "cancel", "press", "look", "popupChoose", "control", "type"].contains(event["t"] as? String ?? "") {
                 guard let request = Requests.latestOpen() else { return "{\"error\":\"no open request\"}" }
                 if event["t"] as? String == "capture" { return Requests.capture(request.window, to: event["s"] as? String) }
                 request.inject?(event)

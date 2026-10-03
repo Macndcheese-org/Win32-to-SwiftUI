@@ -1748,7 +1748,7 @@ static struct
     IFileDialogCustomize *custom;
     char log[512];
 } save_events;
-static BOOL save_controls_shown, save_controls_synced;
+static BOOL save_controls_shown, save_controls_synced, save_type_swapped, save_type_renamed;
 
 static void save_log( const char *fmt, DWORD a, DWORD b )
 {
@@ -1772,11 +1772,22 @@ static HRESULT WINAPI fde_QueryInterface( IFileDialogEvents *iface, REFIID riid,
 }
 static ULONG WINAPI fde_AddRef( IFileDialogEvents *iface ) { return 2; }
 static ULONG WINAPI fde_Release( IFileDialogEvents *iface ) { return 1; }
+static void save_log_name( const char *what, UINT n, IFileDialog *fd )
+{
+    WCHAR *name = NULL;
+    char line[128];
+
+    IFileDialog_GetFileName( fd, &name );
+    snprintf( line, sizeof(line), "%s %u %ls;", what, n, name ? name : L"(none)" );
+    if (strlen( save_events.log ) + strlen( line ) < sizeof(save_events.log)) strcat( save_events.log, line );
+    CoTaskMemFree( name );
+}
+
 static HRESULT WINAPI fde_OnFileOk( IFileDialogEvents *iface, IFileDialog *fd )
 {
     BOOL checked = FALSE;
     IFileDialogCustomize_GetCheckButtonState( save_events.custom, 5, &checked );
-    save_log( "ok %u;", checked, 0 );
+    save_log_name( "ok", checked, fd );
     return S_OK;
 }
 static HRESULT WINAPI fde_OnFolderChanging( IFileDialogEvents *iface, IFileDialog *fd, IShellItem *item ) { return S_OK; }
@@ -1784,7 +1795,16 @@ static HRESULT WINAPI fde_OnFolderChange( IFileDialogEvents *iface, IFileDialog 
 static HRESULT WINAPI fde_OnSelectionChange( IFileDialogEvents *iface, IFileDialog *fd ) { return S_OK; }
 static HRESULT WINAPI fde_OnShareViolation( IFileDialogEvents *iface, IFileDialog *fd, IShellItem *item,
                                             FDE_SHAREVIOLATION_RESPONSE *r ) { return S_OK; }
-static HRESULT WINAPI fde_OnTypeChange( IFileDialogEvents *iface, IFileDialog *fd ) { return S_OK; }
+static HRESULT WINAPI fde_OnTypeChange( IFileDialogEvents *iface, IFileDialog *fd )
+{
+    UINT index = 0;
+
+    IFileDialog_GetFileTypeIndex( fd, &index );
+    save_log_name( "type", index, fd );
+    /* "All": the app renames, as Notepad++ does on a type change */
+    if (index == 3) IFileDialog_SetFileName( fd, L"renamed-by-app.txt" );
+    return S_OK;
+}
 static HRESULT WINAPI fde_OnOverwrite( IFileDialogEvents *iface, IFileDialog *fd, IShellItem *item,
                                        FDE_OVERWRITE_RESPONSE *r ) { return S_OK; }
 static IFileDialogEventsVtbl fde_vtbl =
@@ -1828,6 +1848,15 @@ static IFileDialogControlEventsVtbl fdce_vtbl =
     fdce_OnCheckButtonToggled, fdce_OnControlActivating
 };
 
+static void CALLBACK save_controls_third( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
+{
+    KillTimer( hwnd, id );
+    save_type_renamed = query_has( NULL, "\"nameField\":\"renamed-by-app.txt\"" );
+    /* ticked again just before Save: the app still gets it, before OnFileOk */
+    inject( NULL, "{\"t\":\"control\",\"v\":5}" );
+    inject( NULL, "{\"t\":\"choose\",\"s\":\"/tmp/w2s-gallery-save.txt\"}" );
+}
+
 static void CALLBACK save_controls_second( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
 {
     KillTimer( hwnd, id );
@@ -1836,9 +1865,9 @@ static void CALLBACK save_controls_second( HWND hwnd, UINT msg, UINT_PTR id, DWO
                            query_object_has( NULL, 5, "\"on\":false" ) &&
                            query_object_has( NULL, 22, "\"on\":[200]" ) &&
                            query_object_has( NULL, 11, "\"title\":\"UTF-8\"" );
-    /* ticked again just before Save: the app still gets it, before OnFileOk */
-    inject( NULL, "{\"t\":\"control\",\"v\":5}" );
-    inject( NULL, "{\"t\":\"choose\",\"s\":\"/tmp/w2s-gallery-save.txt\"}" );
+    save_type_swapped = query_has( NULL, "\"nameField\":\"w2s-gallery-save.md\"" );
+    inject( NULL, "{\"t\":\"type\",\"v\":3}" );
+    SetTimer( hwnd, 36, 800, save_controls_third );
 }
 
 static void CALLBACK save_controls_first( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
@@ -1865,6 +1894,7 @@ static void CALLBACK save_controls_first( HWND hwnd, UINT msg, UINT_PTR id, DWOR
     inject( NULL, "{\"t\":\"control\",\"v\":22,\"a\":[200]}" );
     inject( NULL, "{\"t\":\"control\",\"v\":33,\"s\":\"hello\"}" );
     inject( NULL, "{\"t\":\"control\",\"v\":44}" );
+    inject( NULL, "{\"t\":\"type\",\"v\":2}" );
     SetTimer( hwnd, 35, 800, save_controls_second );
 }
 
@@ -1872,7 +1902,7 @@ static void CALLBACK save_controls_first( HWND hwnd, UINT msg, UINT_PTR id, DWOR
  * app's own controls rather than falling back to wine's dialog */
 static void selftest_save_controls(void)
 {
-    static const COMDLG_FILTERSPEC types[] = { { L"Text", L"*.txt" }, { L"All", L"*.*" } };
+    static const COMDLG_FILTERSPEC types[] = { { L"Text", L"*.txt" }, { L"Markdown", L"*.md" }, { L"All", L"*.*" } };
     IFileSaveDialog *dialog;
     IFileDialogCustomize *custom;
     IShellItem *item;
@@ -1931,10 +1961,15 @@ static void selftest_save_controls(void)
     check( save_controls_shown, "a save dialog's own controls (IFileDialogCustomize) are in the native panel: "
            "check box, a group's pop-up, radio buttons, edit box, button, text; a hidden one hidden" );
     check( save_controls_synced, "the app changing its controls while the panel is up (in its events) shows in the panel" );
+    check( save_type_swapped && strstr( save_events.log, "type 2 w2s-gallery-save.md;" ),
+           "picking another file type: the name's extension follows (x.txt -> x.md), and the app's OnTypeChange "
+           "gets the new type and that name" );
+    check( save_type_renamed && strstr( save_events.log, "type 3 w2s-gallery-save.md;" ),
+           "the app renaming in its OnTypeChange (SetFileName) shows in the panel's name field" );
     check( hr == S_OK && path && !_wcsicmp( path, L"Z:\\tmp\\w2s-gallery-save.txt" ) &&
            strstr( save_events.log, "check 5 0;" ) && strstr( save_events.log, "sel 11 100;" ) &&
            strstr( save_events.log, "sel 22 200;" ) && strstr( save_events.log, "click 44;" ) &&
-           strstr( save_events.log, "check 5 1;ok 1" ) &&
+           strstr( save_events.log, "check 5 1;ok 1 w2s-gallery-save.txt;" ) &&
            checked && sel11 == 100 && sel22 == 200 && text && !wcscmp( text, L"hello" ),
            "what the user does in the panel reaches the app (its control events, in order, the last before OnFileOk) "
            "and is what it reads back" );
