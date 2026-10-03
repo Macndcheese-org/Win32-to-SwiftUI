@@ -37,15 +37,6 @@ enum AppName {
         apply()
         // winemac makes its application menu when the first window shows, which may be later
         for delay in [0.5, 2.0, 5.0] { DispatchQueue.main.asyncAfter(deadline: .now() + delay) { apply() } }
-        // debugging: W2S_ICON_DUMP=<png> writes the Dock icon once the program has set it
-        if let path = ProcessInfo.processInfo.environment["W2S_ICON_DUMP"], !path.isEmpty {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
-                if let icon = NSApp.applicationIconImage, let tiff = icon.tiffRepresentation,
-                   let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
-                    try? png.write(to: URL(fileURLWithPath: path))
-                }
-            }
-        }
     }
 
     /// The application menu named after the program: its title, Hide <name>, Quit <name>

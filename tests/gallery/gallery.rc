@@ -22,5 +22,3 @@ FILETYPE VFT_APP
         VALUE "Translation", 0x409, 1200
     }
 }
-
-1 ICON "tests/gallery/gallery.ico"

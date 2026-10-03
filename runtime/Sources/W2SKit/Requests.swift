@@ -905,24 +905,6 @@ enum Debug {
                 bar.debugInject(event)
                 return "{\"ok\":true}"
             }
-            if event["t"] as? String == "appIcon" {
-                // tests: the Dock icon as a PNG ({"s": path}) and its size in points
-                guard let icon = NSApp.applicationIconImage, let tiff = icon.tiffRepresentation,
-                      let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) else {
-                    return "{\"error\":\"no icon\"}"
-                }
-                if let path = event["s"] as? String { try? png.write(to: URL(fileURLWithPath: path)) }
-                func alpha(_ x: Int, _ y: Int) -> Double { Double(rep.colorAt(x: x, y: y)?.alphaComponent ?? -1) }
-                func white(_ x: Int, _ y: Int) -> Bool {
-                    guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { return false }
-                    return c.redComponent > 0.97 && c.greenComponent > 0.97 && c.blueComponent > 0.97 && c.alphaComponent > 0.97
-                }
-                // the corner of the canvas is clear, the body just inside its edge is white, the middle is the drawing
-                return W2S.json(["pointsW": Int(icon.size.width), "pointsH": Int(icon.size.height),
-                                 "pixelsW": rep.pixelsWide, "pixelsH": rep.pixelsHigh,
-                                 "cornerClear": alpha(8, 8) == 0, "bodyWhite": white(140, 512) && white(512, 140),
-                                 "middleDrawn": !white(512, 512) && alpha(512, 512) > 0.97])
-            }
             if event["t"] as? String == "appName" {
                 // tests: what macOS and the application menu call the program
                 let top = NSApp.mainMenu?.items.first

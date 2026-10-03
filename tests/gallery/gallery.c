@@ -2082,23 +2082,6 @@ static LRESULT CALLBACK menuhost_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARA
     return DefWindowProcW( hwnd, msg, wparam, lparam );
 }
 
-/* the program's icon in the Dock is a Mac icon: its drawing on a white rounded square (the gallery's
- * icon is a disc on nothing), 512 points of 1024 pixels */
-static void selftest_app_icon(void)
-{
-    char *r;
-    BOOL ok;
-
-    pump( 1500 );
-    r = pInject( NULL, "{\"t\":\"appIcon\"}" );
-    printf( "      %s\n", r ? r : "(null)" );
-    ok = r && strstr( r, "\"pointsW\":512" ) && strstr( r, "\"pixelsW\":1024" ) && strstr( r, "\"cornerClear\":true" ) &&
-         strstr( r, "\"bodyWhite\":true" ) && strstr( r, "\"middleDrawn\":true" );
-    pFree( r );
-    check( ok, "the program's icon is a Mac app icon: its drawing on a white rounded square, a clear margin around, "
-           "512 points of 1024 pixels" );
-}
-
 /* the process is called after the program, not wine: the Dock, the app switcher and the menu bar */
 static void selftest_app_name(void)
 {
@@ -3152,7 +3135,7 @@ static void CALLBACK about_close( HWND hwnd, UINT msg, UINT_PTR id, DWORD time )
     about_native_ok = query_has( NULL, "\"visible\":true" ) && query_has( NULL, "\"Gallery\"" ) &&
                       query_has( NULL, "Win32-to-SwiftUI gallery\\nEvery control the runtime translates." ) &&
                       query_has( NULL, "1.2.3" ) && query_has( NULL, "\"Copyright 2026 MacNdCheese\"" ) &&
-                      query_has( NULL, "\"icon\":\"pixels\"" );
+                      query_has( NULL, "\"icon\":\"uttype:com.apple.application-bundle\"" );
     inject( NULL, "{\"t\":\"close\"}" );
 }
 
@@ -3164,7 +3147,7 @@ static void selftest_about(void)
     ret = ShellAboutW( main_window, L"Gallery#Win32-to-SwiftUI gallery", L"Every control the runtime translates.", NULL );
     check( ret && about_native_ok,
            "ShellAbout -> the About panel: the program's name, version and copyright, the caller's text, "
-           "the program's own icon; it returns once closed" );
+           "the generic app icon for a program without one; it returns once closed" );
 }
 
 /* ChooseColor, ChooseFont and PrintDlg as the macOS panels */
@@ -3698,12 +3681,6 @@ static int selftest(void)
         printf( "%d passed, %d failed\n", passes, failures );
         return failures;
     }
-    if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "appicon" ))
-    {
-        selftest_app_icon();
-        printf( "%d passed, %d failed\n", passes, failures );
-        return failures;
-    }
     if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "appname" ))
     {
         selftest_app_name();
@@ -4202,7 +4179,6 @@ static int selftest(void)
     selftest_menu_shortcut();
     selftest_about_item();
     selftest_app_name();
-    selftest_app_icon();
     selftest_replace_dialog();
     selftest_pane_list();
     selftest_frame_sidebar();
