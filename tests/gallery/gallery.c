@@ -3129,6 +3129,11 @@ static void selftest_document_title(void)
         { L"untitled 1 - %ls [Administrator]", "untitled 1", "", FALSE },
         /* and only that: */
         { L"untitled 1 - %ls [Administrator] x", "untitled 1 - %ls [Administrator] x", "", FALSE },
+        /* an MDI program's frame is "App - [child]": the child is the document */
+        { L"%ls - [Z:\\tmp\\w2s-gallery-test.txt]", "w2s-gallery-test.txt", "/tmp/w2s-gallery-test.txt", FALSE },
+        { L"Elsewhere - [Z:\\tmp\\w2s-gallery-test.txt]", "w2s-gallery-test.txt", "/tmp/w2s-gallery-test.txt", FALSE },
+        { L"%ls - [Untitled]", "Untitled", "", FALSE },
+        { L"Elsewhere - [Z:\\tmp\\does-not-exist.txt]", "Z:\\\\tmp\\\\does-not-exist.txt", "", FALSE },
         /* Wine's tools call themselves "Wine <name>" */
         { L"Document - Wine %ls", "Document", "", FALSE },
         { L"*Document - Wine %ls", "Document", "", TRUE },
