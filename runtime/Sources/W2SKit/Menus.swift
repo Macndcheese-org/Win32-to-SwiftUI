@@ -393,6 +393,7 @@ final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
         if let spec = found, let id = spec["id"] as? Int {
             var title = MenuBuild.split(spec["text"] as? String ?? "").title
             while let last = title.last, "\u{2026}. ".contains(last) { title.removeLast() }
+            AppName.addAboutText(title)
             // "About..." alone is About <the program>
             if MenuWords.about.contains(where: { MenuWords.bare(title) == $0.before && $0.after.isEmpty }) {
                 title = aboutFormat.replacingOccurrences(of: "%@", with: programName())
@@ -513,6 +514,7 @@ final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
     /// tests/gallery: what is in the menu bar, and the state of an item
     func debugState() -> [String: Any] {
         var out: [String: Any] = ["entry": "menubar", "shown": shown, "titles": items.map { $0.title },
+                                  "macTitle": Unmanaged<NSView>.fromOpaque(host.hostView).takeUnretainedValue().window?.title ?? "",
                                   "editHidden": !hiddenEdit.isEmpty,
                                   "bar": (NSApp.mainMenu?.items ?? []).filter { !$0.isHidden }.map { $0.title },
                                   "helpMenu": NSApp.helpMenu.map { h in items.contains { $0.submenu === h } } ?? false,

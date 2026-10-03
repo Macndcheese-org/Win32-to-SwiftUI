@@ -1372,9 +1372,29 @@ static void tree_nodes( HWND hwnd, HTREEITEM item, struct json *j, int depth, in
  * winefile's) is the window's sidebar, as Finder's: the Mac's own. The sidebar
  * reaches to the pane the app laid out beside the tree (its splitter between):
  * *pane is where that pane starts, in the window's client coordinates. */
+/* The window that holds the tree's place beside the pane: the tree, or the window that holds only
+ * it (OleView's tree is in a "TREE" window, which sits beside "DETAILS" in a splitter "PANE"). */
+static HWND tree_unit( HWND hwnd )
+{
+    HWND root = GetAncestor( hwnd, GA_ROOT ), unit = hwnd, parent;
+
+    while ((parent = GetParent( unit )) && parent != root && !(GetWindowLongW( parent, GWL_STYLE ) & WS_POPUP))
+    {
+        RECT client, rc;
+
+        GetClientRect( parent, &client );
+        GetWindowRect( unit, &rc );
+        MapWindowPoints( NULL, parent, (POINT *)&rc, 2 );
+        /* it fills the parent, a client edge or two aside */
+        if (rc.left > 4 || rc.top > 4 || rc.right < client.right - 4 || rc.bottom < client.bottom - 4) break;
+        unit = parent;
+    }
+    return unit;
+}
+
 static BOOL tree_frame_sidebar( HWND hwnd, int *pane, RECT *tree )
 {
-    HWND root = GetAncestor( hwnd, GA_ROOT ), parent = GetParent( hwnd ), sib;
+    HWND root = GetAncestor( hwnd, GA_ROOT ), unit = tree_unit( hwnd ), parent = GetParent( unit ), sib;
     WCHAR cls[16] = { 0 };
     RECT client, rc;
 
@@ -1382,14 +1402,14 @@ static BOOL tree_frame_sidebar( HWND hwnd, int *pane, RECT *tree )
     GetClassNameW( root, cls, ARRAYSIZE(cls) );
     if (!wcscmp( cls, L"#32770" )) return FALSE;
     GetClientRect( root, &client );
-    GetWindowRect( hwnd, tree );
+    GetWindowRect( unit, tree );
     MapWindowPoints( NULL, root, (POINT *)tree, 2 );
     if (tree->left > 1 || tree->bottom - tree->top < (client.bottom - client.top) * 3 / 5) return FALSE;
     /* the pane beside it: the nearest sibling that starts at or after its right edge */
     *pane = tree->right;
     for (sib = GetWindow( parent, GW_CHILD ); sib; sib = GetWindow( sib, GW_HWNDNEXT ))
     {
-        if (sib == hwnd || !(GetWindowLongW( sib, GWL_STYLE ) & WS_VISIBLE)) continue;
+        if (sib == unit || !(GetWindowLongW( sib, GWL_STYLE ) & WS_VISIBLE)) continue;
         GetWindowRect( sib, &rc );
         MapWindowPoints( NULL, root, (POINT *)&rc, 2 );
         if (rc.left < tree->right || rc.bottom <= tree->top || rc.top >= tree->bottom) continue;
@@ -1402,7 +1422,7 @@ static BOOL tree_frame_sidebar( HWND hwnd, int *pane, RECT *tree )
  * the mouse would (the gap between the tree and the pane beside it) */
 static void tree_move_splitter( HWND hwnd, int want )
 {
-    HWND parent = GetParent( hwnd ), root = GetAncestor( hwnd, GA_ROOT );
+    HWND parent = GetParent( tree_unit( hwnd ) ), root = GetAncestor( hwnd, GA_ROOT );
     POINT origin = { 0, 0 };
     RECT tree;
     int pane, x, y, to;
@@ -3385,6 +3405,15 @@ static const struct w2s_kind kind_window_scrollbars =
     { "scrollbar", scroll_snapshot, scroll_apply, scroll_answer, NULL, scroll_region, NULL, scroll_release, W2S_KEEP_FRAME };
 
 static const struct w2s_kind *select_control_kind( HWND hwnd );
+
+/* A push button with no text, once its window shows, is a surface the app draws on (Task
+ * Manager's graphs are "PUSHBUTTON """ it subclasses and paints): a native button would cover
+ * what it draws. Wine keeps drawing it. A button whose text comes later was created hidden and
+ * has it when it shows. */
+BOOL w2s_is_drawing_surface( HWND hwnd, const struct w2s_kind *kind )
+{
+    return (kind == &kind_button_push || kind == &kind_button_default) && !GetWindowTextLengthW( hwnd );
+}
 
 const struct w2s_kind *w2s_select_kind( HWND hwnd )
 {

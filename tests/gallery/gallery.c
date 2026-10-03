@@ -1465,6 +1465,107 @@ static BOOL sidebar_click( HWND tree, const char *event )
     return key;
 }
 
+/* OleView's layout: the tree is alone in a window ("TREE") beside another ("DETAILS") in a splitter
+ * window ("PANE") that fills the main window; the splitter belongs to the pane */
+static int nested_split = 220;
+static BOOL nested_dragging;
+
+static void nested_layout( HWND pane )
+{
+    RECT rc;
+    HWND box = FindWindowExW( pane, NULL, L"W2SBox", NULL ), details = FindWindowExW( pane, NULL, L"Static", NULL );
+
+    GetClientRect( pane, &rc );
+    if (box) SetWindowPos( box, NULL, 0, 0, nested_split, rc.bottom, SWP_NOZORDER );
+    if (details) SetWindowPos( details, NULL, nested_split + 4, 0, max( 1, rc.right - nested_split - 4 ), rc.bottom, SWP_NOZORDER );
+}
+
+static LRESULT CALLBACK nested_pane_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    switch (msg)
+    {
+    case WM_SIZE: nested_layout( hwnd ); return 0;
+    case WM_LBUTTONDOWN: nested_dragging = TRUE; SetCapture( hwnd ); return 0;
+    case WM_MOUSEMOVE:
+        if (nested_dragging) { nested_split = max( 0, (short)LOWORD( lparam ) ); nested_layout( hwnd ); }
+        return 0;
+    case WM_LBUTTONUP: nested_dragging = FALSE; if (GetCapture() == hwnd) ReleaseCapture(); return 0;
+    }
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
+}
+
+static LRESULT CALLBACK nested_box_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    if (msg == WM_SIZE)
+    {
+        HWND tree = FindWindowExW( hwnd, NULL, WC_TREEVIEWW, NULL );
+        if (tree) SetWindowPos( tree, NULL, 0, 0, LOWORD( lparam ), HIWORD( lparam ), SWP_NOZORDER );
+        return 0;
+    }
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
+}
+
+static LRESULT CALLBACK nested_root_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    if (msg == WM_SIZE)
+    {
+        HWND pane = FindWindowExW( hwnd, NULL, L"W2SPane", NULL );
+        if (pane) SetWindowPos( pane, NULL, 0, 0, LOWORD( lparam ), HIWORD( lparam ), SWP_NOZORDER );
+        return 0;
+    }
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
+}
+
+static void selftest_nested_sidebar(void)
+{
+    WNDCLASSW wc = { 0 };
+    HWND win, pane, box, tree, details;
+    HTREEITEM root;
+    RECT rc;
+
+    wc.hInstance = GetModuleHandleW( NULL );
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpfnWndProc = nested_root_proc;
+    wc.lpszClassName = L"W2SNestedRoot";
+    RegisterClassW( &wc );
+    wc.lpfnWndProc = nested_pane_proc;
+    wc.lpszClassName = L"W2SPane";
+    RegisterClassW( &wc );
+    wc.lpfnWndProc = nested_box_proc;
+    wc.lpszClassName = L"W2SBox";
+    RegisterClassW( &wc );
+    nested_split = 220;
+    win = CreateWindowExW( 0, L"W2SNestedRoot", L"OleView", WS_OVERLAPPEDWINDOW, 260, 160, 800, 500, NULL, NULL,
+                           GetModuleHandleW( NULL ), NULL );
+    pane = CreateWindowExW( 0, L"W2SPane", NULL, WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, win, NULL, GetModuleHandleW( NULL ), NULL );
+    box = CreateWindowExW( WS_EX_CLIENTEDGE, L"W2SBox", NULL, WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, pane, NULL,
+                           GetModuleHandleW( NULL ), NULL );
+    tree = CreateWindowExW( 0, WC_TREEVIEWW, NULL, WS_CHILD | WS_VISIBLE | TVS_HASBUTTONS | TVS_LINESATROOT, 0, 0, 0, 0, box,
+                            (HMENU)1, GetModuleHandleW( NULL ), NULL );
+    details = CreateWindowExW( WS_EX_CLIENTEDGE, L"Static", L"Classes", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, pane, (HMENU)2,
+                               GetModuleHandleW( NULL ), NULL );
+    root = tree_add( tree, TVI_ROOT, L"Object Classes" );
+    tree_add( tree, root, L"Grouped by Component Category" );
+    tree_add( tree, root, L"OLE 1.0 Objects" );
+    tree_add( tree, root, L"COM Library Objects" );
+    tree_add( tree, root, L"All Objects" );
+    SendMessageW( tree, TVM_EXPAND, TVE_EXPAND, (LPARAM)root );
+    GetClientRect( win, &rc );
+    SendMessageW( win, WM_SIZE, SIZE_RESTORED, MAKELPARAM( 800, 460 ) );
+    ShowWindow( win, SW_SHOW );
+    pump( 2000 );
+    check( pIsTranslated( tree ) && query_has( tree, "\"frameSidebar\":true" ) && query_has( tree, "\"sidebarItem\":true" ),
+           "a tree alone in a window beside another, in a splitter window (OleView's layout), is the window's sidebar too" );
+    check( abs( query_int( tree, "sidebarPane" ) * query_int( tree, "scaleMilli" ) / 1000 - query_int( tree, "sidebarWidth" ) ) <= 1 &&
+           query_int( tree, "sidebarPane" ) == nested_split + 4,
+           "its sidebar reaches the window beside it, over the splitter" );
+    inject( tree, "{\"t\":\"sidebarWidth\",\"v\":300}" );
+    pump( 500 );
+    check( nested_split >= 290 && nested_split <= 300, "dragging the sidebar's divider drags the splitter of the pane that holds both" );
+    DestroyWindow( win );
+    pump( 300 );
+}
+
 static void selftest_frame_sidebar(void)
 {
     WNDCLASSW wc = { 0 };
@@ -2096,12 +2197,12 @@ static void selftest_app_name(void)
     pump( 1500 );
     r = pInject( NULL, "{\"t\":\"appName\"}" );
     printf( "      %s\n", r ? r : "(null)" );
-    snprintf( key, sizeof(key), "\"display\":\"%s\"", program );
+    /* its version resource's ProductName (a program without one: its file name) */
+    snprintf( key, sizeof(key), "\"display\":\"%s\"", "Win32-to-SwiftUI gallery" );
     ok = r && strstr( r, key );
-    snprintf( key, sizeof(key), "\"menu\":\"%s\"", program );
+    snprintf( key, sizeof(key), "\"menu\":\"%s\"", "Win32-to-SwiftUI gallery" );
     ok = ok && strstr( r, key );
-    snprintf( key, sizeof(key), "%s\"", program );
-    ok = ok && strstr( r, "\"items\":[" ) && strstr( strstr( r, "\"items\":[" ), key );
+    ok = ok && strstr( r, "\"items\":[" ) && strstr( strstr( r, "\"items\":[" ), "Win32-to-SwiftUI gallery\"" );
     pFree( r );
     check( ok, "the process is named after the program (macOS's name for it, the application menu and its Hide and Quit), "
            "not wine" );
@@ -2164,6 +2265,14 @@ static void selftest_about_item(void)
                    query_has( win, "\"appMenu\":[\"9403:\",\"-\"" ),
                    "the app's About item (Help menu; English, French, German, or alone) is the application menu's first, "
                    "About <app>, and no longer in the app's own menu" );
+        }
+        if (n < 3)
+        {
+            /* the app's About item says its name: it ends the app's titles, which a Mac window doesn't have */
+            SetWindowTextW( win, L"x.txt - Notepad++" );
+            pump( 400 );
+            check( query_has( win, "\"macTitle\":\"x.txt\"" ),
+                   "the app's name, as its About item says it, ends its windows' titles; a Mac window is titled by its document" );
         }
         menu_commands[9403] = 0;
         inject( win, "{\"t\":\"menu\",\"v\":9403}" );
@@ -2575,11 +2684,11 @@ static void selftest_toolbar_image_scale(void)
     SendMessageW( win, WM_SIZE, SIZE_RESTORED, MAKELPARAM( rc.right, rc.bottom ) );
     pump( 800 );
     scale = query_int( tb, "frameScaleMilli" );
-    points = (16 * scale + 500) / 1000;
+    points = max( 16, (16 * scale + 500) / 1000 );      /* never under a Mac toolbar's 16 points */
     snprintf( want, sizeof(want), "\"frameImagePoints\":[[%d,%d]]", points, points );
     printf( "      points per Win32 pixel %d/1000: a 16 px image is %d pt\n", scale, points );
     check( query_has( tb, "\"frameToolbar\":true" ) && query_has( tb, "\"imageSize\":[16,16]" ) && query_has( tb, want ),
-           "a frame toolbar's own image (16 px) is as many points as those pixels are (16 pt, or 8 pt where a pixel is half a point)" );
+           "a frame toolbar's own image (16 px) is as many points as those pixels are, not under a Mac toolbar's 16 pt (a DPI aware program on Retina draws 16 px for 8 pt)" );
     DestroyWindow( win );
     DeleteObject( bitmap );
     pump( 300 );
@@ -2965,8 +3074,8 @@ static void selftest_edited_mark(void)
 {
     static const struct { const WCHAR *title; const char *mac; BOOL edited; } cases[] =
     {
-        { L"*nouveau 1 - Notepad++", "\"macTitle\":\"nouveau 1 - Notepad++\"", TRUE },
-        { L"Report.txt* - Editor", "\"macTitle\":\"Report.txt - Editor\"", TRUE },
+        { L"*nouveau 1 - Elsewhere", "\"macTitle\":\"nouveau 1 - Elsewhere\"", TRUE },
+        { L"Report.txt* - Elsewhere", "\"macTitle\":\"Report.txt - Elsewhere\"", TRUE },
         { L"Drawing*", "\"macTitle\":\"Drawing\"", TRUE },
         { L"Gallery - saved", "\"macTitle\":\"Gallery - saved\"", FALSE },
     };
@@ -3020,6 +3129,9 @@ static void selftest_document_title(void)
         { L"untitled 1 - %ls [Administrator]", "untitled 1", "", FALSE },
         /* and only that: */
         { L"untitled 1 - %ls [Administrator] x", "untitled 1 - %ls [Administrator] x", "", FALSE },
+        /* Wine's tools call themselves "Wine <name>" */
+        { L"Document - Wine %ls", "Document", "", FALSE },
+        { L"*Document - Wine %ls", "Document", "", TRUE },
         { L"Report - Q3", "Report - Q3", "", FALSE },
         { L"%ls", "%ls", "", FALSE },
         { L"%ls - Elsewhere", "%ls - Elsewhere", "", FALSE },
@@ -3699,6 +3811,12 @@ static int selftest(void)
         printf( "%d passed, %d failed\n", passes, failures );
         return failures;
     }
+    if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "nested" ))
+    {
+        selftest_nested_sidebar();
+        printf( "%d passed, %d failed\n", passes, failures );
+        return failures;
+    }
     if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "sidebar" ))
     {
         selftest_frame_sidebar();
@@ -4182,6 +4300,7 @@ static int selftest(void)
     selftest_replace_dialog();
     selftest_pane_list();
     selftest_frame_sidebar();
+    selftest_nested_sidebar();
     selftest_about();
     selftest_taskbar();
     selftest_flash();

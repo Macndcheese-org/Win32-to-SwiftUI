@@ -573,7 +573,11 @@ final class SettingsFormController: WindowChrome {
             return
         }
         let s = scale
-        let want: [CGFloat] = [tab[1], tab[0], sheet[1] - tab[1] - tab[3], sheet[0] - tab[0] - tab[2]].map { max(0, CGFloat($0) * s) }
+        // the form covers the sheet: the tab control's rect with these outsets; below and to the right
+        // they are negative when the sheet is smaller than the tab control (a page that needs less
+        // room: Internet Settings' Content page), or the form would be wider than its window
+        let want: [CGFloat] = [tab[1], tab[0], sheet[1] - tab[1] - tab[3], sheet[0] - tab[0] - tab[2]].enumerated()
+            .map { i, v in i < 2 ? max(0, CGFloat(v) * s) : CGFloat(v) * s }
         if want != outsets {
             outsets = want
             hostView.perform(NSSelectorFromString("w2sSetOutsets:"), with: want.map { NSNumber(value: Double($0)) } as NSArray)
@@ -609,6 +613,9 @@ final class SettingsFormController: WindowChrome {
         // wide enough for every pane's button too (on the screen), as a Mac settings window is
         let panesWidth = min(SettingsToolbar.width(snap.items ?? []), (hostView.window?.screen?.visibleFrame.width ?? 1200) * 0.8)
         let size = [Int(ceil(max(fitting.width, panesWidth) / s)), Int(ceil((fitting.height + 12) / s))]
+        if ProcessInfo.processInfo.environment["W2S_DEBUG_FORM"] != nil {
+            FileHandle.standardError.write(Data("form: fitting \(fitting) panes \(panesWidth) s \(s) sheet \(sheet) asked \(size) page \((snap.page ?? []).count) sel \(snap.selection ?? -1) tab \(tab) outsets \(outsets) hostView \(hostView.frame) window \(hostView.window?.contentView?.frame ?? .zero)\n".utf8))
+        }
         if size != askedSize, abs(Double(size[0]) - sheet[0]) > 2 || abs(Double(size[1]) - sheet[1]) > 2 {
             askedSize = size
             host.model.emit(["t": "formSize", "a": size])

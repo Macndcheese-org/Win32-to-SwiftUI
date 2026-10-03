@@ -133,12 +133,15 @@ static WCHAR *product_string( void *info, const WCHAR *name )
 
 /* A program started through wine is a process called "wine" to macOS: its Dock icon,
  * the app switcher and the menu bar say so. Tell the native side the program's name:
- * its ProductName ("Notepad++", "Steam"), else the image's file name without .exe
- * (a system tool's ProductName is the OS's). Once, at the program's first window. */
+ * its ProductName ("Notepad++", "Steam"), else its FileDescription ("Wine Task Manager":
+ * Wine's tools have the Wine version as ProductName), else the image's file name without
+ * .exe (a system tool's ProductName is the OS's). All of them also end its windows' titles
+ * ("document - name"), which a Mac window doesn't have. Once, at the program's first window. */
 void w2s_announce_app_name(void)
 {
     static LONG announced;
-    WCHAR module[MAX_PATH], name[MAX_PATH], *base, *dot, *value;
+    WCHAR module[MAX_PATH], exe[MAX_PATH], product[MAX_PATH] = L"", description[MAX_PATH] = L"", *base, *dot, *value;
+    const WCHAR *name;
     struct w2s_app_state_params params;
     void *info = NULL;
     DWORD size, handle;
@@ -147,19 +150,34 @@ void w2s_announce_app_name(void)
     if (InterlockedCompareExchange( &announced, 1, 0 )) return;
     if (!GetModuleFileNameW( NULL, module, MAX_PATH )) return;
     base = wcsrchr( module, '\\' ) ? wcsrchr( module, '\\' ) + 1 : module;
-    lstrcpynW( name, base, MAX_PATH );
-    if ((dot = wcsrchr( name, '.' ))) *dot = 0;
+    lstrcpynW( exe, base, MAX_PATH );
+    if ((dot = wcsrchr( exe, '.' ))) *dot = 0;
 
     if ((size = GetFileVersionInfoSizeW( module, &handle )) && (info = HeapAlloc( GetProcessHeap(), 0, size )) &&
-        GetFileVersionInfoW( module, 0, size, info ) && (value = product_string( info, L"ProductName" )) &&
-        wcslen( value ) < 40 && !wcsstr( value, L"Operating System" ))
-        lstrcpynW( name, value, MAX_PATH );
+        GetFileVersionInfoW( module, 0, size, info ))
+    {
+        if ((value = product_string( info, L"ProductName" )) && wcslen( value ) < 40) lstrcpynW( product, value, MAX_PATH );
+        if ((value = product_string( info, L"FileDescription" )) && wcslen( value ) < 60)
+            lstrcpynW( description, value, MAX_PATH );
+    }
     if (info) HeapFree( GetProcessHeap(), 0, info );
+
+    /* what to call it: not the OS's, not the Wine version's */
+    name = exe;
+    if (product[0] && !wcsstr( product, L"Operating System" ) && !(!wcsncmp( product, L"Wine ", 5 ) && product[5] >= '0' && product[5] <= '9'))
+        name = product;
+    else if (description[0] && !wcsstr( description, L"Operating System" ))
+        name = !wcsncmp( description, L"Wine ", 5 ) && description[5] ? description + 5 : description;
 
     json_init( &j );
     json_obj_begin( &j );
     json_str_a( &j, "t", "name" );
     json_str( &j, "name", name );
+    json_arr_begin( &j, "names" );
+    json_str( &j, NULL, exe );
+    if (product[0]) json_str( &j, NULL, product );
+    if (description[0]) json_str( &j, NULL, description );
+    json_arr_end( &j );
     json_obj_end( &j );
     params.json = W2S_PTR( j.buf );
     params.json_len = strlen( j.buf );

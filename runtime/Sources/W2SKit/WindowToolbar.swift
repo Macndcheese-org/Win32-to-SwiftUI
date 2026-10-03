@@ -208,8 +208,11 @@ final class WindowToolbar: NSObject, WindowChrome {
     /// size is in points. The pixels stay, so they are drawn one to one.
     private func inPoints(_ image: NSImage) -> NSImage {
         let scale = host?.scale ?? 1
-        guard scale > 0, abs(scale - 1) > 0.01, let copy = image.copy() as? NSImage else { return image }
-        copy.size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
+        // not smaller than a Mac toolbar's 16 points: an app that is DPI aware on a Retina display
+        // draws 16 pixel images for 8 points
+        let factor = max(scale, 16 / max(1, max(image.size.width, image.size.height)))
+        guard factor > 0, abs(factor - 1) > 0.01, let copy = image.copy() as? NSImage else { return image }
+        copy.size = NSSize(width: image.size.width * factor, height: image.size.height * factor)
         return copy
     }
 

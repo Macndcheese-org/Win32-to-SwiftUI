@@ -1880,16 +1880,22 @@ struct ToolbarBar: View {
 
     @ViewBuilder
     func image(_ b: Snapshot.ToolbarButton) -> some View {
-        let side = 16 * scale
+        // Not smaller than a Mac toolbar's 16 points: an app that is DPI aware on a Retina display
+        // draws 16 pixel images for 8 points, and the buttons around are small enough.
+        let side = max(16, 16 * scale)
         let sym = b.sym ?? b.img.flatMap { model.imageSymbols[$0] }
         if let sym = sym, sym.hasPrefix("sf:"), !sym.contains(";") {
             // a toolbar's symbols are drawn in the text colour, as macOS toolbars do
             Image(systemName: String(sym.dropFirst(3)))
-                .font(.system(size: 13 * scale))
+                .font(.system(size: 13 * side / 16))
                 .foregroundStyle(Color(nsColor: .labelColor))
         } else if let sym = sym, let image = Icons.image(sym, size: NSSize(width: side, height: side)) {
             Image(nsImage: image)
         } else if let index = b.img, let image = model.images[index] {
+            // the image's own pixels, as many points as they are on this display (the app may draw
+            // 32 pixel images for 16 points)
+            let own = max(image.size.width, image.size.height) * scale
+            let side = max(16, own)
             Image(nsImage: image).resizable().interpolation(.high).frame(width: side, height: side)
         }
     }
@@ -2066,6 +2072,12 @@ struct TabBox: View {
                 Color.clear.tabItem { Text(stripMnemonic(items[i])) }.tag(i)
             }
         }
+        // The Win32 tab header is 20 odd pixels, and an app that doesn't ask where the page goes
+        // (Task Manager's dialogs are placed by their templates) puts its page right under it;
+        // a Mac tab bar is taller than that, and covers the top of the page. It sits a little
+        // higher, the box a little taller: the tab bar's bottom is above the page.
+        .padding(.bottom, -5)
+        .offset(y: -5)
         // the tab bar sizes its tabs when it's made: made before the view has its
         // place in the window, they come out squeezed. Made again once placed,
         // and when the tabs change.

@@ -11,6 +11,7 @@ public func w2s_swift_app_state(_ json: UnsafePointer<CChar>?, _ len: UInt32) {
                               value: (spec["value"] as? NSNumber)?.doubleValue ?? 0)
         case "name":
             AppName.set(spec["name"] as? String ?? "")
+            AppName.addTitleNames(spec["names"] as? [String] ?? [])
         default:
             break
         }
@@ -37,6 +38,21 @@ enum AppName {
         apply()
         // winemac makes its application menu when the first window shows, which may be later
         for delay in [0.5, 2.0, 5.0] { DispatchQueue.main.asyncAfter(deadline: .now() + delay) { apply() } }
+    }
+
+    /// winemac: the program's names end its windows' titles ("document - name"), which a Mac
+    /// window doesn't have
+    static func addTitleNames(_ names: [String]) {
+        guard let windows = NSClassFromString("WineWindow") as? NSObject.Type else { return }
+        let selector = NSSelectorFromString("w2sAddAppName:")
+        for name in names where windows.responds(to: selector) { _ = windows.perform(selector, with: name) }
+    }
+
+    /// what the program's About item says ("À propos de Bloc-notes"): it has the name too
+    static func addAboutText(_ text: String) {
+        guard let windows = NSClassFromString("WineWindow") as? NSObject.Type else { return }
+        let selector = NSSelectorFromString("w2sAddAboutText:")
+        if windows.responds(to: selector) { _ = windows.perform(selector, with: text) }
     }
 
     /// The application menu named after the program: its title, Hide <name>, Quit <name>

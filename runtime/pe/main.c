@@ -563,7 +563,7 @@ static void activate_deferred( struct w2s_control *ctl )
     ctl->deferred = NULL;
     InterlockedDecrement( &deferred_count );
     /* what it is now: its styles may have changed meanwhile (LVS_EX_CHECKBOXES) */
-    if ((kind = w2s_select_kind( ctl->hwnd ))) activate( ctl, kind );
+    if ((kind = w2s_select_kind( ctl->hwnd )) && !w2s_is_drawing_surface( ctl->hwnd, kind )) activate( ctl, kind );
 }
 
 static BOOL CALLBACK activate_shown_child( HWND hwnd, LPARAM lparam )

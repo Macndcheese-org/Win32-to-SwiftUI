@@ -159,6 +159,7 @@ struct w2s_control
 };
 
 const struct w2s_kind *w2s_select_kind( HWND hwnd );
+BOOL w2s_is_drawing_surface( HWND hwnd, const struct w2s_kind *kind );
 void w2s_observe_tooltip( HWND hwnd );
 struct w2s_control *w2s_control_of( HWND hwnd );    /* main.c: the translated control a window is, or NULL */
 void w2s_form_child_changed( HWND hwnd );           /* controls.c: a window on a settings form's page came or went */  /* controls.c: a tooltip window was created */
