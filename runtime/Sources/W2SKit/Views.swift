@@ -517,9 +517,11 @@ struct StaticText: View {
         let frameAlign: Alignment = snap.align == "center" ? (snap.centerVertically == true ? .center : .top)
             : snap.align == "trailing" ? (snap.centerVertically == true ? .trailing : .topTrailing)
             : (snap.centerVertically == true ? .leading : .topLeading)
-        Text(label)
+        (snap.bold == true ? Text(label).bold() : Text(label))
             .multilineTextAlignment(align)
             .lineLimit((snap.wrap ?? true) ? nil : 1)
+            // macOS's font is wider than the app's; shrink a little before cutting the text
+            .minimumScaleFactor(0.8)
             .foregroundColor((snap.enabled ?? true) ? .primary : .secondary)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: frameAlign)
             .allowsHitTesting(false)

@@ -357,7 +357,9 @@ static void static_image_snapshot( struct w2s_control *ctl, struct json *j )
         w = bm.bmWidth;
         h = abs( bm.bmHeight );
     }
-    if (w <= 0 || h <= 0 || w > 512 || h > 512) return;
+    /* an app's own artwork can be large, and at 192 dpi twice that (a wizard's
+     * side panel is ~1000 px wide); bound the snapshot by pixels, not by side */
+    if (w <= 0 || h <= 0 || w > 4096 || h > 4096 || (size_t)w * h > 4u * 1024 * 1024) return;
     if ((style & SS_TYPEMASK) == SS_ICON) bits = w2s_image_bgra( image, NULL, w, h );
     else bits = w2s_image_bgra( NULL, image, w, h );
     if (!bits) return;

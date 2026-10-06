@@ -130,7 +130,11 @@ void w2s_common_snapshot( struct w2s_control *ctl, struct json *j )
     }
     json_bool( j, "enabled", IsWindowEnabled( ctl->hwnd ) );
     if (!font) font = GetStockObject( DEFAULT_GUI_FONT );
-    if (GetObjectW( font, sizeof(lf), &lf )) json_int( j, "fontPx", abs( lf.lfHeight ) ? abs( lf.lfHeight ) : 11 );
+    if (GetObjectW( font, sizeof(lf), &lf ))
+    {
+        json_int( j, "fontPx", abs( lf.lfHeight ) ? abs( lf.lfHeight ) : 11 );
+        json_bool( j, "bold", lf.lfWeight >= FW_BOLD );
+    }
     GetClientRect( ctl->hwnd, &rc );
     json_int( j, "widthPx", rc.right );
     json_int( j, "heightPx", rc.bottom );

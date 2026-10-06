@@ -25,6 +25,7 @@ struct Snapshot: Codable, Equatable {
     var text: String?
     var enabled: Bool?
     var fontPx: Double?
+    var bold: Bool?             // the control's own font is bold (a heading)
     var widthPx: Double?
     var heightPx: Double?
     var help: String?           // the text of the tooltip tool this control is
