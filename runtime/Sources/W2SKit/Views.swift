@@ -1462,7 +1462,12 @@ struct TreeList: View {
                 model.snap.selection = id
                 model.emit(["t": "select", "v": id])
             })) {
-            TreeRows(model: model, nodes: model.snap.nodes ?? [])
+            if let title = model.snap.sidebarTitle, !title.isEmpty, model.snap.sidebarPane != nil {
+                // a sidebar's section title, as Finder's "Favorites": the tab the tree was the page of
+                Section(header: Text(title)) { TreeRows(model: model, nodes: model.snap.nodes ?? []) }
+            } else {
+                TreeRows(model: model, nodes: model.snap.nodes ?? [])
+            }
         }
         .modifier(DoubleClickRows(model: model))
         .transaction { $0.animation = nil }
@@ -1884,10 +1889,11 @@ struct ToolbarBar: View {
     func image(_ b: Snapshot.ToolbarButton) -> some View {
         // Not smaller than a Mac toolbar's 16 points: an app that is DPI aware on a Retina display
         // draws 16 pixel images for 8 points, and the buttons around are small enough.
-        // ... nor more than its button has room for: a program that draws its toolbar in pixels (7-Zip's
-        // 22 pixel one) has 11 points of it on such a display, and an icon must keep a margin there
+        // ... nor more than its button has room for, within reason: a program that draws its toolbar in
+        // pixels (7-Zip's 22 pixel one) has 11 points of it on such a display, which an icon of 12 may
+        // exceed a little, the band around it being taller
         let room = b.rect.count == 4 ? CGFloat(b.rect[3]) * scale : 0
-        let side = room > 0 ? min(max(16, 16 * scale), max(8, room - 4)) : max(16, 16 * scale)
+        let side = room > 0 ? min(max(16, 16 * scale), max(12, room - 2)) : max(16, 16 * scale)
         let sym = b.sym ?? b.img.flatMap { model.imageSymbols[$0] }
         if let sym = sym, sym.hasPrefix("sf:"), !sym.contains(";") {
             // a toolbar's symbols are drawn in the text colour, as macOS toolbars do
@@ -1900,7 +1906,7 @@ struct ToolbarBar: View {
             // the image's own pixels, as many points as they are on this display (the app may draw
             // 32 pixel images for 16 points)
             let own = max(image.size.width, image.size.height) * scale
-            let side = room > 0 ? min(max(16, own), max(8, room - 4)) : max(16, own)
+            let side = room > 0 ? min(max(16, own), max(12, room - 2)) : max(16, own)
             Image(nsImage: image).resizable().interpolation(.high).frame(width: side, height: side)
         }
     }

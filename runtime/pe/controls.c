@@ -1383,7 +1383,7 @@ static HWND tree_unit( HWND hwnd )
         RECT client, rc;
 
         WCHAR cls[32] = { 0 };
-        int margin = 4;
+        int margin = 10;       /* a pane's own margin around what fills it */
 
         GetClientRect( parent, &client );
         GetWindowRect( unit, &rc );
@@ -1393,7 +1393,6 @@ static HWND tree_unit( HWND hwnd )
         if (wcsstr( cls, L"SysTabControl32" ))
         {
             if (SendMessageW( parent, TCM_GETITEMCOUNT, 0, 0 ) > 1) break;
-            margin = 10;
             SendMessageW( parent, TCM_ADJUSTRECT, FALSE, (LPARAM)&client );     /* below its tab strip */
             client.top = rc.top;                   /* what the app puts above its list in the page is its own */
         }
@@ -1426,6 +1425,7 @@ static BOOL tree_frame_sidebar( HWND hwnd, int *pane, RECT *tree )
         GetWindowRect( sib, &rc );
         MapWindowPoints( NULL, root, (POINT *)&rc, 2 );
         if (rc.left < tree->right || rc.bottom <= tree->top || rc.top >= tree->bottom) continue;
+        if (rc.right - rc.left < 8) continue;       /* a divider window (HTML Help's SizeBar) is no pane */
         if (*pane == tree->right || rc.left < *pane) *pane = rc.left;
     }
     return TRUE;
@@ -1449,10 +1449,23 @@ static void tree_move_splitter( HWND hwnd, int want )
      * it from there; never before it (a negative x is a huge one to the app) */
     to = max( x + want - pane, (pane - tree.right) / 2 - origin.x );
     if (to < 0) to = 0;
-    SendMessageW( parent, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM( x, y ) );
-    SendMessageW( parent, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM( to, y ) );
-    SendMessageW( parent, WM_LBUTTONUP, 0, MAKELPARAM( to, y ) );
-    if (GetCapture() == parent) ReleaseCapture();
+    {
+        /* the divider may be a window of its own in the parent (HTML Help's "SizeBar"): the mouse is then
+         * on it, in its own coordinates */
+        POINT from = { x, y }, till = { to, y };
+        HWND target = parent, over = ChildWindowFromPointEx( parent, from, CWP_SKIPINVISIBLE );
+
+        if (over && over != parent)
+        {
+            target = over;
+            MapWindowPoints( parent, target, &from, 1 );
+            MapWindowPoints( parent, target, &till, 1 );
+        }
+        SendMessageW( target, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM( from.x, from.y ) );
+        SendMessageW( target, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM( till.x, till.y ) );
+        SendMessageW( target, WM_LBUTTONUP, 0, MAKELPARAM( till.x, till.y ) );
+        if (GetCapture() == target) ReleaseCapture();
+    }
 }
 
 static void tree_snapshot( struct w2s_control *ctl, struct json *j )
@@ -1480,12 +1493,28 @@ static void tree_snapshot( struct w2s_control *ctl, struct json *j )
         int pane;
         if (tree_frame_sidebar( ctl->hwnd, &pane, &tree ))
         {
-            HWND unit = tree_unit( ctl->hwnd );
+            HWND unit = GetParent( ctl->hwnd );     /* the tab it is the only page of, if it is in one */
             WCHAR cls[32] = { 0 };
 
-            /* the tab it is the only page of is not a thing of the sidebar */
-            if (unit != ctl->hwnd && GetClassNameW( unit, cls, ARRAYSIZE(cls) ) && wcsstr( cls, L"SysTabControl32" ))
+            /* that tab is not a thing of the sidebar: its name is the sidebar's section title */
+            if (unit && GetClassNameW( unit, cls, ARRAYSIZE(cls) ) && wcsstr( cls, L"SysTabControl32" ))
+            {
+                WCHAR title[64] = { 0 };
+                TCITEMW item = { TCIF_TEXT };
+
+                item.pszText = title;
+                item.cchTextMax = ARRAYSIZE(title);
+                if (SendMessageW( unit, TCM_GETITEMW, 0, (LPARAM)&item ))
+                {
+                    WCHAR *in, *out;
+
+                    for (in = out = title; *in; in++)      /* its mnemonic is no part of the name */
+                        if (*in != '&' || in[1] == '&') *out++ = *in;
+                    *out = 0;
+                    json_str( j, "sidebarTitle", title );
+                }
                 w2s_retire_control( unit );
+            }
             json_int( j, "sidebarPane", pane );
             /* the app lays out the pane beside after the tree: look again once it has */
             if (!EqualRect( &tree, &data->sidebar_rect ))
