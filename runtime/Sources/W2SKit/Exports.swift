@@ -127,7 +127,18 @@ public func w2s_swift_control_create(_ hostView: UInt64, _ window: UInt64, _ pos
         host.hosting = hosting
         if entryID == "button.groupbox" { GroupBoxTitle.apply(host) }
         // what a control puts in its window's frame lives exactly as long as the control
-        if entryID == "tab" || entryID == "listbox.single" {
+        if let groupID = host.model.snap.sbGroup {
+            // a control on a page of a sidebar's tabs: the window's sidebar shows it under the pages' switch
+            let group = SidebarGroup.group(groupID)
+            group.join(host, host.model.snap)
+            if group.sidebar == nil {
+                let sidebar = FrameSidebar(host: host)
+                sidebar.group = group
+                group.sidebar = sidebar
+                host.owned = sidebar
+                sidebar.update()
+            }
+        } else if entryID == "tab" || entryID == "listbox.single" {
             // a property sheet's tab control or a pane list: the window's settings form
             let form = SettingsFormController(host: host)
             host.owned = form
@@ -296,6 +307,19 @@ public func w2s_swift_control_update(_ handle: UInt64, _ json: UnsafePointer<CCh
             (host.owned as? WindowChrome)?.update()
             return
         }
+        if let groupID = snap.sbGroup {
+            // the control is on a page of a sidebar's tabs (its first snapshot, made before the app had laid
+            // out, may not have said so): the window's sidebar shows the pages
+            let group = SidebarGroup.group(groupID)
+            if let sidebar = host.owned as? FrameSidebar, sidebar.group == nil, !sidebar.attached, group.sidebar == nil {
+                sidebar.group = group
+                group.sidebar = sidebar
+                group.join(host, snap)
+            } else {
+                group.update(host, snap)
+                if host.owned == nil, group.sidebar != nil { host.hosting?.isHidden = true }
+            }
+        }
         if host.entry == "treeview" {
             applyTree(host, snap)
         } else if host.model.snap != snap {
@@ -315,6 +339,8 @@ public func w2s_swift_control_destroy(_ handle: UInt64) {
     W2S.lock.unlock()
     guard let host = host else { return }
     DispatchQueue.main.async {
+        // (a menu bar has no model)
+        if let groupID = host.model?.snap.sbGroup { SidebarGroup.group(groupID).leave(host) }
         (host.owned as? WindowChrome)?.detach()  // before the hosting view leaves
         host.hosting?.removeFromSuperview()
         host.hosting = nil

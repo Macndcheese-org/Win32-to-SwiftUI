@@ -11,7 +11,9 @@ import SwiftUI
 /// own splitter once the button is up, and the app lays itself out again.
 final class FrameSidebar: NSObject, WindowChrome {
     weak var host: ControlHost?
-    private var controller: NSHostingController<AnyView>?
+    /// a sidebar of several pages (HTML Help's navigation pane): the controls of the pages, not the one tree
+    var group: SidebarGroup?
+    private var controller: NSHostingController<AnyView>?     // a SidebarHostingController for a sidebar of pages
     private weak var window: NSWindow?
     private var retries = 0
     private var dragged: CGFloat?
@@ -46,9 +48,21 @@ final class FrameSidebar: NSObject, WindowChrome {
             return
         }
         // the Mac's sidebar text, whatever the tree's Win32 size
-        let view = ControlRoot(model: host.model, entry: host.entry, fixed: FormMetrics.metrics(scale: host.scale))
-            .environment(\.w2sInSidebar, true)
-        let controller = NSHostingController(rootView: AnyView(view))
+        let content: AnyView
+        if let group = group {
+            content = AnyView(SidebarGroupView(group: group))
+        } else {
+            content = AnyView(ControlRoot(model: host.model, entry: host.entry, fixed: FormMetrics.metrics(scale: host.scale))
+                .environment(\.w2sInSidebar, true))
+        }
+        let controller: NSHostingController<AnyView>
+        if let group = group {
+            let paged = SidebarHostingController(rootView: content)
+            paged.group = group
+            controller = paged
+        } else {
+            controller = NSHostingController(rootView: content)
+        }
         controller.sizingOptions = []
         self.controller = controller
         self.window = window
@@ -60,6 +74,21 @@ final class FrameSidebar: NSObject, WindowChrome {
         for delay in [0.2, 0.6, 1.2, 1.8] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.fitRows() }
         }
+        // the sidebar's safe area is there once the window has laid out, which takes its time
+        if group != nil {
+            for step in 0..<48 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25 * Double(step)) { [weak self] in self?.syncInset() }
+            }
+        }
+    }
+
+    /// a sidebar of pages: its content starts below the title bar, where the sidebar's safe area does
+    private func syncInset() {
+        guard let group = group, let side = sidebarView else { return }
+        // the safe area, or what the title bar and toolbar take of the window's top (the safe area is late)
+        var inset = side.safeAreaInsets.top
+        if let window = side.window { inset = max(inset, window.frame.height - window.contentLayoutRect.maxY) }
+        if abs(group.topInset - inset) > 0.5 { group.topInset = inset }
     }
 
     /// The window's list in the sidebar (SwiftUI's outline view).

@@ -139,6 +139,11 @@ struct Snapshot: Codable, Equatable {
     var nodes: [TreeNode]?
     var sidebarPane: Double?    // tree: the window's sidebar, up to this pane (client px; FrameSidebar)
     var sidebarTitle: String?   // tree: the only tab it was the page of, as the sidebar's section title
+    var sbGroup: Int?           // on a page of a window sidebar's tabs (SidebarGroup): the pane that holds the tabs
+    var sbPage: Int?            // ... the page it is on
+    var sbOrder: Int?           // ... its place on the page, from the top
+    var sbTab: Int?             // ... the app's current tab
+    var sbTabs: [String]?       // ... the tabs' names
     var mode: String?           // tab: "strip", "form" (a property sheet as a settings form) or "wizard"
     var sheetPx: [Double]?      // tab, form: the sheet's client size
     var tabRect: [Double]?      // tab, form: the tab control in the sheet

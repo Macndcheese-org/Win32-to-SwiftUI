@@ -805,6 +805,16 @@ enum Debug {
             }
             if host.entry == "treeview", let sidebar = host.owned as? FrameSidebar {
                 out["frameSidebar"] = sidebar.attached
+                out["snapSidebarPane"] = host.model.snap.sidebarPane ?? -1      // what the PE side sent
+                out["snapGroup"] = host.model.snap.sbGroup ?? -1
+                if let gid = host.model.snap.sbGroup {
+                    let group = SidebarGroup.group(gid)
+                    out["groupTabs"] = group.tabs
+                    out["groupTab"] = group.tab
+                    out["groupMembers"] = group.members.map { "\($0.host.entry)@\($0.page)" }
+                    out["groupTopInset"] = Double(group.topInset)
+                }
+                out["snapHasWindow"] = host.hosting?.window != nil
                 out["scaleMilli"] = Int((host.scale * 1000).rounded())     // points per Win32 pixel
                 // rows on screen whose name doesn't fit (shown with "...")
                 out["truncatedRows"] = host.model.rowShortfall.values.filter { $0 > 0.5 }.count

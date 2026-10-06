@@ -138,6 +138,8 @@ void w2s_common_snapshot( struct w2s_control *ctl, struct json *j )
     GetClientRect( ctl->hwnd, &rc );
     json_int( j, "widthPx", rc.right );
     json_int( j, "heightPx", rc.bottom );
+    /* on a page of a sidebar's tabs (HTML Help's Index and Search): shown there */
+    if (strcmp( ctl->kind->entry, "treeview" ) && strcmp( ctl->kind->entry, "tab" )) w2s_sidebar_member( ctl->hwnd, j, TRUE );
     /* light or dark as what is behind it (look.c) */
     if (ctl->backdrop_stale)
     {
@@ -306,6 +308,7 @@ static void apply_events( struct w2s_control *ctl )
         {
             if (GetFocus() != ctl->hwnd) SetFocus( ctl->hwnd );
         }
+        else if (!strcmp( events[i].type, "sidebarTab" )) w2s_select_nav_tab( ctl->hwnd, events[i].has_value ? (int)events[i].value : -1 );
         else ctl->kind->apply( ctl, &events[i] );
     }
     ctl->applying--;

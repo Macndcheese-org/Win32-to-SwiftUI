@@ -1467,12 +1467,13 @@ static HWND tree_unit( HWND hwnd )
         GetClientRect( parent, &client );
         GetWindowRect( unit, &rc );
         MapWindowPoints( NULL, parent, (POINT *)&rc, 2 );
-        /* a tab's page area has a margin of its own; only one page is no tabs to choose from */
+        /* a tab's page area has a margin of its own */
         GetClassNameW( parent, cls, ARRAYSIZE(cls) );
         if (wcsstr( cls, L"SysTabControl32" ))
         {
-            if (SendMessageW( parent, TCM_GETITEMCOUNT, 0, 0 ) > 1) break;
             SendMessageW( parent, TCM_ADJUSTRECT, FALSE, (LPARAM)&client );     /* below its tab strip */
+            /* the margins of a page are the app's, in its pixels at its DPI (HTML Help's are 8 and 4 at 96) */
+            margin = MulDiv( 12, GetDpiForWindow( parent ), 96 );
             client.top = rc.top;                   /* what the app puts above its list in the page is its own */
         }
         /* it fills the parent, a client edge or two aside */
@@ -1504,10 +1505,88 @@ static BOOL tree_frame_sidebar( HWND hwnd, int *pane, RECT *tree )
         GetWindowRect( sib, &rc );
         MapWindowPoints( NULL, root, (POINT *)&rc, 2 );
         if (rc.left < tree->right || rc.bottom <= tree->top || rc.top >= tree->bottom) continue;
-        if (rc.right - rc.left < 8) continue;       /* a divider window (HTML Help's SizeBar) is no pane */
+        if (rc.right - rc.left < MulDiv( 8, GetDpiForWindow( root ), 96 )) continue;   /* a divider window (HTML Help's SizeBar) is no pane */
         if (*pane == tree->right || rc.left < *pane) *pane = rc.left;
     }
     return TRUE;
+}
+
+/* HTML Help's navigation pane is a tab control of several pages (Contents, Index, Search) along the
+ * window's leading edge: the window's sidebar, with the tabs as the switch between the pages. The tab
+ * control a control is a page's part of, if it has more than one page. */
+static HWND nav_tab( HWND hwnd )
+{
+    HWND root = GetAncestor( hwnd, GA_ROOT ), p;
+
+    for (p = GetParent( hwnd ); p && p != root; p = GetParent( p ))
+    {
+        WCHAR cls[32] = { 0 };
+
+        if (GetClassNameW( p, cls, ARRAYSIZE(cls) ) && wcsstr( cls, L"SysTabControl32" ))
+            return SendMessageW( p, TCM_GETITEMCOUNT, 0, 0 ) > 1 ? p : NULL;
+    }
+    return NULL;
+}
+
+/* What the native side needs of a control that is on a page of such a sidebar: the group (the pane that
+ * holds the tabs), the page it is on, its place on the page, and the tabs. The sidebar then shows the
+ * page's controls under a switch. */
+void w2s_sidebar_member( HWND hwnd, struct json *j, BOOL with_pane )
+{
+    static const WCHAR page_prop[] = L"Win32ToSwiftUI.NavPage";
+    HWND tab = nav_tab( hwnd ), root;
+    HANDLE saved;
+    RECT tree, rc;
+    int pane, page, count, i;
+
+    /* the pane is the tab's own, however little of a page a control (a search field) fills */
+    if (!tab || !tree_frame_sidebar( tab, &pane, &tree )) return;
+    root = GetAncestor( hwnd, GA_ROOT );
+    count = (int)SendMessageW( tab, TCM_GETITEMCOUNT, 0, 0 );
+    /* a control is shown with its page, which is the one chosen when it first shows */
+    if ((saved = GetPropW( hwnd, page_prop ))) page = (int)(INT_PTR)saved - 1;
+    else
+    {
+        page = (int)SendMessageW( tab, TCM_GETCURSEL, 0, 0 );
+        SetPropW( hwnd, page_prop, (HANDLE)(INT_PTR)(page + 1) );
+    }
+    GetWindowRect( hwnd, &rc );
+    MapWindowPoints( NULL, root, (POINT *)&rc, 2 );
+    if (with_pane) json_int( j, "sidebarPane", pane );
+    json_int( j, "sbGroup", (INT_PTR)tree_unit( tab ) );
+    json_int( j, "sbPage", page );
+    json_int( j, "sbOrder", rc.top );
+    json_int( j, "sbTab", (int)SendMessageW( tab, TCM_GETCURSEL, 0, 0 ) );
+    json_arr_begin( j, "sbTabs" );
+    for (i = 0; i < count; i++)
+    {
+        WCHAR title[64] = { 0 }, *in, *out;
+        TCITEMW item = { TCIF_TEXT };
+
+        item.pszText = title;
+        item.cchTextMax = ARRAYSIZE(title);
+        SendMessageW( tab, TCM_GETITEMW, i, (LPARAM)&item );
+        for (in = out = title; *in; in++)      /* the mnemonic is no part of the name */
+            if (*in != '&' || in[1] == '&') *out++ = *in;
+        *out = 0;
+        json_str( j, NULL, title );
+    }
+    json_arr_end( j );
+    /* the tabs are the sidebar's switch now, not a control of the page */
+    w2s_retire_control( tab );
+}
+
+/* the user chose a page in the sidebar's switch: the app's tab changes as a click on it would */
+void w2s_select_nav_tab( HWND hwnd, int page )
+{
+    HWND tab = nav_tab( hwnd );
+    NMHDR nm = { 0 };
+
+    if (!tab || page < 0 || page >= (int)SendMessageW( tab, TCM_GETITEMCOUNT, 0, 0 ) ||
+        page == (int)SendMessageW( tab, TCM_GETCURSEL, 0, 0 )) return;
+    if (w2s_notify_parent( tab, TCN_SELCHANGING, &nm )) return;     /* the app vetoes it */
+    SendMessageW( tab, TCM_SETCURSEL, page, 0 );
+    w2s_notify_parent( tab, TCN_SELCHANGE, &nm );
 }
 
 /* the user dragged the sidebar's divider: the app's own splitter, dragged as
@@ -1665,8 +1744,11 @@ static void tree_snapshot( struct w2s_control *ctl, struct json *j )
             HWND unit = GetParent( ctl->hwnd );     /* the tab it is the only page of, if it is in one */
             WCHAR cls[32] = { 0 };
 
+            /* several pages: the tabs are the sidebar's switch (w2s_sidebar_member) */
+            w2s_sidebar_member( ctl->hwnd, j, FALSE );
             /* that tab is not a thing of the sidebar: its name is the sidebar's section title */
-            if (unit && GetClassNameW( unit, cls, ARRAYSIZE(cls) ) && wcsstr( cls, L"SysTabControl32" ))
+            if (unit && GetClassNameW( unit, cls, ARRAYSIZE(cls) ) && wcsstr( cls, L"SysTabControl32" ) &&
+                SendMessageW( unit, TCM_GETITEMCOUNT, 0, 0 ) == 1)
             {
                 WCHAR title[64] = { 0 };
                 TCITEMW item = { TCIF_TEXT };
