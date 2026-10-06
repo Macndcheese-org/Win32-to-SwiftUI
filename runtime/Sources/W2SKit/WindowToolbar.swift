@@ -87,9 +87,12 @@ final class FrameToolbar: NSObject, NSToolbarDelegate {
     private var identifiers: [NSToolbarItem.Identifier] {
         var ids: [NSToolbarItem.Identifier] = sidebarToggle ? [.toggleSidebar, .sidebarTrackingSeparator] : []
         var groups = 0
-        for member in members where !member.buttons.isEmpty {
+        for member in members {
+            // the app's own "hide the navigation" button is the Mac's, in a window with a sidebar
+            let shown = member.buttons.filter { !(sidebarToggle && member.isSidebarButton($0)) }
+            if shown.isEmpty { continue }
             if groups > 0 { ids.append(.space) }
-            ids += member.buttons.map(member.id)
+            ids += shown.map(member.id)
             groups += 1
         }
         return ids
@@ -171,6 +174,11 @@ final class WindowToolbar: NSObject, WindowChrome {
         }
         buttons = list
         frame = FrameToolbar.join(self, window: window)
+    }
+
+    /// a button that hides or shows the app's navigation pane (the stock sidebar image)
+    func isSidebarButton(_ b: Snapshot.ToolbarButton) -> Bool {
+        (b.sym ?? b.img.flatMap { host?.model.imageSymbols[$0] }) == "sf:sidebar.left"
     }
 
     func detach() {
