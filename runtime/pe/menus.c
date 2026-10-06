@@ -34,6 +34,8 @@ struct w2s_frame
     BOOL native;            /* __wine_native_menu_bar is set */
     BOOL active;
     int shrink;             /* menu bar height to take off a fixed-size window, pending */
+    BOOL alert_posted;      /* a dialog that is an alert, to be shown as one (alertdlg.c) */
+    BOOL show_dialog;       /* ... but let it show as the dialog it is */
 };
 
 /* ---------- snapshot ---------- */
@@ -341,10 +343,30 @@ static LRESULT CALLBACK frame_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
 
     if (msg == w2s_wake_message && w2s_wake_message)
     {
-        if (wparam == W2S_WAKE_SHRINK) shrink_frame( frame );
+        if (wparam == W2S_WAKE_ALERT)
+        {
+            frame->alert_posted = FALSE;
+            if (!w2s_dialog_run_alert( hwnd ))
+            {
+                frame->show_dialog = TRUE;
+                ShowWindow( hwnd, SW_SHOW );
+            }
+        }
+        else if (wparam == W2S_WAKE_SHRINK) shrink_frame( frame );
         else if (wparam == W2S_WAKE_LOOK) w2s_sync_look();
         else if (frame->handle) apply_menu_events( frame );
         return 0;
+    }
+    /* a dialog that is only an icon, text and buttons is shown as the alert of the system */
+    if (msg == WM_WINDOWPOSCHANGING && (((WINDOWPOS *)lparam)->flags & SWP_SHOWWINDOW) && !frame->show_dialog &&
+        (frame->alert_posted || (!(GetWindowLongW( hwnd, GWL_STYLE ) & WS_VISIBLE) && w2s_dialog_is_alert( hwnd ))))
+    {
+        ((WINDOWPOS *)lparam)->flags &= ~SWP_SHOWWINDOW;
+        if (!frame->alert_posted)
+        {
+            frame->alert_posted = TRUE;
+            PostMessageW( hwnd, w2s_wake_message, W2S_WAKE_ALERT, 0 );
+        }
     }
     /* SetMenu and DrawMenuBar recalculate the frame: be ready before wine does */
     if (msg == WM_NCCALCSIZE) sync_menu( frame, TRUE );
@@ -382,6 +404,7 @@ void w2s_frame_created( HWND hwnd )
     DWORD style = GetWindowLongW( hwnd, GWL_STYLE );
     struct w2s_frame *frame;
 
+    TRACE( "frame %p: style %08lx\n", hwnd, style );
     if ((style & WS_CHILD) || (style & WS_CAPTION) != WS_CAPTION) return;
     if (GetPropW( hwnd, frame_prop )) return;
     frame = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*frame) );
@@ -390,6 +413,14 @@ void w2s_frame_created( HWND hwnd )
     frame->orig = (WNDPROC)SetWindowLongPtrW( hwnd, GWLP_WNDPROC, (LONG_PTR)frame_proc );
     frame->active = GetActiveWindow() == hwnd;
     sync_menu( frame, FALSE );
+    /* made already shown (Windows Installer's dialogs): shown as the alert it is, not as this */
+    if ((style & WS_VISIBLE) && w2s_dialog_is_alert( hwnd ))
+    {
+        TRACE( "frame %p: an alert\n", hwnd );
+        frame->alert_posted = TRUE;
+        ShowWindow( hwnd, SW_HIDE );
+        PostMessageW( hwnd, w2s_wake_message, W2S_WAKE_ALERT, 0 );
+    }
 }
 
 /* for tests/gallery: the menu the native side shows for this window */

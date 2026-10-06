@@ -96,6 +96,7 @@ const char *w2s_stock_icon( HICON icon, const BYTE *bits, int cx, int cy, HIMAGE
 #define W2S_WAKE_REFRESH 1      /* send a fresh snapshot (from another thread) */
 #define W2S_WAKE_SHRINK  2      /* a frame: take the menu bar's height off (menus.c) */
 #define W2S_WAKE_LOOK    3      /* the system colours changed (look.c; the native Look.wakeLook) */
+#define W2S_WAKE_ALERT   4      /* a dialog that is an alert: show it as one (alertdlg.c) */
 extern UINT w2s_wake_message;
 extern int w2s_popup_choice;    /* menus.c: answer the next popup with this item */
 extern UINT w2s_os_major, w2s_os_minor;    /* the running macOS */
@@ -182,6 +183,8 @@ COLORREF w2s_backdrop( HWND hwnd );
 
 /* menus.c */
 void w2s_frame_created( HWND hwnd );
+BOOL w2s_dialog_is_alert( HWND hwnd );    /* alertdlg.c */
+BOOL w2s_dialog_run_alert( HWND hwnd );
 UINT64 w2s_frame_handle( HWND hwnd );
 
 /* dialogs.c */
