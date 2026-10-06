@@ -173,7 +173,7 @@ BOOL w2s_dialog_run_alert( HWND hwnd )
     HWND owner;
     int i, def = 0, cancel = -1, n;
     LRESULT defid = SendMessageW( hwnd, DM_GETDEFID, 0, 0 );
-    BOOL ok;
+    BOOL ok, declared = FALSE;
 
     if (!alert_collect( hwnd, &a )) return FALSE;
 
@@ -183,7 +183,10 @@ BOOL w2s_dialog_run_alert( HWND hwnd )
 
         if ((GetWindowLongW( a.buttons[i].hwnd, GWL_STYLE ) & BS_TYPEMASK) == BS_DEFPUSHBUTTON ||
             (HIWORD( defid ) == DC_HASDEFID && id == (int)LOWORD( defid )))
+        {
             def = i;
+            declared = TRUE;
+        }
         if (cancel < 0 && (id == IDCANCEL || is_cancel_label( a.buttons[i].label ))) cancel = i;
     }
     if (a.button_count == 1) cancel = 0;
@@ -203,6 +206,8 @@ BOOL w2s_dialog_run_alert( HWND hwnd )
     }
     json_str_a( &j, "style", a.style );
     json_bool( &j, "floating", FALSE );
+    /* a dialog that names no default button has none: Return is not an answer (HIG: Alerts) */
+    json_bool( &j, "noDefault", !declared );
     json_arr_begin( &j, "buttons" );
     /* NSAlert: the first button is the default and sits on the right */
     for (n = 0; n < a.button_count; n++)

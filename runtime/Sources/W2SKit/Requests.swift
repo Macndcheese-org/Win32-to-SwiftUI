@@ -144,6 +144,13 @@ enum Requests {
             ids.append(b["id"] as? Int ?? 1)
             if b["cancel"] as? Bool == true && i != 0 { button.keyEquivalent = "\u{1b}" }
         }
+        // no default button: Return answers nothing (the first button is the default otherwise);
+        // the cancel button keeps Escape
+        if params["noDefault"] as? Bool == true {
+            for (i, b) in buttons.enumerated() {
+                alert.buttons[i].keyEquivalent = b["cancel"] as? Bool == true ? "\u{1b}" : ""
+            }
+        }
 
         let complete: (Int) -> Void = { index in
             let id = index >= 0 && index < ids.count ? ids[index] : (ids.last ?? 2)
