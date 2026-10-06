@@ -76,9 +76,64 @@ static void wizard_button_display( struct w2s_control *ctl, struct json *j )
     json_str( j, "display", p );
 }
 
+/* Push buttons a dialog sets flush against each other (a wizard's Back and
+ * Next) are separate buttons on the Mac with a space between them, not a
+ * segmented control: the distance to the push button beside this one goes to
+ * the view, which keeps AppKit's standard space (Views.swift, PushButton). */
+static BOOL is_push_button( HWND hwnd )
+{
+    WCHAR name[64];
+    DWORD type;
+
+    if (!(GetWindowLongW( hwnd, GWL_STYLE ) & WS_VISIBLE)) return FALSE;
+    if (!GetClassNameW( hwnd, name, ARRAYSIZE(name) ) || !is_class( name, L"Button" )) return FALSE;
+    type = GetWindowLongW( hwnd, GWL_STYLE ) & BS_TYPEMASK;
+    return type == BS_PUSHBUTTON || type == BS_DEFPUSHBUTTON;
+}
+
+static void push_button_neighbours( struct w2s_control *ctl, struct json *j )
+{
+    HWND parent = GetParent( ctl->hwnd ), sib;
+    RECT rc, o;
+    int left = -1, right = -1;
+
+    if (!parent || !is_push_button( ctl->hwnd )) return;
+    /* made one after the other: look again once the row is all there */
+    if (!ctl->data)
+    {
+        ctl->data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(int) );
+        PostMessageW( ctl->hwnd, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
+    }
+    GetWindowRect( ctl->hwnd, &rc );
+    MapWindowPoints( NULL, parent, (POINT *)&rc, 2 );
+    for (sib = GetWindow( parent, GW_CHILD ); sib; sib = GetWindow( sib, GW_HWNDNEXT ))
+    {
+        int overlap, gap;
+
+        if (sib == ctl->hwnd || !is_push_button( sib )) continue;
+        GetWindowRect( sib, &o );
+        MapWindowPoints( NULL, parent, (POINT *)&o, 2 );
+        overlap = min( rc.bottom, o.bottom ) - max( rc.top, o.top );
+        if (overlap * 2 < rc.bottom - rc.top) continue;     /* not in the same row */
+        if (o.right <= rc.left + 2)
+        {
+            gap = max( 0, rc.left - o.right );
+            if (left < 0 || gap < left) left = gap;
+        }
+        else if (o.left >= rc.right - 2)
+        {
+            gap = max( 0, o.left - rc.right );
+            if (right < 0 || gap < right) right = gap;
+        }
+    }
+    if (left >= 0) json_int( j, "gapLeftPx", left );
+    if (right >= 0) json_int( j, "gapRightPx", right );
+}
+
 static void button_snapshot( struct w2s_control *ctl, struct json *j )
 {
     DWORD style = GetWindowLongW( ctl->hwnd, GWL_STYLE );
+    push_button_neighbours( ctl, j );
     json_int( j, "checked", SendMessageW( ctl->hwnd, BM_GETCHECK, 0, 0 ) );
     json_bool( j, "isDefault", (style & BS_TYPEMASK) == BS_DEFPUSHBUTTON );
     json_bool( j, "noPrefix", FALSE );

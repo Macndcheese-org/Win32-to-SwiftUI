@@ -88,6 +88,14 @@ struct Metrics {
     }
 }
 
+/// Push buttons in a row keep AppKit's standard space between them (12 pt; the
+/// HIG leaves it to the platform) whatever the app's layout, which sets Back
+/// and Next flush. Two neighbours give half of what's missing each.
+func neighbourInset(_ gapPx: Double?, scale: CGFloat) -> CGFloat {
+    guard let gap = gapPx else { return 0 }
+    return max(0, (12 - CGFloat(gap) * scale) / 2)
+}
+
 struct ControlRoot: View {
     @ObservedObject var model: ControlModel
     let entry: String
@@ -115,6 +123,8 @@ struct ControlRoot: View {
         switch entry {
         case "button.push", "button.default":
             PushButton(model: model, label: label, prominent: snap.isDefault ?? (entry == "button.default"))
+                .padding(.leading, neighbourInset(snap.gapLeftPx, scale: metrics.scale))
+                .padding(.trailing, neighbourInset(snap.gapRightPx, scale: metrics.scale))
         case "button.checkbox":
             CheckBox(model: model, label: label)
         case "button.pushlike":

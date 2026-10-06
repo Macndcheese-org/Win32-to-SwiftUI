@@ -26,6 +26,8 @@ struct Snapshot: Codable, Equatable {
     var enabled: Bool?
     var fontPx: Double?
     var bold: Bool?             // the control's own font is bold (a heading)
+    var gapLeftPx: Double?      // a push button: the space to the push button on its left / right
+    var gapRightPx: Double?
     var widthPx: Double?
     var heightPx: Double?
     var help: String?           // the text of the tooltip tool this control is
