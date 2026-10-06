@@ -433,7 +433,22 @@ final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
         settingsID = id
     }
 
+    /// The program's name as its own About item says it ("À propos du Bloc-notes"), which also ends the titles
+    /// of its windows ("README.txt - Bloc-notes"): the About item by the Mac's words for it, or, in words the
+    /// Mac's list lacks ("du", where the Mac's is "À propos de"), the last item of the Help menu, as by
+    /// convention. Needs only the app's menu, not the Mac's, which may not be there yet.
+    private func learnProgramName(_ specs: [[String: Any]]) {
+        let help = specs.filter(MenuBuild.isHelp).compactMap { ($0["sub"] as? [String: Any])?["items"] as? [[String: Any]] }
+        let found = help.lazy.compactMap { MenuBuild.firstItem($0, MenuBuild.isAbout) }.first
+            ?? MenuBuild.firstItem(specs, MenuBuild.isAbout)
+            ?? help.compactMap({ $0.last(where: { $0["sep"] as? Bool != true && $0["sub"] == nil }) }).first
+        guard var title = (found?["text"] as? String).map({ MenuBuild.split($0).title }) else { return }
+        while let end = title.last, "\u{2026}. ".contains(end) { title.removeLast() }
+        AppName.addAboutText(title)
+    }
+
     private func rebuild() {
+        learnProgramName(currentItems())
         guard let main = NSApp.mainMenu else { return }
         removeItems()
         let specs = currentItems()

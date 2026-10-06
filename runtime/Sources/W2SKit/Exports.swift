@@ -284,6 +284,12 @@ public func w2s_swift_control_update(_ handle: UInt64, _ json: UnsafePointer<CCh
     DispatchQueue.main.async {
         host.model.absorbImages(snap)
         Look.apply(snap.backdrop, to: host.hosting)
+        // the dot in the close button of a window whose document has unsaved changes (HIG: Windows);
+        // only when it changes, not to undo what the window's title says (a "*" mark in it)
+        if let edited = snap.docEdited, edited != host.docEdited {
+            host.docEdited = edited
+            host.hosting?.window?.isDocumentEdited = edited
+        }
         // taken before the PE side saw the user's latest events: showing it
         // would undo what the user just did; a fresh one follows once they're applied
         if (snap.ack ?? 0) < host.emittedSeq {

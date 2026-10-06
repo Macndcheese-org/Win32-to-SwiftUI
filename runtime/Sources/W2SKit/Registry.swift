@@ -27,6 +27,7 @@ struct Snapshot: Codable, Equatable {
     var enabled: Bool?
     var fontPx: Double?
     var bold: Bool?             // the control's own font is bold (a heading)
+    var docEdited: Bool?        // a document's text: it has changes the app has not saved
     var gapLeftPx: Double?      // a push button: the space to the push button on its left / right
     var gapRightPx: Double?
     var widthPx: Double?
@@ -318,6 +319,7 @@ final class ControlHost {
     let postWake: PostWake?
     var model: ControlModel!
     var hosting: NSView?
+    var docEdited: Bool?                    // main thread: the window's edited dot, as set from a document's text
     var pending: [[String: Any]] = []       // guarded by W2S.lock
     private var seq: UInt64 = 0             // guarded by W2S.lock
     var published: String?                 // guarded by W2S.lock: for the entry's answers

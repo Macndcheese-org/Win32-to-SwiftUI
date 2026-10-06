@@ -653,6 +653,7 @@ struct ml_data
 {
     int caret_gen, scroll_gen, scroll_line;
     int document;           /* what the last snapshot said: +1 a document's text, -1 not */
+    int modified;           /* a document's text: +1 it has unsaved changes (EM_GETMODIFY), -1 not, 0 not known */
     struct ml_native nat;
 };
 
@@ -874,6 +875,12 @@ static void ml_snapshot( struct w2s_control *ctl, struct json *j )
     json_int( j, "scrollLine", data->scroll_line );
     data->document = ml_is_document( ctl->hwnd ) ? 1 : -1;
     json_bool( j, "document", data->document > 0 );
+    /* a document's text with changes the app has not saved is the dot in its window's close button */
+    if (data->document > 0)
+    {
+        data->modified = SendMessageW( ctl->hwnd, EM_GETMODIFY, 0, 0 ) ? 1 : -1;
+        json_bool( j, "docEdited", data->modified > 0 );
+    }
 }
 
 static void ml_observe( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM lparam )
@@ -885,6 +892,15 @@ static void ml_observe( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM
         /* only when it becomes (or stops being) a document's text: a snapshot has all the text */
         data = ml_data( ctl );
         if (data->document && (ml_is_document( ctl->hwnd ) ? 1 : -1) != data->document) w2s_push( ctl, FALSE );
+        return;
+    }
+    /* what changes the text, or the app saying it is saved (EM_SETMODIFY): look again at the flag */
+    if (msg == EM_SETMODIFY || msg == EM_REPLACESEL || msg == EM_UNDO || msg == WM_UNDO || msg == WM_CUT ||
+        msg == WM_PASTE || msg == WM_CLEAR || msg == WM_SETTEXT || msg == WM_CHAR)
+    {
+        data = ml_data( ctl );
+        if (data->document > 0 && (SendMessageW( ctl->hwnd, EM_GETMODIFY, 0, 0 ) ? 1 : -1) != data->modified)
+            PostMessageW( ctl->hwnd, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
         return;
     }
     if (msg != EM_SCROLLCARET && msg != EM_LINESCROLL) return;
