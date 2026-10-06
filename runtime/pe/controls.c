@@ -1382,11 +1382,24 @@ static HWND tree_unit( HWND hwnd )
     {
         RECT client, rc;
 
+        WCHAR cls[32] = { 0 };
+        int margin = 4;
+
         GetClientRect( parent, &client );
         GetWindowRect( unit, &rc );
         MapWindowPoints( NULL, parent, (POINT *)&rc, 2 );
+        /* a tab's page area has a margin of its own; only one page is no tabs to choose from */
+        GetClassNameW( parent, cls, ARRAYSIZE(cls) );
+        if (wcsstr( cls, L"SysTabControl32" ))
+        {
+            if (SendMessageW( parent, TCM_GETITEMCOUNT, 0, 0 ) > 1) break;
+            margin = 10;
+            SendMessageW( parent, TCM_ADJUSTRECT, FALSE, (LPARAM)&client );     /* below its tab strip */
+            client.top = rc.top;                   /* what the app puts above its list in the page is its own */
+        }
         /* it fills the parent, a client edge or two aside */
-        if (rc.left > 4 || rc.top > 4 || rc.right < client.right - 4 || rc.bottom < client.bottom - 4) break;
+        if (rc.left > client.left + margin || rc.top > client.top + margin ||
+            rc.right < client.right - margin || rc.bottom < client.bottom - margin) break;
         unit = parent;
     }
     return unit;
@@ -1467,6 +1480,12 @@ static void tree_snapshot( struct w2s_control *ctl, struct json *j )
         int pane;
         if (tree_frame_sidebar( ctl->hwnd, &pane, &tree ))
         {
+            HWND unit = tree_unit( ctl->hwnd );
+            WCHAR cls[32] = { 0 };
+
+            /* the tab it is the only page of is not a thing of the sidebar */
+            if (unit != ctl->hwnd && GetClassNameW( unit, cls, ARRAYSIZE(cls) ) && wcsstr( cls, L"SysTabControl32" ))
+                w2s_retire_control( unit );
             json_int( j, "sidebarPane", pane );
             /* the app lays out the pane beside after the tree: look again once it has */
             if (!EqualRect( &tree, &data->sidebar_rect ))
@@ -2182,8 +2201,10 @@ static void tab_release( struct w2s_control *ctl )
     HeapFree( GetProcessHeap(), 0, data );
 }
 
+static HRGN tab_region( struct w2s_control *ctl );
+
 static const struct w2s_kind kind_tab = { "tab", tab_snapshot, tab_apply, tab_answer,
-                                                  NULL, NULL, tab_observe, tab_release };
+                                                  NULL, tab_region, tab_observe, tab_release };
 
 /* ---------- A list of a settings window's panes ---------- */
 
@@ -3010,6 +3031,17 @@ static HRGN container_region( struct w2s_control *ctl )
     return children_region( ctl->hwnd, NULL );
 }
 
+/* A tab that holds windows of the app's own (HTML Help's contents tree sits inside its "Contents"
+ * tab): wine keeps drawing them, so the native tab doesn't cover them. A property sheet's tab has
+ * its pages beside it, not inside. */
+static HRGN tab_region( struct w2s_control *ctl )
+{
+    struct tab_data *data = ctl->data;
+
+    if (!data || data->sheet || data->form) return NULL;
+    return children_region( ctl->hwnd, NULL );
+}
+
 static void toolbar_snapshot( struct w2s_control *ctl, struct json *j )
 {
     struct tb_data *data = toolbar_data( ctl );
@@ -3457,7 +3489,12 @@ static const struct w2s_kind *select_control_kind( HWND hwnd )
         is_class( parent_name, L"SysListView32" ) || is_class( parent_name, L"SysTreeView32" ) ||
         is_class( parent_name, L"SysDateTimePick32" ) || is_class( parent_name, L"SysIPAddress32" ) ||
         is_class( parent_name, L"msctls_updown32" ) || is_class( parent_name, L"ToolbarWindow32" ) ||
-        is_class( parent_name, L"ReBarWindow32" ) || is_class( parent_name, L"SysTabControl32" ))
+        is_class( parent_name, L"ReBarWindow32" ))
+        return NULL;
+    /* a tab's own parts are its scroll arrows and tooltips; a control the app put in it (HTML Help's
+     * contents tree) is a control as anywhere */
+    if (is_class( parent_name, L"SysTabControl32" ) &&
+        (is_class( name, UPDOWN_CLASSW ) || is_class( name, L"tooltips_class32" )))
         return NULL;
 
     if (is_class( name, L"Button" ))

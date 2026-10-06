@@ -446,6 +446,17 @@ static BOOL is_answer( struct w2s_control *ctl, UINT msg )
     return FALSE;
 }
 
+/* a control whose native view isn't wanted any more (a tab whose only page is the window's sidebar) */
+void w2s_retire_control( HWND hwnd )
+{
+    struct w2s_control *ctl = GetPropW( hwnd, prop_name );
+
+    if (!ctl || !ctl->active) return;
+    ctl->reselecting++;
+    deactivate( ctl, FALSE );
+    ctl->reselecting--;
+}
+
 struct w2s_control *w2s_control_from_hwnd( HWND hwnd )
 {
     struct w2s_control *ctl = GetPropW( hwnd, prop_name );

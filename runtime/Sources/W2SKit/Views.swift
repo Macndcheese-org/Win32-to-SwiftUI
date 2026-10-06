@@ -1884,7 +1884,10 @@ struct ToolbarBar: View {
     func image(_ b: Snapshot.ToolbarButton) -> some View {
         // Not smaller than a Mac toolbar's 16 points: an app that is DPI aware on a Retina display
         // draws 16 pixel images for 8 points, and the buttons around are small enough.
-        let side = max(16, 16 * scale)
+        // ... nor more than its button has room for: a program that draws its toolbar in pixels (7-Zip's
+        // 22 pixel one) has 11 points of it on such a display, and an icon must keep a margin there
+        let room = b.rect.count == 4 ? CGFloat(b.rect[3]) * scale : 0
+        let side = room > 0 ? min(max(16, 16 * scale), max(8, room - 4)) : max(16, 16 * scale)
         let sym = b.sym ?? b.img.flatMap { model.imageSymbols[$0] }
         if let sym = sym, sym.hasPrefix("sf:"), !sym.contains(";") {
             // a toolbar's symbols are drawn in the text colour, as macOS toolbars do
@@ -1897,7 +1900,7 @@ struct ToolbarBar: View {
             // the image's own pixels, as many points as they are on this display (the app may draw
             // 32 pixel images for 16 points)
             let own = max(image.size.width, image.size.height) * scale
-            let side = max(16, own)
+            let side = room > 0 ? min(max(16, own), max(8, room - 4)) : max(16, own)
             Image(nsImage: image).resizable().interpolation(.high).frame(width: side, height: side)
         }
     }
