@@ -114,6 +114,7 @@ struct Snapshot: Codable, Equatable {
     var imageGen: Int?
     var stateImages: [String: String]?  // a tree's state images in use (index: BGRA base64)
     var stateSize: [Int]?
+    var stateSymbols: [String: String]?   // a tree's state images that are the system's: SF Symbol names
     var imageSize: [Int]?
     var small: Bool?
     // values
@@ -180,6 +181,8 @@ final class ControlModel: ObservableObject {
     var images: [Int: NSImage] = [:]
     /// A tree's state images by index (main thread), as the PE side last sent them.
     var stateImages: [Int: NSImage] = [:]
+    /// State images that are the system's own artwork, as SF Symbol names (a pop-up button's symbols).
+    var stateSymbols: [Int: String] = [:]
     /// Which of them are stock icons shown as macOS images (for the tests).
     var imageSymbols: [Int: String] = [:]
     private var imageGen: Int?
@@ -191,6 +194,9 @@ final class ControlModel: ObservableObject {
             imageGen = snap.imageGen
             images = [:]
             imageSymbols = [:]
+        }
+        for (key, name) in snap.stateSymbols ?? [:] {
+            if let index = Int(key) { stateSymbols[index] = name }
         }
         if let size = snap.stateSize, size.count == 2 {
             for (key, base64) in snap.stateImages ?? [:] {

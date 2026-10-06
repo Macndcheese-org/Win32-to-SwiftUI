@@ -1494,6 +1494,48 @@ struct TreeList: View {
     }
 }
 
+/// A tree node's choice of what happens to it (the feature tree of Windows Installer: install
+/// it here, install it all, on demand, don't): the pop-up button that shows the current one.
+/// The choices are the order of the app's own menu (msi's), which makes them when asked.
+struct StateMenu: View {
+    @ObservedObject var model: ControlModel
+    let node: Int
+    let state: Int      // INSTALLSTATE of the node: 1 advertised, 2 absent, 3 local, 4 source, 5 default
+    let symbol: String
+
+    private static let choices: [(title: String, symbol: String)] = [
+        ("Install feature locally", "checkmark.circle"),
+        ("Install entire feature", "checkmark.circle.fill"),
+        ("Install on demand", "arrow.down.circle"),
+        ("Don't install", "xmark.circle"),
+    ]
+
+    /// the choice that is the current state ("entire feature" is a way to the local state, not another state)
+    private var current: Int { state == 3 || state == 5 ? 0 : state == 1 ? 2 : state == 2 ? 3 : -1 }
+
+    var body: some View {
+        Menu {
+            Picker("", selection: Binding<Int>(
+                get: { current },
+                set: { choice in
+                    guard choice >= 0 else { return }
+                    model.emit(["t": "stateChoose", "v": node, "a": [choice]])
+                })) {
+                ForEach(Array(StateMenu.choices.enumerated()), id: \.offset) { index, choice in
+                    Label(choice.title, systemImage: choice.symbol).tag(index)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            Image(systemName: symbol)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.visible)
+        .fixedSize()
+    }
+}
+
 struct TreeRows: View {
     @ObservedObject var model: ControlModel
     let nodes: [Snapshot.TreeNode]
@@ -1535,10 +1577,16 @@ struct TreeRows: View {
     }
 
     /// Its state image, when the app's tree has them (the feature tree's choice of
-    /// what to install): a button that opens the app's own choice (msi's menu).
+    /// what to install): a button that opens the app's own choice (msi's menu). The
+    /// system's own images are a pop-up button's symbol and arrows; an app's stay its own.
     @ViewBuilder
     func label(_ node: Snapshot.TreeNode) -> some View {
-        if let st = node.st, let image = model.stateImages[st] {
+        if let st = node.st, let name = model.stateSymbols[st] {
+            HStack(spacing: 6) {
+                StateMenu(model: model, node: node.id, state: st, symbol: name)
+                iconLabel(node)
+            }
+        } else if let st = node.st, let image = model.stateImages[st] {
             HStack(spacing: 6) {
                 Button { model.emit(["t": "stateClick", "v": node.id]) } label: {
                     Image(nsImage: image).resizable().interpolation(.none)

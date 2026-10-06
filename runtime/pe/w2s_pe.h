@@ -97,6 +97,7 @@ const char *w2s_stock_icon( HICON icon, const BYTE *bits, int cx, int cy, HIMAGE
 #define W2S_WAKE_SHRINK  2      /* a frame: take the menu bar's height off (menus.c) */
 #define W2S_WAKE_LOOK    3      /* the system colours changed (look.c; the native Look.wakeLook) */
 extern UINT w2s_wake_message;
+extern int w2s_popup_choice;    /* menus.c: answer the next popup with this item */
 extern UINT w2s_os_major, w2s_os_minor;    /* the running macOS */
 BOOL w2s_get_host( HWND hwnd, struct w2s_host *host );
 void w2s_release_host( HWND hwnd, const struct w2s_host *host );

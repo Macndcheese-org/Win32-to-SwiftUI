@@ -402,6 +402,11 @@ UINT64 w2s_frame_handle( HWND hwnd )
 /***********************************************************************
  *      W2STrackPopupMenu  (win32swiftui.@)
  */
+/* The item (by position) the next popup menu is answered with without showing it: a native
+ * control that already shows the choices (a pop-up button) has made the choice the app's own
+ * menu asks for. -1: none. */
+int w2s_popup_choice = -1;
+
 BOOL WINAPI W2STrackPopupMenu( HMENU menu, UINT flags, INT x, INT y, HWND hwnd, TPMPARAMS *params, INT *ret )
 {
     HWND top = hwnd ? GetAncestor( hwnd, GA_ROOT ) : NULL;
@@ -412,6 +417,22 @@ BOOL WINAPI W2STrackPopupMenu( HMENU menu, UINT flags, INT x, INT y, HWND hwnd, 
     RECT client;
     double id = 0;
 
+    if (w2s_popup_choice >= 0 && IsMenu( menu ))
+    {
+        UINT cmd = GetMenuItemID( menu, w2s_popup_choice );
+
+        w2s_popup_choice = -1;
+        if (cmd != (UINT)-1)
+        {
+            if (flags & TPM_RETURNCMD) *ret = (INT)cmd;
+            else
+            {
+                if (cmd && !(flags & TPM_NONOTIFY)) PostMessageW( hwnd, WM_COMMAND, MAKEWPARAM( cmd, 0 ), 0 );
+                *ret = TRUE;
+            }
+            return TRUE;
+        }
+    }
     if (!IsMenu( menu ) || !top || !IsWindowVisible( top )) return FALSE;
     if (!w2s_get_host( top, &host )) return FALSE;
 

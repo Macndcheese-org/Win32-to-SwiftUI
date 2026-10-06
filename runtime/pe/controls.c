@@ -1534,10 +1534,41 @@ static void tree_move_splitter( HWND hwnd, int want )
 /* A node's state image (the user-set TVSIL_STATE list: msi's feature tree
  * shows what is installed, and a click on it opens the choice). Only the
  * images the nodes use now. */
-static void tree_state_images( HIMAGELIST himl, unsigned states, struct json *j )
+static const char *msi_state_symbol( int state )
+{
+    /* msi's feature tree: the image is the feature's INSTALLSTATE (Windows Installer's own bitmaps) */
+    switch (state)
+    {
+    case 1: return "arrow.down.circle";     /* INSTALLSTATE_ADVERTISED: installed when first used */
+    case 2: return "xmark.circle";          /* INSTALLSTATE_ABSENT */
+    case 3:                                 /* INSTALLSTATE_LOCAL */
+    case 5: return "checkmark.circle";      /* INSTALLSTATE_DEFAULT */
+    case 4: return "externaldrive";         /* INSTALLSTATE_SOURCE: run from the source */
+    }
+    return NULL;
+}
+
+static void tree_state_images( HWND hwnd, HIMAGELIST himl, unsigned states, struct json *j )
 {
     int cx, cy, i;
 
+    /* The feature tree of Windows Installer (msi.dll) shows its choices in its own bitmaps, which are
+     * the system's, not the app's artwork: the macOS pop-up button's symbols stand for them. */
+    if (GetPropW( hwnd, L"MSIDATA" ))
+    {
+        json_key_obj_begin( j, "stateSymbols" );
+        for (i = 1; i < 16; i++)
+        {
+            const char *name;
+            char key[8];
+
+            if (!(states & (1u << i)) || !(name = msi_state_symbol( i ))) continue;
+            snprintf( key, sizeof(key), "%d", i );
+            json_str_a( j, key, name );
+        }
+        json_obj_end( j );
+        return;
+    }
     if (!ImageList_GetIconSize( himl, &cx, &cy ) || cx <= 0 || cy <= 0 || cx > 256 || cy > 256) return;
     json_arr_begin( j, "stateSize" );
     json_int( j, NULL, cx );
@@ -1603,7 +1634,7 @@ static void tree_snapshot( struct w2s_control *ctl, struct json *j )
     tree_nodes( ctl->hwnd, (HTREEITEM)SendMessageW( ctl->hwnd, TVM_GETNEXTITEM, TVGN_ROOT, 0 ), j, 0, &budget,
                 images, &images_count, hstate ? &states : NULL );
     json_arr_end( j );
-    if (hstate && states) tree_state_images( hstate, states, j );
+    if (hstate && states) tree_state_images( ctl->hwnd, hstate, states, j );
     /* the nodes' icons: wine's folders and drives come as the Finder's (icons.c) */
     image_list_json( data, himl, images, images_count, j );
     HeapFree( GetProcessHeap(), 0, images );
@@ -1690,6 +1721,13 @@ static void tree_apply( struct w2s_control *ctl, const struct w2s_event *ev )
     }
     else if (!strcmp( ev->type, "sidebarWidth" )) tree_move_splitter( ctl->hwnd, (int)ev->value );
     else if (!strcmp( ev->type, "stateClick" )) tree_state_click( ctl->hwnd, item );
+    else if (!strcmp( ev->type, "stateChoose" ) && ev->array_count > 0)
+    {
+        /* the pop-up button's choice is the position in the app's own menu for the node's state image */
+        w2s_popup_choice = ev->array[0];
+        tree_state_click( ctl->hwnd, item );
+        w2s_popup_choice = -1;
+    }
     else if (!strcmp( ev->type, "expand" )) tree_expand( ctl->hwnd, item, TRUE );
     else if (!strcmp( ev->type, "collapse" )) tree_expand( ctl->hwnd, item, FALSE );
     else if (!strcmp( ev->type, "activate" ))
