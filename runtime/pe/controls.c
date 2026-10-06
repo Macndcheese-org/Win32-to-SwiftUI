@@ -1384,7 +1384,7 @@ static const struct w2s_kind kind_listview_icon = { "listview.icon", listview_sn
 #define MAX_TREE_DEPTH 50
 
 static void tree_nodes( HWND hwnd, HTREEITEM item, struct json *j, int depth, int *budget,
-                        int *images, int *images_count )
+                        int *images, int *images_count, unsigned *states )
 {
     for (; item && *budget > 0; item = (HTREEITEM)SendMessageW( hwnd, TVM_GETNEXTITEM, TVGN_NEXT, (LPARAM)item ))
     {
@@ -1397,7 +1397,7 @@ static void tree_nodes( HWND hwnd, HTREEITEM item, struct json *j, int depth, in
         it.hItem = item;
         it.pszText = text;
         it.cchTextMax = ARRAYSIZE(text);
-        it.stateMask = TVIS_EXPANDED;
+        it.stateMask = TVIS_EXPANDED | TVIS_STATEIMAGEMASK;
         it.iImage = -1;
         SendMessageW( hwnd, TVM_GETITEMW, 0, (LPARAM)&it );
         if (it.pszText != text) lstrcpynW( text, it.pszText && it.pszText != LPSTR_TEXTCALLBACKW ? it.pszText : L"", ARRAYSIZE(text) );
@@ -1409,6 +1409,12 @@ static void tree_nodes( HWND hwnd, HTREEITEM item, struct json *j, int depth, in
         json_int( j, "id", (INT_PTR)item );
         json_str( j, "text", text );
         json_bool( j, "kids", child || it.cChildren > 0 );
+        if (states && (it.state & TVIS_STATEIMAGEMASK))
+        {
+            int st = (it.state & TVIS_STATEIMAGEMASK) >> 12;
+            json_int( j, "st", st );
+            *states |= 1u << st;
+        }
         if (it.iImage >= 0 && it.iImage != I_IMAGECALLBACK && images && *images_count < MAX_TREE_NODES)
         {
             json_int( j, "img", it.iImage );
@@ -1418,7 +1424,7 @@ static void tree_nodes( HWND hwnd, HTREEITEM item, struct json *j, int depth, in
         {
             json_bool( j, "open", TRUE );
             json_arr_begin( j, "children" );
-            tree_nodes( hwnd, child, j, depth + 1, budget, images, images_count );
+            tree_nodes( hwnd, child, j, depth + 1, budget, images, images_count, states );
             json_arr_end( j );
         }
         json_obj_end( j );
@@ -1525,9 +1531,67 @@ static void tree_move_splitter( HWND hwnd, int want )
     }
 }
 
+/* A node's state image (the user-set TVSIL_STATE list: msi's feature tree
+ * shows what is installed, and a click on it opens the choice). Only the
+ * images the nodes use now. */
+static void tree_state_images( HIMAGELIST himl, unsigned states, struct json *j )
+{
+    int cx, cy, i;
+
+    if (!ImageList_GetIconSize( himl, &cx, &cy ) || cx <= 0 || cy <= 0 || cx > 256 || cy > 256) return;
+    json_arr_begin( j, "stateSize" );
+    json_int( j, NULL, cx );
+    json_int( j, NULL, cy );
+    json_arr_end( j );
+    json_key_obj_begin( j, "stateImages" );
+    for (i = 1; i < 16; i++)
+    {
+        HICON icon;
+        BYTE *bits;
+        char key[8];
+
+        if (!(states & (1u << i)) || !(icon = ImageList_GetIcon( himl, i, ILD_NORMAL ))) continue;
+        if ((bits = w2s_image_bgra( icon, NULL, cx, cy )))
+        {
+            snprintf( key, sizeof(key), "%d", i );
+            json_base64( j, key, bits, (size_t)cx * cy * 4 );
+            HeapFree( GetProcessHeap(), 0, bits );
+        }
+        DestroyIcon( icon );
+    }
+    json_obj_end( j );
+}
+
+/* a click on the node's state image, where the tree has it */
+static void tree_state_click( HWND hwnd, HTREEITEM item )
+{
+    RECT rc;
+    TVHITTESTINFO hit;
+    int x, y;
+
+    *(HTREEITEM *)&rc = item;
+    if (!SendMessageW( hwnd, TVM_GETITEMRECT, FALSE, (LPARAM)&rc )) return;
+    y = (rc.top + rc.bottom) / 2;
+    for (x = rc.left; x < rc.right; x++)
+    {
+        hit.pt.x = x;
+        hit.pt.y = y;
+        hit.flags = 0;
+        hit.hItem = NULL;
+        SendMessageW( hwnd, TVM_HITTEST, 0, (LPARAM)&hit );
+        if (hit.hItem == item && (hit.flags & TVHT_ONITEMSTATEICON))
+        {
+            SendMessageW( hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM( x, y ) );
+            return;
+        }
+    }
+}
+
 static void tree_snapshot( struct w2s_control *ctl, struct json *j )
 {
     int budget = MAX_TREE_NODES;
+    HIMAGELIST hstate = (HIMAGELIST)SendMessageW( ctl->hwnd, TVM_GETIMAGELIST, TVSIL_STATE, 0 );
+    unsigned states = 0;
 
     HIMAGELIST himl = (HIMAGELIST)SendMessageW( ctl->hwnd, TVM_GETIMAGELIST, TVSIL_NORMAL, 0 );
     struct lv_data *data = ctl->data;
@@ -1537,8 +1601,9 @@ static void tree_snapshot( struct w2s_control *ctl, struct json *j )
     if (himl) images = HeapAlloc( GetProcessHeap(), 0, MAX_TREE_NODES * sizeof(int) );
     json_arr_begin( j, "nodes" );
     tree_nodes( ctl->hwnd, (HTREEITEM)SendMessageW( ctl->hwnd, TVM_GETNEXTITEM, TVGN_ROOT, 0 ), j, 0, &budget,
-                images, &images_count );
+                images, &images_count, hstate ? &states : NULL );
     json_arr_end( j );
+    if (hstate && states) tree_state_images( hstate, states, j );
     /* the nodes' icons: wine's folders and drives come as the Finder's (icons.c) */
     image_list_json( data, himl, images, images_count, j );
     HeapFree( GetProcessHeap(), 0, images );
@@ -1624,6 +1689,7 @@ static void tree_apply( struct w2s_control *ctl, const struct w2s_event *ev )
             SendMessageW( ctl->hwnd, TVM_SELECTITEM, TVGN_CARET, (LPARAM)item );
     }
     else if (!strcmp( ev->type, "sidebarWidth" )) tree_move_splitter( ctl->hwnd, (int)ev->value );
+    else if (!strcmp( ev->type, "stateClick" )) tree_state_click( ctl->hwnd, item );
     else if (!strcmp( ev->type, "expand" )) tree_expand( ctl->hwnd, item, TRUE );
     else if (!strcmp( ev->type, "collapse" )) tree_expand( ctl->hwnd, item, FALSE );
     else if (!strcmp( ev->type, "activate" ))

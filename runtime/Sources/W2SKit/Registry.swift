@@ -17,6 +17,7 @@ struct Snapshot: Codable, Equatable {
         var kids: Bool?
         var open: Bool?
         var img: Int?           // its image list index (ControlModel.images)
+        var st: Int?            // its state image index (ControlModel.stateImages)
         var children: [TreeNode]?
     }
 
@@ -111,6 +112,8 @@ struct Snapshot: Codable, Equatable {
     var images: [String: String]?   // icons not sent before (index: BGRA base64); see ControlModel.images
     var symbols: [String: String]?  // stock icons not sent before (index: macOS image spec)
     var imageGen: Int?
+    var stateImages: [String: String]?  // a tree's state images in use (index: BGRA base64)
+    var stateSize: [Int]?
     var imageSize: [Int]?
     var small: Bool?
     // values
@@ -175,6 +178,8 @@ final class ControlModel: ObservableObject {
 
     /// Icons of an icon view, sent once each (main thread).
     var images: [Int: NSImage] = [:]
+    /// A tree's state images by index (main thread), as the PE side last sent them.
+    var stateImages: [Int: NSImage] = [:]
     /// Which of them are stock icons shown as macOS images (for the tests).
     var imageSymbols: [Int: String] = [:]
     private var imageGen: Int?
@@ -186,6 +191,13 @@ final class ControlModel: ObservableObject {
             imageGen = snap.imageGen
             images = [:]
             imageSymbols = [:]
+        }
+        if let size = snap.stateSize, size.count == 2 {
+            for (key, base64) in snap.stateImages ?? [:] {
+                if let index = Int(key), let image = bgraImage(base64, width: size[0], height: size[1]) {
+                    stateImages[index] = image
+                }
+            }
         }
         guard let size = snap.imageSize, size.count == 2 else { return }
         for (key, base64) in snap.images ?? [:] {

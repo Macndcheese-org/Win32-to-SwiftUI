@@ -123,3 +123,12 @@ extension EnvironmentValues {
         set { self[InSidebarKey.self] = newValue }
     }
 }
+
+struct ScaleKey: EnvironmentKey { static let defaultValue: CGFloat = 1 }
+extension EnvironmentValues {
+    /// points per Win32 pixel for the control being drawn (Metrics.scale)
+    var w2sScale: CGFloat {
+        get { self[ScaleKey.self] }
+        set { self[ScaleKey.self] = newValue }
+    }
+}

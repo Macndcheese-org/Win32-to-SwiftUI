@@ -108,6 +108,7 @@ struct ControlRoot: View {
             let scale = geo.size.height / CGFloat(max(1, snap.heightPx ?? Double(geo.size.height)))
             let metrics = fixed ?? Metrics(snap: snap, scale: scale.isFinite && scale > 0 ? scale : 1)
             content(snap: snap, metrics: metrics)
+                .environment(\.w2sScale, metrics.scale)
                 .modifier(HelpText(text: snap.help))
                 .font(.system(size: metrics.fontSize))
                 .controlSize(metrics.controlSize)
@@ -1497,6 +1498,7 @@ struct TreeRows: View {
     @ObservedObject var model: ControlModel
     let nodes: [Snapshot.TreeNode]
     @Environment(\.w2sInSidebar) private var inSidebar
+    @Environment(\.w2sScale) private var scale
 
     var body: some View {
         ForEach(nodes) { node in
@@ -1532,9 +1534,27 @@ struct TreeRows: View {
         }
     }
 
-    /// Its icon (wine's folders as the Finder's, icons.c) before its title.
+    /// Its state image, when the app's tree has them (the feature tree's choice of
+    /// what to install): a button that opens the app's own choice (msi's menu).
     @ViewBuilder
     func label(_ node: Snapshot.TreeNode) -> some View {
+        if let st = node.st, let image = model.stateImages[st] {
+            HStack(spacing: 6) {
+                Button { model.emit(["t": "stateClick", "v": node.id]) } label: {
+                    Image(nsImage: image).resizable().interpolation(.none)
+                        .frame(width: image.size.width * scale, height: image.size.height * scale)
+                }
+                .buttonStyle(.plain)
+                iconLabel(node)
+            }
+        } else {
+            iconLabel(node)
+        }
+    }
+
+    /// Its icon (wine's folders as the Finder's, icons.c) before its title.
+    @ViewBuilder
+    func iconLabel(_ node: Snapshot.TreeNode) -> some View {
         if let index = node.img, let image = model.images[index] {
             Label {
                 Text(node.text).lineLimit(1)
