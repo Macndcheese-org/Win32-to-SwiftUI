@@ -1298,6 +1298,8 @@ struct ReportView: View {
                 }
             }
             .tableColumnHeaders((model.snap.noHeader ?? false) ? .hidden : .automatic)
+            // alternating rows help to follow a row across columns (HIG: Lists and tables), not in a list of one
+            .alternatingRowBackgrounds(columns.count > 1 ? .automatic : .disabled)
             .modifier(DoubleClickRows(model: model))
             .id(key + (model.snap.checks == nil ? "" : "|checks"))
         } else {

@@ -95,8 +95,13 @@ struct SidebarGroupView: View {
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
             }
-            ForEach(group.members.filter { $0.page == group.tab }.sorted { $0.order < $1.order }) { member in
-                SidebarMember(host: member.host)
+            let page = group.members.filter { $0.page == group.tab }.sorted { $0.order < $1.order }
+            if let search = SidebarSearch(page: page.map(\.host)) {
+                // a page of a field, a button and a list is a search: the Mac's search field and its results
+                SidebarSearchPage(search: search,
+                                  prompt: group.tabs.indices.contains(group.tab) ? group.tabs[group.tab] : "")
+            } else {
+                ForEach(page) { member in SidebarMember(host: member.host) }
             }
             Spacer(minLength: 0)
         }
@@ -130,5 +135,99 @@ final class SidebarHostingController: NSHostingController<AnyView> {
         var inset = view.safeAreaInsets.top
         if let window = view.window { inset = max(inset, window.frame.height - window.contentLayoutRect.maxY) }
         if abs(group.topInset - inset) > 0.5 { DispatchQueue.main.async { group.topInset = inset } }
+    }
+}
+
+/// The controls of a search page: its field, the button that lists the results, and the list.
+struct SidebarSearch {
+    let field: ControlHost
+    let button: ControlHost
+    let results: ControlHost
+
+    init?(page: [ControlHost]) {
+        guard let field = page.first(where: { $0.entry.hasPrefix("edit.") }),
+              let button = page.first(where: { $0.entry.hasPrefix("button.") }),
+              let results = page.first(where: { $0.entry.hasPrefix("listview.") || $0.entry.hasPrefix("listbox.") })
+        else { return nil }
+        self.field = field
+        self.button = button
+        self.results = results
+    }
+}
+
+/// A search as the Mac has it (HIG: Search fields): a field with the magnifier, a clear button and the name
+/// of what is searched; Return lists the results, which are the list below, with nothing in it until then.
+struct SidebarSearchPage: View {
+    let search: SidebarSearch
+    let prompt: String
+    @ObservedObject private var field: ControlModel
+    @ObservedObject private var results: ControlModel
+
+    init(search: SidebarSearch, prompt: String) {
+        self.search = search
+        self.prompt = prompt
+        field = search.field.model
+        results = search.results.model
+    }
+
+    var body: some View {
+        let empty = (results.snap.rows ?? []).isEmpty && (results.snap.items ?? []).isEmpty
+        VStack(spacing: 8) {
+            SearchFieldView(
+                text: Binding(
+                    get: { field.snap.text ?? "" },
+                    set: { new in
+                        guard new != field.snap.text else { return }
+                        field.snap.text = new
+                        field.emit(["t": "text", "s": new])
+                    }),
+                prompt: prompt,
+                onSubmit: { search.button.model.emit(["t": "click"]) })
+                .frame(height: 24)
+                .padding(.horizontal, 12)
+                .padding(.top, 2)
+            // no results: nothing, not a list of empty rows
+            if !empty { SidebarMember(host: search.results) }
+        }
+    }
+}
+
+/// NSSearchField: SwiftUI's searchable is for a navigation stack's toolbar.
+struct SearchFieldView: NSViewRepresentable {
+    @Binding var text: String
+    let prompt: String
+    let onSubmit: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField()
+        field.placeholderString = prompt
+        field.delegate = context.coordinator
+        field.target = context.coordinator
+        field.action = #selector(Coordinator.submitted(_:))
+        field.sendsSearchStringImmediately = false
+        field.sendsWholeSearchString = true
+        return field
+    }
+
+    func updateNSView(_ field: NSSearchField, context: Context) {
+        context.coordinator.parent = self
+        if field.stringValue != text { field.stringValue = text }
+        if field.placeholderString != prompt { field.placeholderString = prompt }
+    }
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var parent: SearchFieldView
+        init(_ parent: SearchFieldView) { self.parent = parent }
+
+        func controlTextDidChange(_ note: Notification) {
+            if let field = note.object as? NSSearchField { parent.text = field.stringValue }
+        }
+
+        @objc func submitted(_ field: NSSearchField) {
+            parent.text = field.stringValue
+            parent.onSubmit()
+        }
     }
 }

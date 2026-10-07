@@ -1462,7 +1462,8 @@ static HWND tree_unit( HWND hwnd )
         RECT client, rc;
 
         WCHAR cls[32] = { 0 };
-        int margin = 10;       /* a pane's own margin around what fills it */
+        /* a pane's own margin around what fills it: the app's pixels, at its DPI (HTML Help's: 8 and 4 at 96) */
+        int margin = MulDiv( 11, GetDpiForWindow( parent ), 96 );
 
         GetClientRect( parent, &client );
         GetWindowRect( unit, &rc );
@@ -1472,8 +1473,6 @@ static HWND tree_unit( HWND hwnd )
         if (wcsstr( cls, L"SysTabControl32" ))
         {
             SendMessageW( parent, TCM_ADJUSTRECT, FALSE, (LPARAM)&client );     /* below its tab strip */
-            /* the margins of a page are the app's, in its pixels at its DPI (HTML Help's are 8 and 4 at 96) */
-            margin = MulDiv( 12, GetDpiForWindow( parent ), 96 );
             client.top = rc.top;                   /* what the app puts above its list in the page is its own */
         }
         /* it fills the parent, a client edge or two aside */
@@ -1587,6 +1586,30 @@ void w2s_select_nav_tab( HWND hwnd, int page )
     if (w2s_notify_parent( tab, TCN_SELCHANGING, &nm )) return;     /* the app vetoes it */
     SendMessageW( tab, TCM_SETCURSEL, page, 0 );
     w2s_notify_parent( tab, TCN_SELCHANGE, &nm );
+}
+
+/* HTML Help hides and shows its navigation pane with its own command (the toolbar's Hide / Show, which the
+ * window's sidebar button replaces): the pane and its size bar leave properly, and the app knows. HTML Help
+ * also changes the window's size by the pane's width, which a Mac sidebar does not: the window stays as it was.
+ * FALSE: not HTML Help, or the pane is shown and only its width is to be set. */
+#define HH_IDTB_EXPAND   200
+#define HH_IDTB_CONTRACT 201
+
+static BOOL hh_navigation_command( HWND hwnd, int want )
+{
+    HWND root = GetAncestor( hwnd, GA_ROOT ), nav = tree_unit( hwnd );
+    WCHAR cls[32] = { 0 };
+    RECT rc;
+    BOOL shown;
+
+    if (!root || !GetClassNameW( root, cls, ARRAYSIZE(cls) ) || wcscmp( cls, L"HH Parent" )) return FALSE;
+    shown = (GetWindowLongW( nav, GWL_STYLE ) & WS_VISIBLE) != 0;
+    if (want > 0 && shown) return FALSE;            /* just its width */
+    if (want <= 0 && !shown) return TRUE;           /* already hidden */
+    GetWindowRect( root, &rc );
+    SendMessageW( root, WM_COMMAND, MAKEWPARAM( want > 0 ? HH_IDTB_EXPAND : HH_IDTB_CONTRACT, 0 ), 0 );
+    SetWindowPos( root, NULL, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, SWP_NOZORDER | SWP_NOACTIVATE );
+    return want <= 0;
 }
 
 /* the user dragged the sidebar's divider: the app's own splitter, dragged as
@@ -1817,7 +1840,10 @@ static void tree_apply( struct w2s_control *ctl, const struct w2s_event *ev )
         if (item != (HTREEITEM)SendMessageW( ctl->hwnd, TVM_GETNEXTITEM, TVGN_CARET, 0 ))
             SendMessageW( ctl->hwnd, TVM_SELECTITEM, TVGN_CARET, (LPARAM)item );
     }
-    else if (!strcmp( ev->type, "sidebarWidth" )) tree_move_splitter( ctl->hwnd, (int)ev->value );
+    else if (!strcmp( ev->type, "sidebarWidth" ))
+    {
+        if (!hh_navigation_command( ctl->hwnd, (int)ev->value )) tree_move_splitter( ctl->hwnd, (int)ev->value );
+    }
     else if (!strcmp( ev->type, "stateClick" )) tree_state_click( ctl->hwnd, item );
     else if (!strcmp( ev->type, "stateChoose" ) && ev->array_count > 0)
     {
