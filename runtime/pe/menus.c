@@ -27,6 +27,8 @@ struct w2s_frame
 {
     HWND hwnd;
     WNDPROC orig;
+    BOOL unicode;           /* the window is Unicode (and stays what it was: a window's procedure set with the W
+                               function makes it one, and its controls then notify it in Unicode) */
     struct w2s_host host;
     UINT64 handle;          /* the native menu bar (a "menubar" control on the unix side) */
     HMENU menu;             /* the menu shown */
@@ -373,16 +375,18 @@ static LRESULT CALLBACK frame_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     if (msg == WM_NCDESTROY)
     {
         WNDPROC orig = frame->orig;
+        BOOL unicode = frame->unicode;
         if (frame->active) show_menu( frame, FALSE );
         destroy_menubar( frame );
         if (frame->host.surface) w2s_release_host( hwnd, &frame->host );
         RemovePropW( hwnd, frame_prop );
         RemovePropW( hwnd, native_bar_prop );
         HeapFree( GetProcessHeap(), 0, frame );
-        return CallWindowProcW( orig, hwnd, msg, wparam, lparam );
+        return unicode ? CallWindowProcW( orig, hwnd, msg, wparam, lparam ) : CallWindowProcA( orig, hwnd, msg, wparam, lparam );
     }
 
-    ret = CallWindowProcW( frame->orig, hwnd, msg, wparam, lparam );
+    ret = frame->unicode ? CallWindowProcW( frame->orig, hwnd, msg, wparam, lparam )
+                         : CallWindowProcA( frame->orig, hwnd, msg, wparam, lparam );
 
     switch (msg)
     {
@@ -410,7 +414,9 @@ void w2s_frame_created( HWND hwnd )
     frame = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*frame) );
     frame->hwnd = hwnd;
     SetPropW( hwnd, frame_prop, frame );
-    frame->orig = (WNDPROC)SetWindowLongPtrW( hwnd, GWLP_WNDPROC, (LONG_PTR)frame_proc );
+    frame->unicode = IsWindowUnicode( hwnd );
+    frame->orig = (WNDPROC)(frame->unicode ? SetWindowLongPtrW( hwnd, GWLP_WNDPROC, (LONG_PTR)frame_proc )
+                                           : SetWindowLongPtrA( hwnd, GWLP_WNDPROC, (LONG_PTR)frame_proc ));
     frame->active = GetActiveWindow() == hwnd;
     sync_menu( frame, FALSE );
     /* made already shown (Windows Installer's dialogs): shown as the alert it is, not as this */
