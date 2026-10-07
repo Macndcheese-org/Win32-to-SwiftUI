@@ -596,6 +596,14 @@ static LRESULT CALLBACK show_hook( int code, WPARAM wparam, LPARAM lparam )
 {
     const CWPRETSTRUCT *cwp = (const CWPRETSTRUCT *)lparam;
 
+    /* a window that was not redrawn (PuTTY's, while it shows another panel's controls) is shown again:
+       wine's WM_SETREDRAW takes the window's visible style off and puts it back, so the controls that
+       showed meanwhile were not visible to be activated */
+    if (code == HC_ACTION && cwp->message == WM_SETREDRAW && cwp->wParam && deferred_count > 0)
+    {
+        activate_shown_child( cwp->hwnd, 0 );
+        EnumChildWindows( cwp->hwnd, activate_shown_child, 0 );
+    }
     if (code == HC_ACTION && cwp->message == WM_WINDOWPOSCHANGED)
     {
         UINT flags = ((const WINDOWPOS *)cwp->lParam)->flags;
