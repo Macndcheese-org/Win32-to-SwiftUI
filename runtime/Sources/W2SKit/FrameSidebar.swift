@@ -73,13 +73,16 @@ final class FrameSidebar: NSObject, WindowChrome {
             // the app's pane; it keeps the width the app laid its tree out in
             spec["minWidth"] = width
             spec["maxWidth"] = width
+            // ... and with nothing to follow it, hiding it would only leave the app's layout with a gap and
+            // the categories out of reach: it is not hidden
+            spec["canCollapse"] = false
         } else if group != nil {
             // AppKit's own limits: a sidebar keeps its default minimum (144 pt) and has no maximum; so that
             // the content cannot be squeezed out by a wide one, it keeps AppKit's content list minimum (200 pt)
             spec["contentMinWidth"] = 200
         }
         window.perform(NSSelectorFromString("w2sAttachSidebar:"), with: spec as NSDictionary)
-        FrameToolbar.setSidebarToggle(true, window: window)
+        if host.model.snap.sbFixed != true { FrameToolbar.setSidebarToggle(true, window: window) }
         attachedAt = Date()
         for delay in [0.2, 0.6, 1.2, 1.8] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.fitRows() }
