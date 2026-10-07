@@ -1130,6 +1130,7 @@ struct ListBoxView: View {
     @ObservedObject var model: ControlModel
     let multi: Bool
     var fromRows = false
+    @Environment(\.w2sInSidebar) private var inSidebar
 
     var items: [String] {
         fromRows ? (model.snap.rows ?? []).map { $0.first ?? "" } : (model.snap.items ?? [])
@@ -1152,7 +1153,10 @@ struct ListBoxView: View {
                     get: { fromRows ? model.snap.selections?.first : model.snap.selection.flatMap { $0 >= 0 ? $0 : nil } },
                     set: { sel in
                         if fromRows { model.snap.selections = sel.map { [$0] } ?? [] } else { model.snap.selection = sel ?? -1 }
-                        model.emit(["t": "select", "v": sel ?? -1])
+                        /* choosing a row of a sidebar opens it (the sidebar is for navigating); a Win32 list
+                           opens on a double click or Return, which is what "activate" stands for */
+                        if inSidebar, let row = sel { model.emit(["t": "activate", "v": row]) }
+                        else { model.emit(["t": "select", "v": sel ?? -1]) }
                     })) {
                     ForEach(items.indices, id: \.self) { row($0, items[$0]).tag(Optional($0)) }
                 }
