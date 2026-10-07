@@ -67,8 +67,14 @@ final class FrameSidebar: NSObject, WindowChrome {
         self.controller = controller
         self.window = window
         hosting.isHidden = true
-        window.perform(NSSelectorFromString("w2sAttachSidebar:"),
-                       with: ["controller": controller, "width": width, "target": self] as NSDictionary)
+        var spec: [String: Any] = ["controller": controller, "width": width, "target": self]
+        if group != nil {
+            // a switch between pages has to fit; the content is never squeezed out by a wide sidebar
+            spec["minWidth"] = 200
+            spec["maxWidth"] = 440
+            spec["contentMinWidth"] = 300
+        }
+        window.perform(NSSelectorFromString("w2sAttachSidebar:"), with: spec as NSDictionary)
         FrameToolbar.setSidebarToggle(true, window: window)
         attachedAt = Date()
         for delay in [0.2, 0.6, 1.2, 1.8] {

@@ -79,21 +79,20 @@ final class SidebarGroup: ObservableObject {
 }
 
 /// The sidebar's content: the switch between the pages and the controls on the chosen one.
+@available(macOS 13.0, *)
 struct SidebarGroupView: View {
     @ObservedObject var group: SidebarGroup
 
     var body: some View {
         VStack(spacing: 8) {
             if group.tabs.count > 1 {
-                Picker("", selection: Binding(get: { group.tab }, set: { group.choose($0) })) {
-                    ForEach(Array(group.tabs.enumerated()), id: \.offset) { index, title in
-                        Text(title).tag(index)
-                    }
+                // the names while they fit, their symbols when the sidebar is narrow (HIG: Segmented controls)
+                ViewThatFits(in: .horizontal) {
+                    switcher(symbols: false)
+                    if group.tabs.allSatisfy({ tabSymbol($0) != nil }) { switcher(symbols: true) }
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .padding(.horizontal, 10)
-                .padding(.top, 8)
+                .padding(.horizontal, 12)
+                .padding(.top, 4)
             }
             let page = group.members.filter { $0.page == group.tab }.sorted { $0.order < $1.order }
             if let search = SidebarSearch(page: page.map(\.host)) {
@@ -105,8 +104,33 @@ struct SidebarGroupView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.top, group.topInset)
     }
+
+    private func switcher(symbols: Bool) -> some View {
+        Picker("", selection: Binding(get: { group.tab }, set: { group.choose($0) })) {
+            ForEach(Array(group.tabs.enumerated()), id: \.offset) { index, title in
+                if symbols, let name = tabSymbol(title) {
+                    Image(systemName: name).help(title).accessibilityLabel(title).tag(index)
+                } else {
+                    Text(title).lineLimit(1).tag(index)
+                }
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.small)
+    }
+}
+
+/// The symbol of a page by what its name says, in the languages the Mac has (a help viewer's Contents,
+/// Index and Search); nil for a name it doesn't know, which keeps the names.
+func tabSymbol(_ title: String) -> String? {
+    let name = title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+    func has(_ words: [String]) -> Bool { words.contains { name.contains($0) } }
+    if has(["somm", "content", "inhalt", "indice general", "contenido", "contenu", "contenuti", "inhoud", "indhold", "innhold", "innehall", "toc"]) { return "book" }
+    if has(["index", "indice", "register", "verzeichnis", "stikord"]) { return "character.book.closed" }
+    if has(["rech", "search", "such", "busc", "cerc", "zoek", "sog", "sok", "etsi"]) { return "magnifyingglass" }
+    return nil
 }
 
 /// One control of a page in the sidebar: a field or a button its own height, a list the rest.
@@ -118,6 +142,9 @@ struct SidebarMember: View {
             .environment(\.w2sInSidebar, true)
         if host.entry.hasPrefix("edit.") || host.entry.hasPrefix("button.") {
             view.frame(height: 24).padding(.horizontal, 10)
+        } else if host.entry.hasPrefix("listview."), (host.model.snap.columns?.count ?? 1) <= 1 {
+            // a list of one column in the sidebar is the sidebar's list: on its material, not a white table
+            ListBoxView(model: host.model, multi: false, fromRows: true).environment(\.w2sInSidebar, true)
         } else {
             view
         }
@@ -182,6 +209,7 @@ struct SidebarSearchPage: View {
                         field.emit(["t": "text", "s": new])
                     }),
                 prompt: prompt,
+                onFocus: { field.emit(["t": "focus"]) },
                 onSubmit: { search.button.model.emit(["t": "click"]) })
                 .frame(height: 24)
                 .padding(.horizontal, 12)
@@ -196,12 +224,24 @@ struct SidebarSearchPage: View {
 struct SearchFieldView: NSViewRepresentable {
     @Binding var text: String
     let prompt: String
+    let onFocus: () -> Void
     let onSubmit: () -> Void
+
+    /// the app's keyboard focus follows the field's (Return, and the keys a Win32 control takes, go to the app's)
+    final class Field: NSSearchField {
+        var onFocus: (() -> Void)?
+        override func becomeFirstResponder() -> Bool {
+            let ok = super.becomeFirstResponder()
+            if ok { onFocus?() }
+            return ok
+        }
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSSearchField {
-        let field = NSSearchField()
+        let field = Field()
+        field.onFocus = onFocus
         field.placeholderString = prompt
         field.delegate = context.coordinator
         field.target = context.coordinator
@@ -213,6 +253,7 @@ struct SearchFieldView: NSViewRepresentable {
 
     func updateNSView(_ field: NSSearchField, context: Context) {
         context.coordinator.parent = self
+        (field as? Field)?.onFocus = onFocus
         if field.stringValue != text { field.stringValue = text }
         if field.placeholderString != prompt { field.placeholderString = prompt }
     }

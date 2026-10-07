@@ -1116,6 +1116,16 @@ func nsControlSize(_ size: ControlSize) -> NSControl.ControlSize {
     size == .mini ? .mini : size == .small ? .small : .regular
 }
 
+/// A list box is a bordered list; in a window's sidebar it is the sidebar's, on its material.
+struct ListBoxStyle: ViewModifier {
+    @Environment(\.w2sInSidebar) private var inSidebar
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if inSidebar { content.listStyle(.sidebar) } else { content.listStyle(.bordered) }
+    }
+}
+
 struct ListBoxView: View {
     @ObservedObject var model: ControlModel
     let multi: Bool
@@ -1148,7 +1158,7 @@ struct ListBoxView: View {
                 }
             }
         }
-        .listStyle(.bordered)
+        .modifier(ListBoxStyle())
         .modifier(DoubleClickRows(model: model))
     }
 
