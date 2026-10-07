@@ -1361,8 +1361,13 @@ static void listview_apply( struct w2s_control *ctl, const struct w2s_event *ev 
     else if (!strcmp( ev->type, "activate" ) && ev->has_value)
     {
         NMITEMACTIVATE nm = { { 0 } };
+        LVITEMW item = { 0 };
         int i = (int)ev->value;
         listview_select( ctl->hwnd, &i, 1 );
+        /* what comctl32 fills in: the application finds the item by its lParam (hhctrl does) */
+        item.mask = LVIF_PARAM;
+        item.iItem = i;
+        if (SendMessageW( ctl->hwnd, LVM_GETITEMW, 0, (LPARAM)&item )) nm.lParam = item.lParam;
         nm.iItem = i;
         w2s_notify_parent( ctl->hwnd, NM_DBLCLK, &nm.hdr );
         w2s_notify_parent( ctl->hwnd, LVN_ITEMACTIVATE, &nm.hdr );
