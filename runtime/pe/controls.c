@@ -1500,7 +1500,9 @@ static BOOL tree_frame_sidebar( HWND hwnd, int *pane, RECT *tree )
     GetClientRect( root, &client );
     GetWindowRect( unit, tree );
     MapWindowPoints( NULL, root, (POINT *)tree, 2 );
-    if (tree->left > 1 || tree->bottom - tree->top < (client.bottom - client.top) * 3 / 5) return FALSE;
+    /* at the leading edge, a margin of the app's own aside (a dialog's, PuTTY's category tree) */
+    if (tree->left > MulDiv( 11, GetDpiForWindow( root ), 96 ) || tree->bottom - tree->top < (client.bottom - client.top) * 3 / 5)
+        return FALSE;
     /* the pane beside it: the nearest sibling that starts at or after its right edge */
     *pane = tree->right;
     for (sib = GetWindow( parent, GW_CHILD ); sib; sib = GetWindow( sib, GW_HWNDNEXT ))
@@ -1513,6 +1515,62 @@ static BOOL tree_frame_sidebar( HWND hwnd, int *pane, RECT *tree )
         if (*pane == tree->right || rc.left < *pane) *pane = rc.left;
     }
     return TRUE;
+}
+
+/* A window of a fixed size has no splitter to follow a sidebar's width, and what its tree sits among is a
+ * dialog's layout: the sidebar keeps the width the app laid it out in, and holds what is around the tree. */
+static BOOL frame_tree_fixed( HWND root )
+{
+    return !(GetWindowLongW( root, GWL_STYLE ) & WS_THICKFRAME);
+}
+
+struct frame_tree_search
+{
+    HWND tree;
+    RECT rc;
+    int pane;
+};
+
+static BOOL CALLBACK find_frame_tree( HWND hwnd, LPARAM lparam )
+{
+    struct frame_tree_search *s = (struct frame_tree_search *)lparam;
+    WCHAR cls[32] = { 0 };
+
+    if (s->tree || !IsWindowVisible( hwnd )) return TRUE;
+    if (GetClassNameW( hwnd, cls, ARRAYSIZE(cls) ) && !wcscmp( cls, L"SysTreeView32" ) &&
+        tree_frame_sidebar( hwnd, &s->pane, &s->rc )) s->tree = hwnd;
+    return TRUE;
+}
+
+/* What the sidebar of a fixed window covers of the app's layout (the floating sidebar lies over it):
+ * a caption above the tree ("Category:") has nothing to caption once the tree is the sidebar, and a button
+ * below it (About, Help) is shown at the sidebar's foot, where it stays within reach. */
+void w2s_frame_cover( HWND hwnd, const char *entry, struct json *j )
+{
+    HWND root = GetAncestor( hwnd, GA_ROOT ), unit;
+    struct frame_tree_search s = { 0 };
+    RECT rc;
+    int cx;
+
+    if (!root || root == hwnd || !frame_tree_fixed( root )) return;
+    if (strncmp( entry, "static.", 7 ) && strncmp( entry, "button.", 7 )) return;
+    EnumChildWindows( root, find_frame_tree, (LPARAM)&s );
+    if (!s.tree) return;
+    unit = tree_unit( s.tree );
+    if (hwnd == unit || IsChild( unit, hwnd ) || IsChild( hwnd, unit ) || !(GetWindowLongW( hwnd, GWL_STYLE ) & WS_VISIBLE)) return;
+    GetWindowRect( hwnd, &rc );
+    MapWindowPoints( NULL, root, (POINT *)&rc, 2 );
+    cx = (rc.left + rc.right) / 2;
+    if (cx < 0 || cx >= s.pane) return;                 /* beside the tree: the app's pane */
+    if (!strncmp( entry, "static.", 7 ) && rc.bottom <= s.rc.top)
+        json_bool( j, "sbHide", TRUE );
+    else if (!strncmp( entry, "button.", 7 ) && rc.top >= s.rc.bottom)
+    {
+        json_int( j, "sbGroup", (INT_PTR)unit );
+        json_bool( j, "sbFoot", TRUE );
+        json_int( j, "sbPage", 0 );
+        json_int( j, "sbOrder", rc.left );
+    }
 }
 
 /* HTML Help's navigation pane is a tab control of several pages (Contents, Index, Search) along the
@@ -1774,6 +1832,14 @@ static void tree_snapshot( struct w2s_control *ctl, struct json *j )
 
             /* several pages: the tabs are the sidebar's switch (w2s_sidebar_member) */
             w2s_sidebar_member( ctl->hwnd, j, FALSE );
+            /* a dialog's tree: the sidebar of its window, with what the app put around it */
+            if (!nav_tab( ctl->hwnd ) && frame_tree_fixed( GetAncestor( ctl->hwnd, GA_ROOT ) ))
+            {
+                json_int( j, "sbGroup", (INT_PTR)tree_unit( ctl->hwnd ) );
+                json_int( j, "sbPage", 0 );
+                json_int( j, "sbOrder", -1 );
+                json_bool( j, "sbFixed", TRUE );
+            }
             /* that tab is not a thing of the sidebar: its name is the sidebar's section title */
             if (unit && GetClassNameW( unit, cls, ARRAYSIZE(cls) ) && wcsstr( cls, L"SysTabControl32" ) &&
                 SendMessageW( unit, TCM_GETITEMCOUNT, 0, 0 ) == 1)

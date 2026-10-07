@@ -68,11 +68,15 @@ final class FrameSidebar: NSObject, WindowChrome {
         self.window = window
         hosting.isHidden = true
         var spec: [String: Any] = ["controller": controller, "width": width, "target": self]
-        if group != nil {
-            // a switch between pages has to fit; the content is never squeezed out by a wide sidebar
-            spec["minWidth"] = 200
-            spec["maxWidth"] = 440
-            spec["contentMinWidth"] = 300
+        if host.model.snap.sbFixed == true {
+            // a window of a fixed size: no splitter follows the sidebar, and the floating sidebar would cover
+            // the app's pane; it keeps the width the app laid its tree out in
+            spec["minWidth"] = width
+            spec["maxWidth"] = width
+        } else if group != nil {
+            // AppKit's own limits: a sidebar keeps its default minimum (144 pt) and has no maximum; so that
+            // the content cannot be squeezed out by a wide one, it keeps AppKit's content list minimum (200 pt)
+            spec["contentMinWidth"] = 200
         }
         window.perform(NSSelectorFromString("w2sAttachSidebar:"), with: spec as NSDictionary)
         FrameToolbar.setSidebarToggle(true, window: window)

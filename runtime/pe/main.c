@@ -139,7 +139,11 @@ void w2s_common_snapshot( struct w2s_control *ctl, struct json *j )
     json_int( j, "widthPx", rc.right );
     json_int( j, "heightPx", rc.bottom );
     /* on a page of a sidebar's tabs (HTML Help's Index and Search): shown there */
-    if (strcmp( ctl->kind->entry, "treeview" ) && strcmp( ctl->kind->entry, "tab" )) w2s_sidebar_member( ctl->hwnd, j, TRUE );
+    if (strcmp( ctl->kind->entry, "treeview" ) && strcmp( ctl->kind->entry, "tab" ))
+    {
+        w2s_sidebar_member( ctl->hwnd, j, TRUE );
+        w2s_frame_cover( ctl->hwnd, ctl->kind->entry, j );
+    }
     /* light or dark as what is behind it (look.c) */
     if (ctl->backdrop_stale)
     {

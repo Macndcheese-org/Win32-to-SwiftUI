@@ -10,6 +10,7 @@ final class SidebarGroup: ObservableObject {
         let host: ControlHost
         var page: Int
         var order: Int
+        var foot = false
         var id: UInt64 { host.handle }
     }
 
@@ -55,9 +56,11 @@ final class SidebarGroup: ObservableObject {
                 tab = current
             }
         }
-        let member = Member(host: host, page: snap.sbPage ?? 0, order: snap.sbOrder ?? 0)
+        let member = Member(host: host, page: snap.sbPage ?? 0, order: snap.sbOrder ?? 0, foot: snap.sbFoot ?? false)
         if let index = members.firstIndex(where: { $0.id == host.handle }) {
-            if members[index].page != member.page || members[index].order != member.order { members[index] = member }
+            if members[index].page != member.page || members[index].order != member.order || members[index].foot != member.foot {
+                members[index] = member
+            }
         } else {
             members.append(member)
         }
@@ -100,9 +103,23 @@ struct SidebarGroupView: View {
                 SidebarSearchPage(search: search,
                                   prompt: group.tabs.indices.contains(group.tab) ? group.tabs[group.tab] : "")
             } else {
-                ForEach(page) { member in SidebarMember(host: member.host) }
+                ForEach(page.filter { !$0.foot }) { member in SidebarMember(host: member.host) }
             }
             Spacer(minLength: 0)
+            // what the app put under its tree (About, Help), kept within reach at the sidebar's foot
+            let foot = group.members.filter { $0.foot }.sorted { $0.order < $1.order }
+            if !foot.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(foot) { member in
+                        ControlRoot(model: member.host.model, entry: member.host.entry,
+                                    fixed: FormMetrics.metrics(scale: member.host.scale))
+                            .environment(\.w2sInSidebar, true)
+                            .frame(height: 24)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 10)
+            }
         }
     }
 

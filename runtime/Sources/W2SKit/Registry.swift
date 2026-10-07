@@ -144,6 +144,9 @@ struct Snapshot: Codable, Equatable {
     var sbOrder: Int?           // ... its place on the page, from the top
     var sbTab: Int?             // ... the app's current tab
     var sbTabs: [String]?       // ... the tabs' names
+    var sbFoot: Bool?           // a button of a fixed window under its sidebar's tree: shown at the sidebar's foot
+    var sbHide: Bool?           // a caption of a fixed window's tree, which the tree as the sidebar no longer needs
+    var sbFixed: Bool?          // the tree of a fixed window: its sidebar keeps the width the app laid it out in
     var mode: String?           // tab: "strip", "form" (a property sheet as a settings form) or "wizard"
     var sheetPx: [Double]?      // tab, form: the sheet's client size
     var tabRect: [Double]?      // tab, form: the tab control in the sheet

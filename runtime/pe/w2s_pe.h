@@ -169,6 +169,7 @@ WCHAR *w2s_tool_text( HWND hwnd );      /* controls.c: its tooltip's text, HeapA
 struct w2s_control *w2s_control_from_hwnd( HWND hwnd );
 void w2s_retire_control( HWND hwnd );
 void w2s_sidebar_member( HWND hwnd, struct json *j, BOOL with_pane );   /* controls.c */
+void w2s_frame_cover( HWND hwnd, const char *entry, struct json *j );   /* controls.c */
 void w2s_select_nav_tab( HWND hwnd, int page );
 BOOL w2s_attach( HWND hwnd, const struct w2s_kind *kind );
 void w2s_common_snapshot( struct w2s_control *ctl, struct json *j );

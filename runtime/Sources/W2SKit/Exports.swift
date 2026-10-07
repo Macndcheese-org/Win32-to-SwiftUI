@@ -126,12 +126,15 @@ public func w2s_swift_control_create(_ hostView: UInt64, _ window: UInt64, _ pos
         container.addSubview(hosting)
         host.hosting = hosting
         if entryID == "button.groupbox" { GroupBoxTitle.apply(host) }
+        // a caption of a fixed window's tree has nothing to caption once the tree is the window's sidebar
+        if host.model.snap.sbHide == true { hosting.isHidden = true }
         // what a control puts in its window's frame lives exactly as long as the control
         if let groupID = host.model.snap.sbGroup {
             // a control on a page of a sidebar's tabs: the window's sidebar shows it under the pages' switch
             let group = SidebarGroup.group(groupID)
             group.join(host, host.model.snap)
-            if group.sidebar == nil {
+            // (a button at the sidebar's foot does not make the sidebar: the tree does)
+            if group.sidebar == nil, host.model.snap.sbFoot != true {
                 let sidebar = FrameSidebar(host: host)
                 sidebar.group = group
                 group.sidebar = sidebar
@@ -307,6 +310,7 @@ public func w2s_swift_control_update(_ handle: UInt64, _ json: UnsafePointer<CCh
             (host.owned as? WindowChrome)?.update()
             return
         }
+        if snap.sbHide == true { host.hosting?.isHidden = true }
         if let groupID = snap.sbGroup {
             // the control is on a page of a sidebar's tabs (its first snapshot, made before the app had laid
             // out, may not have said so): the window's sidebar shows the pages
@@ -317,7 +321,7 @@ public func w2s_swift_control_update(_ handle: UInt64, _ json: UnsafePointer<CCh
                 group.join(host, snap)
             } else {
                 group.update(host, snap)
-                if host.owned == nil, group.sidebar != nil { host.hosting?.isHidden = true }
+                if host.owned == nil, group.sidebar != nil || snap.sbFoot == true { host.hosting?.isHidden = true }
             }
         }
         if host.entry == "treeview" {
