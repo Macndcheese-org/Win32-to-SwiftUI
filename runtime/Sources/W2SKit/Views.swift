@@ -1267,6 +1267,23 @@ struct ReportRow: Identifiable {
     let cells: [String]
 }
 
+/// The rows of a report: all of a list's, or, for a virtual list (LVS_OWNERDATA), the window of them
+/// the app has given, among the count it has. A row outside the window is empty until the cell that
+/// shows it asks the app for the rows around it (ReportCell): the table touches rows it does not show.
+struct ReportRows: RandomAccessCollection {
+    let count: Int
+    let first: Int
+    let loaded: [[String]]
+
+    var startIndex: Int { 0 }
+    var endIndex: Int { count }
+
+    subscript(index: Int) -> ReportRow {
+        let at = index - first
+        return ReportRow(id: index, cells: at >= 0 && at < loaded.count ? loaded[at] : [])
+    }
+}
+
 /// A report column the view shows: `id` is the Win32 column index (what
 /// LVN_COLUMNCLICK reports), `slot` its cell in each row (rows come in display
 /// order), `width` the Win32 width in points.
@@ -1304,7 +1321,10 @@ struct ReportView: View {
     @State private var sortOrder: [ColumnClick] = []
 
     var body: some View {
-        let rows = (model.snap.rows ?? []).enumerated().map { ReportRow(id: $0.offset, cells: $0.element) }
+        let loaded = model.snap.rows ?? []
+        let virtual = model.snap.virtual ?? false
+        let rows = ReportRows(count: virtual ? (model.snap.rowCount ?? loaded.count) : loaded.count,
+                              first: virtual ? (model.snap.rowsFrom ?? 0) : 0, loaded: loaded)
         let columns = ReportColumn.from(model.snap, scale: scale)
         let selection = Binding(
             get: { Set(model.snap.selections ?? []) },
@@ -1361,7 +1381,7 @@ struct ReportView: View {
             .modifier(DoubleClickRows(model: model))
             .id(key + (model.snap.checks == nil ? "" : "|checks"))
         } else {
-            ReportFallback(model: model, rows: rows, columns: columns, selection: selection, scale: scale)
+            ReportFallback(model: model, rows: Array(rows.prefix(2000)), columns: columns, selection: selection, scale: scale)
         }
     }
 }
@@ -1377,14 +1397,21 @@ struct ReportCell: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            if first, let icons = model.snap.icons, row.id < icons.count, icons[row.id] >= 0,
-               let image = model.images[icons[row.id]], let size = model.snap.imageSize, size.count == 2 {
+            if first, let icons = model.snap.icons, row.id - (model.snap.rowsFrom ?? 0) >= 0,
+               row.id - (model.snap.rowsFrom ?? 0) < icons.count, icons[row.id - (model.snap.rowsFrom ?? 0)] >= 0,
+               let image = model.images[icons[row.id - (model.snap.rowsFrom ?? 0)]], let size = model.snap.imageSize, size.count == 2 {
                 Image(nsImage: image).resizable().interpolation(.high)
                     .frame(width: CGFloat(size[0]) * scale, height: CGFloat(size[1]) * scale)
             }
             Text(column.cell(row)).lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: column.alignment)
+        // a row of a virtual list the app has not given yet is on screen: ask for the rows around it
+        .task(id: row.id) {
+            guard model.snap.virtual ?? false else { return }
+            let at = row.id - (model.snap.rowsFrom ?? 0)
+            if at < 0 || at >= (model.snap.rows?.count ?? 0) { model.wantRows(around: row.id) }
+        }
     }
 }
 

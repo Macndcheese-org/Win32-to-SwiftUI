@@ -1182,6 +1182,9 @@ static int listview_columns( HWND hwnd, int *subitems, struct json *j )
  * until imageGen changes (a new image list or icon size). */
 #define MAX_LV_IMAGES 4096
 
+/* the rows of a virtual list the native view gets at a time, and asks for others as it scrolls */
+#define LV_WINDOW_ROWS 240
+
 struct lv_data
 {
     HIMAGELIST himl;
@@ -1189,6 +1192,7 @@ struct lv_data
     BOOL more;                      /* images left for the next snapshot */
     BYTE sent[MAX_LV_IMAGES / 8];
     RECT sidebar_rect;              /* tree: where it was when the sidebar last looked */
+    int win_first, win_count;       /* virtual list: the rows the native view asked for */
 };
 
 /* An image list's images, each sent once: the native view keeps them until
@@ -1260,7 +1264,7 @@ static void image_list_json( struct lv_data *data, HIMAGELIST himl, const int *i
     data->more = (fresh == 64);
 }
 
-static void listview_icons( struct w2s_control *ctl, struct json *j, BOOL small, int count )
+static void listview_icons( struct w2s_control *ctl, struct json *j, BOOL small, int first, int count )
 {
     struct lv_data *data = ctl->data;
     HIMAGELIST himl = (HIMAGELIST)SendMessageW( ctl->hwnd, LVM_GETIMAGELIST, small ? LVSIL_SMALL : LVSIL_NORMAL, 0 );
@@ -1274,7 +1278,7 @@ static void listview_icons( struct w2s_control *ctl, struct json *j, BOOL small,
     for (i = 0; i < count; i++)
     {
         LVITEMW item = { LVIF_IMAGE };
-        item.iItem = i;
+        item.iItem = first + i;
         item.iImage = -1;
         SendMessageW( ctl->hwnd, LVM_GETITEMW, 0, (LPARAM)&item );
         indices[i] = himl ? item.iImage : -1;
@@ -1293,13 +1297,28 @@ static void listview_snapshot( struct w2s_control *ctl, struct json *j )
     DWORD style = GetWindowLongW( ctl->hwnd, GWL_STYLE );
     int subitems[MAX_LV_COLUMNS] = { 0 }, columns = 1;
     int count = (int)SendMessageW( ctl->hwnd, LVM_GETITEMCOUNT, 0, 0 ), i, c;
+    int first = 0, shown = min( count, 2000 );
     WCHAR text[512];
 
     json_bool( j, "report", view == LV_VIEW_DETAILS );
     if (view == LV_VIEW_DETAILS)
         columns = max( 1, listview_columns( ctl->hwnd, subitems, j ) );
+    /* A virtual list has the app's own rows, perhaps a hundred thousand of them: the native view
+     * shows all of them and asks for the ones that come into view, as LVN_GETDISPINFO asks the app. */
+    if (style & LVS_OWNERDATA)
+    {
+        struct lv_data *data = ctl->data;
+
+        if (!data) data = ctl->data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data) );
+        if (data->win_count <= 0) data->win_count = LV_WINDOW_ROWS;
+        first = max( 0, min( data->win_first, count - 1 ) );
+        shown = max( 0, min( count - first, data->win_count ) );
+        json_bool( j, "virtual", TRUE );
+        json_int( j, "rowCount", count );
+        json_int( j, "rowsFrom", first );
+    }
     json_arr_begin( j, "rows" );
-    for (i = 0; i < count && i < 2000; i++)
+    for (i = first; i < first + shown; i++)
     {
         json_arr_begin( j, NULL );
         for (c = 0; c < columns; c++)
@@ -1325,14 +1344,14 @@ static void listview_snapshot( struct w2s_control *ctl, struct json *j )
     if (ex & LVS_EX_CHECKBOXES)
     {
         json_arr_begin( j, "checks" );
-        for (i = 0; i < count && i < 2000; i++)
+        for (i = first; i < first + shown; i++)
             json_bool( j, NULL, (SendMessageW( ctl->hwnd, LVM_GETITEMSTATE, i, LVIS_STATEIMAGEMASK ) >> 12) == 2 );
         json_arr_end( j );
     }
     if (view == LV_VIEW_ICON || view == LV_VIEW_SMALLICON)
-        listview_icons( ctl, j, view == LV_VIEW_SMALLICON, count );
+        listview_icons( ctl, j, view == LV_VIEW_SMALLICON, first, shown );
     else if (view == LV_VIEW_DETAILS && SendMessageW( ctl->hwnd, LVM_GETIMAGELIST, LVSIL_SMALL, 0 ))
-        listview_icons( ctl, j, TRUE, count );  /* before the first column's text, as Finder's list has them */
+        listview_icons( ctl, j, TRUE, first, shown );  /* before the first column's text, as Finder's list has them */
 }
 
 static void listview_select( HWND hwnd, const int *items, int count )
@@ -1352,7 +1371,17 @@ static void listview_select( HWND hwnd, const int *items, int count )
 
 static void listview_apply( struct w2s_control *ctl, const struct w2s_event *ev )
 {
-    if (!strcmp( ev->type, "selectMany" )) listview_select( ctl->hwnd, ev->array, ev->array_count );
+    if (!strcmp( ev->type, "viewport" ) && ev->array_count == 2)
+    {
+        /* the rows the native view shows are others now: the next snapshot has these */
+        struct lv_data *data = ctl->data;
+
+        if (!data) data = ctl->data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data) );
+        data->win_first = max( 0, ev->array[0] );
+        data->win_count = max( 1, min( ev->array[1], 2000 ) );
+        PostMessageW( ctl->hwnd, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
+    }
+    else if (!strcmp( ev->type, "selectMany" )) listview_select( ctl->hwnd, ev->array, ev->array_count );
     else if (!strcmp( ev->type, "select" ) && ev->has_value)
     {
         int i = (int)ev->value;

@@ -912,6 +912,12 @@ enum Debug {
             return W2S.json(out)
         case "inject":
             guard let event = op["event"] as? [String: Any] else { return "{\"error\":\"no event\"}" }
+            if event["t"] as? String == "scrollRows", let host = W2S.control(handle), let view = host.hosting {
+                // tests: {"t":"scrollRows","v":N}: the native table scrolls to row N, as the user's scrolling would
+                let row = event["v"] as? Int ?? 0
+                DispatchQueue.main.async { FrameSidebar.table(in: view)?.scrollRowToVisible(row) }
+                return "{\"ok\":true}"
+            }
             if event["t"] as? String == "lookOverride" {
                 // tests: {"t":"lookOverride","s":"dark"|"light"|""}: as if macOS switched
                 switch event["s"] as? String {

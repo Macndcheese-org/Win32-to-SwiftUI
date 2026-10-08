@@ -110,6 +110,9 @@ struct Snapshot: Codable, Equatable {
     var report: Bool?           // list view in details mode
     var checks: [Bool]?         // LVS_EX_CHECKBOXES
     var icons: [Int]?           // icon views: each row's image index
+    var virtual: Bool?          // a virtual list (LVS_OWNERDATA): `rows` is a window of rowCount rows, from rowsFrom
+    var rowCount: Int?
+    var rowsFrom: Int?
     var images: [String: String]?   // icons not sent before (index: BGRA base64); see ControlModel.images
     var symbols: [String: String]?  // stock icons not sent before (index: macOS image spec)
     var imageGen: Int?
@@ -176,6 +179,19 @@ final class ControlModel: ObservableObject {
     /// What the Win32 control answers its `answers` queries from (main thread).
     var publish: ([String: Any]) -> Void = { _ in }
     private var clickQueued = false
+    /// A virtual list: the window of rows asked for last, so a row that is not loaded asks once
+    private var rowsAsked: (first: Int, count: Int)?
+
+    /// A row of a virtual list the native view shows but has not got: ask the app for the rows around it.
+    func wantRows(around index: Int) {
+        let count = 240
+        if let asked = rowsAsked, index >= asked.first, index < asked.first + asked.count { return }
+        let first = max(0, index - count / 4)
+        rowsAsked = (first, count)
+        DispatchQueue.main.async { [weak self] in self?.emit(["t": "viewport", "a": [first, count]]) }
+    }
+    /// the rows arrived (or the list changed): the next row that is missing asks again
+    func rowsArrived() { rowsAsked = nil }
 
     init(snap: Snapshot, emit: @escaping ([String: Any]) -> Void) {
         self.snap = snap
