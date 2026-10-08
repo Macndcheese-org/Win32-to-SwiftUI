@@ -852,12 +852,14 @@ enum Debug {
                     out["toolbarStyle"] = window?.toolbarStyle == .unified ? "unified" : "other"
                 }
             }
-            if host.entry == "tab" || host.entry == "listbox.single", host.model.snap.mode == "form",
+            if host.entry == "tab" || host.entry == "listbox.single" || host.entry == "treeview", host.model.snap.mode == "form",
                let hostView = host.hosting?.superview {
                 // the settings form: what it covers, what it shows
                 out["formCover"] = [Int(hostView.frame.width), Int(hostView.frame.height)]
                 out["formFront"] = hostView.superview?.subviews.last === hostView
-                if let panes = (host.owned as? SettingsFormController)?.panes {
+                out["ownedType"] = host.owned.map { String(describing: type(of: $0)) } ?? "nil"
+                out["windowToolbar"] = hostView.window?.toolbar.map { $0.identifier } ?? "none"
+                if let panes = ((host.owned as? SettingsFormController) ?? (host.owned as? FrameSidebar)?.settings)?.panes {
                     out["paneToolbar"] = panes.attached
                     out["panes"] = panes.toolbar.items.map { $0.label }
                     out["paneIcons"] = panes.toolbar.items.map { PaneIcons.symbol(for: $0.label, mnemonics: false) }
@@ -950,6 +952,16 @@ enum Debug {
             }
             guard let host = W2S.control(handle) else { return "{\"error\":\"no control\"}" }
             if event["t"] as? String == "capture" { return Requests.capture(host.hosting?.window, to: event["s"] as? String) }
+            if event["t"] as? String == "paneChoose" || event["t"] as? String == "subChoose" {
+                // tests: a click on pane v's toolbar button, or on page v of the pane's own pages, of a settings window
+                guard let form = (host.owned as? SettingsFormController) ?? (host.owned as? FrameSidebar)?.settings,
+                      let i = event["v"] as? Int else { return "{\"error\":\"no settings form\"}" }
+                if event["t"] as? String == "paneChoose" { form.panes?.debugChoose(i) }
+                else if host.model.snap.subPages.indices.contains(i) {
+                    host.model.emit(["t": "select", "v": host.model.snap.subPages[i].id])
+                }
+                return "{\"ok\":true}"
+            }
             if event["t"] as? String == "toggleSidebar" {
                 // tests: the toolbar's sidebar button, as it acts (toggleSidebar: to the split view)
                 (host.hosting?.window?.contentViewController as? NSSplitViewController)?.toggleSidebar(nil)

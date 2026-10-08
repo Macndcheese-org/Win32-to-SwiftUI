@@ -1960,6 +1960,100 @@ static void selftest_pane_list(void)
     (void)client;
 }
 
+/* FileZilla's Settings: a tree of pages (two levels) with a caption above it, the pages windows of a class of the
+ * app's own, all in one holder window beside the tree, a check box inside a group box on each (wxWidgets makes the
+ * box the parent of what it boxes); OK and Cancel below. A Mac settings window: the tree's first level the panes in
+ * the toolbar, what is under one its pages as a switch above the form. */
+static HWND tree_pages[4], tree_checks[4];
+
+static INT_PTR CALLBACK tree_dlgproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    NMTREEVIEWW *nm = (NMTREEVIEWW *)lparam;
+
+    if (msg == WM_NOTIFY && nm->hdr.code == TVN_SELCHANGEDW)
+    {
+        int i, sel = (int)nm->itemNew.lParam;
+        for (i = 0; i < 4; i++) ShowWindow( tree_pages[i], i == sel ? SW_SHOW : SW_HIDE );
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static void selftest_page_tree(void)
+{
+    static const WCHAR *names[] = { L"General", L"Display", L"Colors", L"Network" };
+    static const int levels[] = { 0, 0, 1, 0 };
+    HWND dlg, tree, holder, ok, cancel;
+    HTREEITEM parent = NULL, items[4];
+    WNDCLASSW wc = { 0 };
+    int i;
+
+    wc.lpfnWndProc = DefWindowProcW;
+    wc.hInstance = GetModuleHandleW( NULL );
+    wc.lpszClassName = L"W2SSettingsPage";
+    RegisterClassW( &wc );
+
+    dlg = CreateWindowExW( WS_EX_CONTROLPARENT | WS_EX_DLGMODALFRAME, WC_DIALOG, L"Settings",
+                           WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_SETFONT, 260, 220, 640, 420, main_window, NULL,
+                           GetModuleHandleW( NULL ), NULL );
+    SetWindowLongPtrW( dlg, DWLP_DLGPROC, (LONG_PTR)tree_dlgproc );
+    CreateWindowExW( 0, L"Static", L"Select a page:", WS_CHILD | WS_VISIBLE, 10, 8, 150, 18, dlg, NULL,
+                     GetModuleHandleW( NULL ), NULL );
+    tree = CreateWindowExW( WS_EX_CLIENTEDGE, WC_TREEVIEWW, NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | TVS_HASLINES |
+                            TVS_HASBUTTONS | TVS_SHOWSELALWAYS, 10, 30, 150, 280, dlg, (HMENU)1, GetModuleHandleW( NULL ), NULL );
+    holder = CreateWindowExW( 0, L"W2SSettingsPage", NULL, WS_CHILD | WS_VISIBLE, 170, 10, 450, 300, dlg, NULL,
+                              GetModuleHandleW( NULL ), NULL );
+    ok = CreateWindowExW( 0, L"Button", L"OK", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, 450, 340, 75, 23, dlg,
+                          (HMENU)IDOK, GetModuleHandleW( NULL ), NULL );
+    cancel = CreateWindowExW( 0, L"Button", L"Cancel", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 535, 340, 75, 23, dlg,
+                              (HMENU)IDCANCEL, GetModuleHandleW( NULL ), NULL );
+    for (i = 0; i < 4; i++)
+    {
+        TVINSERTSTRUCTW ins = { 0 };
+        WCHAR text[64];
+        HWND box;
+
+        ins.hParent = levels[i] ? parent : NULL;
+        ins.hInsertAfter = TVI_LAST;
+        ins.item.mask = TVIF_TEXT | TVIF_PARAM;
+        ins.item.pszText = (WCHAR *)names[i];
+        ins.item.lParam = i;
+        items[i] = (HTREEITEM)SendMessageW( tree, TVM_INSERTITEMW, 0, (LPARAM)&ins );
+        if (!levels[i]) parent = items[i];
+
+        tree_pages[i] = CreateWindowExW( 0, L"W2SSettingsPage", NULL, WS_CHILD | (i ? 0 : WS_VISIBLE), 0, 0, 450, 300,
+                                         holder, NULL, GetModuleHandleW( NULL ), NULL );
+        swprintf( text, ARRAYSIZE(text), L"%s options", names[i] );
+        box = CreateWindowExW( 0, L"Button", text, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 10, 10, 300, 80, tree_pages[i],
+                               NULL, GetModuleHandleW( NULL ), NULL );
+        swprintf( text, ARRAYSIZE(text), L"Enable %s", names[i] );
+        tree_checks[i] = CreateWindowExW( 0, L"Button", text, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 10, 25, 200, 18,
+                                          box, NULL, GetModuleHandleW( NULL ), NULL );
+    }
+    SendMessageW( tree, TVM_SELECTITEM, TVGN_CARET, (LPARAM)items[0] );
+    ShowWindow( dlg, SW_SHOW );
+    pump( 1500 );
+    check( pIsTranslated( tree ) && query_has( tree, "\"mode\":\"form\"" ) && query_has( tree, "\"paneToolbar\":true" ) &&
+           query_has( tree, "\"panes\":[\"General\",\"Display\",\"Network\"]" ),
+           "a tree of its dialog's pages (FileZilla's Settings) is a settings window: its first level the toolbar's panes" );
+    check( query_has( tree, "\"formSections\":1" ) && query_has( tree_checks[0], "\"formHidden\":true" ),
+           "the page shown, laid out again as the form (a check box inside its group box too)" );
+    check( query_has( ok, "\"formHidden\":true" ) && query_has( cancel, "\"formHidden\":true" ),
+           "the dialog's OK and Cancel are the form's" );
+    inject( tree, "{\"t\":\"paneChoose\",\"v\":1}" );
+    pump( 1500 );
+    check( IsWindowVisible( tree_pages[1] ) && !IsWindowVisible( tree_pages[0] ) && query_has( tree, "\"paneSelected\":1" ) &&
+           query_has( tree, "\"windowTitle\":\"Display\"" ) && query_has( tree_checks[1], "\"formHidden\":true" ),
+           "a pane chosen in the toolbar: the app shows its page (TVN_SELCHANGED), the form and the title follow" );
+    inject( tree, "{\"t\":\"subChoose\",\"v\":1}" );
+    pump( 1500 );
+    check( IsWindowVisible( tree_pages[2] ) && !IsWindowVisible( tree_pages[1] ) && query_has( tree, "\"paneSelected\":1" ) &&
+           query_has( tree_checks[2], "\"formHidden\":true" ),
+           "a pane's own page chosen in the switch above its form: the pane stays, the app shows that page" );
+    DestroyWindow( dlg );
+    pump( 200 );
+}
+
 /* Notepad++'s Find/Replace dialog: buttons, then a tab control made after them,
  * their sibling under them across the dialog; translucent (layered) while it isn't
  * the active window */
@@ -3891,6 +3985,7 @@ static int selftest(void)
     if (getenv( "W2S_ONLY" ) && !strcmp( getenv( "W2S_ONLY" ), "panes" ))
     {
         selftest_pane_list();
+        selftest_page_tree();
         printf( "%d passed, %d failed\n", passes, failures );
         return failures;
     }
@@ -4448,6 +4543,7 @@ static int selftest(void)
     selftest_app_name();
     selftest_replace_dialog();
     selftest_pane_list();
+    selftest_page_tree();
     selftest_frame_sidebar();
     selftest_nested_sidebar();
     selftest_about();

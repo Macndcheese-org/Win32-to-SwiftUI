@@ -387,6 +387,68 @@ struct FormPage: View {
     }
 }
 
+/// A settings window's panes and the pages of each, from what the Win32 side holds: a tab control's tabs or a
+/// pane list's items are panes alone; a page tree's first level are the panes, and what is under one are its
+/// pages (HIG, Settings: the toolbar of panes; Tab views: a segmented control for a pane's own pages).
+extension Snapshot {
+    var paneTops: [PaneNode]? { paneNodes?.filter { $0.d == 0 } }
+    var paneTitles: [String] { paneTops?.map { $0.text } ?? items ?? [] }
+
+    /// the nodes of the selected node's first-level node: itself, then everything under it
+    private var paneRange: Range<Int>? {
+        guard let nodes = paneNodes, let sel = selection, let at = nodes.firstIndex(where: { $0.id == sel }),
+              let start = nodes[...at].lastIndex(where: { $0.d == 0 }) else { return nil }
+        let end = nodes[(start + 1)...].firstIndex(where: { $0.d == 0 }) ?? nodes.count
+        return start..<end
+    }
+    /// the pane shown: the position among the panes
+    var paneIndex: Int {
+        guard let nodes = paneNodes else { return selection ?? 0 }
+        guard let range = paneRange else { return 0 }
+        return nodes[..<range.lowerBound].filter { $0.d == 0 }.count
+    }
+    /// the pane's pages (it is the first), when it has more than itself
+    var subPages: [PaneNode] {
+        guard let nodes = paneNodes, let range = paneRange, range.count > 1 else { return [] }
+        return Array(nodes[range])
+    }
+    var subIndex: Int { subPages.firstIndex(where: { $0.id == selection }) ?? 0 }
+}
+
+/// The pages of one pane: a segmented control, or a pop-up button when there are too many or too long for one
+/// row (HIG, Tab views: more than six tabs → a pop-up button).
+struct SubPages: View {
+    @ObservedObject var model: ControlModel
+
+    var body: some View {
+        let pages = model.snap.subPages
+        let choice = Binding<Int>(
+            get: { model.snap.subIndex },
+            set: { i in
+                guard pages.indices.contains(i), pages[i].id != model.snap.selection else { return }
+                model.emit(["t": "select", "v": pages[i].id])
+            })
+        // a few short titles fit one row of segments; otherwise a pop-up button holds them (HIG, Segmented controls)
+        let titles = pages.map { stripMnemonic($0.text) }
+        let row = titles.reduce(CGFloat(0)) { $0 + FormMetrics.textWidth($1) + 28 }
+        Group {
+            if pages.count <= 5 && row <= 560 {
+                Picker("", selection: choice) {
+                    ForEach(pages.indices, id: \.self) { Text(stripMnemonic(pages[$0].text)).tag($0) }
+                }
+                .pickerStyle(.segmented)
+            } else {
+                Picker("", selection: choice) {
+                    ForEach(pages.indices, id: \.self) { Text(stripMnemonic(pages[$0].text)).tag($0) }
+                }
+                .pickerStyle(.menu)
+            }
+        }
+        .labelsHidden()
+        .fixedSize()
+    }
+}
+
 /// The whole sheet: the tab view with the current page as a form, the sheet's
 /// buttons below it. It stands in the tab control's host view, which covers
 /// the sheet (outsets) above every other control's.
@@ -445,7 +507,12 @@ struct SettingsForm: View {
         let selection = snap.selection ?? 0
         let page = snap.page ?? []
         return VStack(spacing: 0) {
-            // the panes are the window's toolbar (SettingsToolbar), as a Mac settings window's
+            // the panes are the window's toolbar (SettingsToolbar), as a Mac settings window's;
+            // a pane that has pages of its own shows them as a switch above the form
+            if snap.subPages.count > 1 {
+                SubPages(model: model)
+                    .padding(.top, 16)
+            }
             FormPage(items: page, scale: scale, form: form)
                 .padding(.horizontal, 24)
                 .padding(.top, 20)
@@ -541,6 +608,9 @@ final class SettingsToolbar: NSObject, NSToolbarDelegate {
     }
 
     @objc private func chosen(_ item: NSToolbarItem) { select(item.tag) }
+
+    /// tests: a click on pane i's button
+    func debugChoose(_ i: Int) { select(i) }
 }
 
 /// Puts the settings form over its sheet: the tab control's host view covers
@@ -587,12 +657,19 @@ final class SettingsFormController: WindowChrome {
         // the panes in the window's toolbar
         if panes == nil, let window = hostView.window {
             panes = SettingsToolbar(window: window) { [weak host] i in
-                guard let host = host, i != host.model.snap.selection else { return }
+                guard let host = host else { return }
+                if let tops = host.model.snap.paneTops {
+                    // a page tree: the pane is its first-level node, and the app shows that node's page
+                    guard tops.indices.contains(i), i != host.model.snap.paneIndex else { return }
+                    host.model.emit(["t": "select", "v": tops[i].id])
+                    return
+                }
+                guard i != host.model.snap.selection else { return }
                 host.model.snap.selection = i
                 host.model.emit(["t": "select", "v": i])
             }
         }
-        panes?.update(titles: snap.items ?? [], selection: snap.selection ?? 0, mnemonics: host.entry == "tab")
+        panes?.update(titles: snap.paneTitles, selection: snap.paneIndex, mnemonics: host.entry == "tab")
 
         // the page's and the sheet's controls show in the form, not in their own views
         let shown = Set((snap.page ?? []).map { $0.h } + (snap.sheetButtons ?? []).map { $0.h })
@@ -611,7 +688,7 @@ final class SettingsFormController: WindowChrome {
         let fitting = NSHostingView(rootView: SettingsForm(model: host.model, scale: s).content
             .controlSize(.regular)).fittingSize
         // wide enough for every pane's button too (on the screen), as a Mac settings window is
-        let panesWidth = min(SettingsToolbar.width(snap.items ?? []), (hostView.window?.screen?.visibleFrame.width ?? 1200) * 0.8)
+        let panesWidth = min(SettingsToolbar.width(snap.paneTitles), (hostView.window?.screen?.visibleFrame.width ?? 1200) * 0.8)
         let size = [Int(ceil(max(fitting.width, panesWidth) / s)), Int(ceil((fitting.height + 12) / s))]
         if ProcessInfo.processInfo.environment["W2S_DEBUG_FORM"] != nil {
             FileHandle.standardError.write(Data("form: fitting \(fitting) panes \(panesWidth) s \(s) sheet \(sheet) asked \(size) page \((snap.page ?? []).count) sel \(snap.selection ?? -1) tab \(tab) outsets \(outsets) hostView \(hostView.frame) window \(hostView.window?.contentView?.frame ?? .zero)\n".utf8))

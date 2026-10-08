@@ -231,6 +231,9 @@ struct ControlRoot: View {
             ListBoxView(model: model, multi: entry == "listbox.multi")
         case "listview.list":
             ListBoxView(model: model, multi: !(snap.single ?? false), fromRows: true)
+        case "treeview" where snap.mode == "form":
+            // a dialog's page tree (FileZilla's Settings): the window's settings form
+            if #available(macOS 13, *) { SettingsSheet(model: model) } else { TreeList(model: model) }
         case "treeview":
             TreeList(model: model)
         case "listview.report":

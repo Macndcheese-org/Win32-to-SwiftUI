@@ -27,10 +27,17 @@ final class FrameSidebar: NSObject, WindowChrome {
     var attached: Bool { controller != nil }
     var sidebarView: NSView? { controller?.view }
 
+    /// the tree of a dialog is its page list instead (FileZilla's Settings): the settings window's toolbar and form
+    private(set) var settings: SettingsFormController?
+
     func update() {
+        if let host = host, host.model.snap.mode == "form" || settings != nil {
+            if settings == nil { settings = SettingsFormController(host: host) }
+            settings?.update()
+        }
         guard #available(macOS 26.0, *) else { return }
         guard let host = host, let pane = host.model.snap.sidebarPane, pane > 0 else {
-            detach()
+            detachSidebar()
             return
         }
         guard let hosting = host.hosting, let window = hosting.window else {
@@ -149,6 +156,12 @@ final class FrameSidebar: NSObject, WindowChrome {
     }
 
     func detach() {
+        settings?.detach()
+        detachSidebar()
+    }
+
+    /// the sidebar alone goes (not the settings form: a tree that is no sidebar may be a dialog's page list)
+    private func detachSidebar() {
         guard controller != nil else { return }
         if let window = window { FrameToolbar.setSidebarToggle(false, window: window) }
         window?.perform(NSSelectorFromString("w2sDetachSidebar"))

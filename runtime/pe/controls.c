@@ -1185,8 +1185,11 @@ static int listview_columns( HWND hwnd, int *subitems, struct json *j )
 /* the rows of a virtual list the native view gets at a time, and asks for others as it scrolls */
 #define LV_WINDOW_ROWS 240
 
+struct tab_data;
+
 struct lv_data
 {
+    struct tab_data *form;          /* tree: the settings form its nodes are the pages of (tree_panes_snapshot) */
     HIMAGELIST himl;
     int cx, cy, gen;
     BOOL more;                      /* images left for the next snapshot */
@@ -1839,6 +1842,11 @@ static void tree_state_click( HWND hwnd, HTREEITEM item )
     }
 }
 
+static void tree_panes_snapshot( struct w2s_control *ctl, struct json *j );
+static BOOL tree_panes_apply( struct w2s_control *ctl, const struct w2s_event *ev );
+static void tree_panes_observe( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM lparam );
+static void tree_panes_release( struct w2s_control *ctl );
+
 static void tree_snapshot( struct w2s_control *ctl, struct json *j )
 {
     int budget = MAX_TREE_NODES;
@@ -1861,6 +1869,8 @@ static void tree_snapshot( struct w2s_control *ctl, struct json *j )
     HeapFree( GetProcessHeap(), 0, images );
     if (data->more) PostMessageW( ctl->hwnd, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
     json_int( j, "selection", (INT_PTR)SendMessageW( ctl->hwnd, TVM_GETNEXTITEM, TVGN_CARET, 0 ) );
+    /* a dialog's page tree is a settings window */
+    tree_panes_snapshot( ctl, j );
     /* a tree along a main window's edge is the window's sidebar (Finder's) */
     {
         RECT tree;
@@ -1945,6 +1955,7 @@ static void tree_apply( struct w2s_control *ctl, const struct w2s_event *ev )
 {
     HTREEITEM item = (HTREEITEM)(INT_PTR)(INT64)ev->value;
 
+    if (tree_panes_apply( ctl, ev )) return;
     if (!ev->has_value) return;
     if (!strcmp( ev->type, "select" ))
     {
@@ -1980,7 +1991,8 @@ static void tree_apply( struct w2s_control *ctl, const struct w2s_event *ev )
     }
 }
 
-static const struct w2s_kind kind_treeview = { "treeview", tree_snapshot, tree_apply };
+static const struct w2s_kind kind_treeview = { "treeview", tree_snapshot, tree_apply, NULL, NULL, NULL,
+                                               tree_panes_observe, tree_panes_release };
 
 /* ---------- Progress, trackbar ---------- */
 
@@ -2209,18 +2221,37 @@ struct tab_data
     struct { HWND hwnd; RECT rect; } slot[16];
 };
 
+/* a place in the page's coordinates, in those of the window it is a place in (the page's, or a group box's) */
+static void page_to_window( HWND page, HWND hwnd, POINT *pt )
+{
+    HWND parent = GetParent( hwnd );
+
+    if (page && parent && parent != page) MapWindowPoints( page, parent, pt, 1 );
+}
+
 /* the page and its windows back where the app put them */
 static void form_unslot( struct tab_data *data )
 {
     int i;
 
     if (data->page && IsWindow( data->page ))
-        SetWindowPos( data->page, 0, data->page_rect.left, data->page_rect.top, data->page_rect.right - data->page_rect.left,
+    {
+        /* its place is the sheet's coordinates; a page inside a window of its own (a settings dialog's page area) has them its parent's */
+        POINT at = { data->page_rect.left, data->page_rect.top };
+        HWND root = GetAncestor( data->page, GA_ROOT ), parent = GetParent( data->page );
+
+        if (parent && parent != root) MapWindowPoints( root, parent, &at, 1 );
+        SetWindowPos( data->page, 0, at.x, at.y, data->page_rect.right - data->page_rect.left,
                       data->page_rect.bottom - data->page_rect.top, SWP_NOZORDER | SWP_NOACTIVATE );
+    }
     for (i = 0; i < data->moved; i++)       /* in their page */
         if (IsWindow( data->slot[i].hwnd ))
-            SetWindowPos( data->slot[i].hwnd, 0, data->slot[i].rect.left, data->slot[i].rect.top, 0, 0,
-                          SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE );
+        {
+            POINT at = { data->slot[i].rect.left, data->slot[i].rect.top };
+
+            page_to_window( data->page, data->slot[i].hwnd, &at );
+            SetWindowPos( data->slot[i].hwnd, 0, at.x, at.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE );
+        }
     data->moved = 0;
     data->page = NULL;
 }
@@ -2299,6 +2330,20 @@ static void form_item( struct json *j, struct w2s_control *ctl, HWND sheet, POIN
     json_obj_end( j );
 }
 
+/* a window of the page: its own, or inside a group box on it (wxWidgets makes a static box the parent of what it
+ * boxes) */
+static BOOL on_page( HWND hwnd, HWND page )
+{
+    HWND parent;
+
+    for (parent = GetParent( hwnd ); parent && parent != page; parent = GetParent( parent ))
+    {
+        struct w2s_control *box = w2s_control_of( parent );
+        if (!box || strcmp( box->kind->entry, "button.groupbox" )) return FALSE;
+    }
+    return parent == page;
+}
+
 /* the page's own windows: visible ones must all be controls the form shows */
 static BOOL CALLBACK form_child( HWND hwnd, LPARAM lparam )
 {
@@ -2306,7 +2351,7 @@ static BOOL CALLBACK form_child( HWND hwnd, LPARAM lparam )
     struct w2s_control *ctl;
     RECT rc;
 
-    if (GetParent( hwnd ) != scan->page || !(GetWindowLongW( hwnd, GWL_STYLE ) & WS_VISIBLE)) return TRUE;
+    if (!(GetWindowLongW( hwnd, GWL_STYLE ) & WS_VISIBLE) || !on_page( hwnd, scan->page )) return TRUE;
     GetClientRect( hwnd, &rc );
     if (IsRectEmpty( &rc )) return TRUE;
     if (!(ctl = w2s_control_of( hwnd )) && !GetWindow( hwnd, GW_CHILD ))
@@ -2547,11 +2592,18 @@ static BOOL form_apply( struct w2s_control *ctl, HWND sheet, HWND page, struct t
             data->page = page;
         }
         GetClientRect( sheet, &client );
-        SetWindowPos( page, 0, 0, 0, client.right, client.bottom, SWP_NOZORDER | SWP_NOACTIVATE );
+        {
+            POINT at = { 0, 0 };
+            HWND parent = GetParent( page );
+
+            if (parent && parent != sheet) MapWindowPoints( sheet, parent, &at, 1 );    /* the sheet's corner */
+            SetWindowPos( page, 0, at.x, at.y, client.right, client.bottom, SWP_NOZORDER | SWP_NOACTIVATE );
+        }
         for (i = 0; i + 2 < ev->array_count; i += 3)
         {
             HWND hwnd = (HWND)(ULONG_PTR)(UINT)ev->array[i];
-            if (!IsWindow( hwnd ) || GetParent( hwnd ) != page) continue;
+            POINT at = { ev->array[i + 1], ev->array[i + 2] };
+            if (!IsWindow( hwnd ) || !on_page( hwnd, page )) continue;
             for (k = 0; k < data->moved; k++) if (data->slot[k].hwnd == hwnd) break;
             if (k == data->moved && data->moved < ARRAYSIZE(data->slot))
             {
@@ -2562,7 +2614,8 @@ static BOOL form_apply( struct w2s_control *ctl, HWND sheet, HWND page, struct t
                 data->slot[k].rect = rc;
                 data->moved++;
             }
-            SetWindowPos( hwnd, 0, ev->array[i + 1], ev->array[i + 2], 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE );
+            page_to_window( page, hwnd, &at );
+            SetWindowPos( hwnd, 0, at.x, at.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE );
         }
         return TRUE;
     }
@@ -2679,7 +2732,9 @@ static BOOL pane_dialog_ok( HWND list, WCHAR *blocker )
     HWND dlg = GetParent( list ), child;
     struct w2s_control *ctl;
     WCHAR cls[16];
+    RECT list_rc, rc;
 
+    GetWindowRect( list, &list_rc );
     for (child = GetWindow( dlg, GW_CHILD ); child; child = GetWindow( child, GW_HWNDNEXT ))
     {
         if (child == list || !(GetWindowLongW( child, GWL_STYLE ) & WS_VISIBLE)) continue;
@@ -2689,16 +2744,43 @@ static BOOL pane_dialog_ok( HWND list, WCHAR *blocker )
             (!strcmp( ctl->kind->entry, "button.push" ) || !strcmp( ctl->kind->entry, "button.default" ) ||
              !strcmp( ctl->kind->entry, "static.separator" ) || !strcmp( ctl->kind->entry, "static.frame" )))
             continue;
+        /* the list's caption ("Select a page:"): the toolbar's panes need none */
+        GetWindowRect( child, &rc );
+        if (ctl && !strcmp( ctl->kind->entry, "static.text" ) && rc.bottom <= list_rc.top + 2 && rc.right <= list_rc.right + 2)
+            continue;
+        /* the window that holds the pages, beside the list */
+        if (!ctl && rc.left >= list_rc.right - 2 && GetWindow( child, GW_CHILD )) continue;
         lstrcpynW( blocker, cls, 64 );
         return FALSE;
     }
     return TRUE;
 }
 
+/* A settings dialog's own push buttons for the form, in the Mac's order: the default one last (HIG, Buttons) */
+static void form_dialog_buttons( struct json *j, HWND dlg )
+{
+    HWND child;
+    int pass;
+
+    json_arr_begin( j, "sheetButtons" );
+    for (pass = 0; pass < 2; pass++)
+        for (child = GetWindow( dlg, GW_CHILD ); child; child = GetWindow( child, GW_HWNDNEXT ))
+        {
+            struct w2s_control *b = w2s_control_of( child );
+            POINT none = { 0, 0 };
+
+            if (!b || !(GetWindowLongW( child, GWL_STYLE ) & WS_VISIBLE)) continue;
+            if (strcmp( b->kind->entry, "button.push" ) && strcmp( b->kind->entry, "button.default" )) continue;
+            if (!strcmp( b->kind->entry, "button.default" ) != pass) continue;
+            form_item( j, b, dlg, none );
+        }
+    json_arr_end( j );
+}
+
 static void panes_snapshot( struct w2s_control *ctl, struct json *j )
 {
     struct tab_data *data = ctl->data;
-    HWND dlg = GetParent( ctl->hwnd ), page, child;
+    HWND dlg = GetParent( ctl->hwnd ), page;
     WCHAR blocker[64];
     RECT rc, client;
 
@@ -2753,16 +2835,7 @@ static void panes_snapshot( struct w2s_control *ctl, struct json *j )
     json_arr_begin( j, "page" );
     if (page) form_page( dlg, page, j, NULL, data );
     json_arr_end( j );
-    json_arr_begin( j, "sheetButtons" );
-    for (child = GetWindow( dlg, GW_CHILD ); child; child = GetWindow( child, GW_HWNDNEXT ))
-    {
-        struct w2s_control *b = w2s_control_of( child );
-        POINT none = { 0, 0 };
-        if (b && (GetWindowLongW( child, GWL_STYLE ) & WS_VISIBLE) &&
-            (!strcmp( b->kind->entry, "button.push" ) || !strcmp( b->kind->entry, "button.default" )))
-            form_item( j, b, dlg, none );
-    }
-    json_arr_end( j );
+    form_dialog_buttons( j, dlg );
 }
 
 static void panes_apply( struct w2s_control *ctl, const struct w2s_event *ev )
@@ -2796,6 +2869,208 @@ static void panes_release( struct w2s_control *ctl )
 
 static const struct w2s_kind kind_listbox_single = { "listbox.single", panes_snapshot, panes_apply, NULL,
                                                      NULL, NULL, panes_observe, panes_release };
+
+/* ---------- A tree of a settings window's panes ---------- */
+
+/* A tree whose nodes are its dialog's pages (FileZilla's Settings): the pages are windows in one place beside it,
+ * one shown at a time, either child dialogs of the dialog itself or windows inside one window that holds them
+ * all. Which node a page belongs to is not asked: the app shows the page of the selected node, so the page
+ * shown is the one that is visible. *page: that one (NULL while the app switches). */
+static BOOL tree_panes( HWND tree, HWND *page )
+{
+    HWND dlg = GetParent( tree ), child, holder = NULL, window;
+    DWORD dlg_style;
+    WCHAR cls[16];
+    RECT tree_rc, rc, place = { 0 };
+    int pages = 0, roots = 0;
+    BOOL dialogs = FALSE;
+    HTREEITEM root;
+
+    *page = NULL;
+    if (w2s_os_major < 13 || !dlg || !(GetWindowLongW( tree, GWL_STYLE ) & WS_VISIBLE)) return FALSE;
+    dlg_style = GetWindowLongW( dlg, GWL_STYLE );
+    if (!GetClassNameW( dlg, cls, ARRAYSIZE(cls) ) || wcscmp( cls, L"#32770" ) || (dlg_style & WS_CHILD) ||
+        (dlg_style & WS_CAPTION) != WS_CAPTION)
+        return FALSE;
+    for (root = (HTREEITEM)SendMessageW( tree, TVM_GETNEXTITEM, TVGN_ROOT, 0 ); root && roots < 2;
+         root = (HTREEITEM)SendMessageW( tree, TVM_GETNEXTITEM, TVGN_NEXT, (LPARAM)root ))
+        roots++;
+    if (roots < 2) return FALSE;                      /* one root is a tree of things, not of pages */
+
+    /* beside the tree: child dialogs of the dialog, or the one window that holds the pages */
+    GetWindowRect( tree, &tree_rc );
+    for (child = GetWindow( dlg, GW_CHILD ); child; child = GetWindow( child, GW_HWNDNEXT ))
+    {
+        if (child == tree || !(GetWindowLongW( child, GWL_STYLE ) & WS_CHILD)) continue;
+        GetWindowRect( child, &rc );
+        if (rc.left < tree_rc.right - 2) continue;
+        if (GetClassNameW( child, cls, ARRAYSIZE(cls) ) && !wcscmp( cls, L"#32770" ))
+        {
+            dialogs = TRUE;
+            holder = dlg;
+        }
+        else if (!dialogs && !w2s_control_of( child ) && (GetWindowLongW( child, GWL_STYLE ) & WS_VISIBLE) && GetWindow( child, GW_CHILD ))
+        {
+            if (holder) return FALSE;                 /* two candidates */
+            holder = child;
+        }
+    }
+    if (!holder) return FALSE;
+
+    for (window = GetWindow( holder, GW_CHILD ); window; window = GetWindow( window, GW_HWNDNEXT ))
+    {
+        if (!(GetWindowLongW( window, GWL_STYLE ) & WS_CHILD)) continue;
+        if (dialogs && (!GetClassNameW( window, cls, ARRAYSIZE(cls) ) || wcscmp( cls, L"#32770" ))) continue;
+        if (!GetWindow( window, GW_CHILD )) continue;                       /* a page has something on it */
+        GetWindowRect( window, &rc );
+        if (dialogs && rc.left < tree_rc.right - 2) return FALSE;
+        if (pages && (abs( rc.left - place.left ) > 2 || abs( rc.top - place.top ) > 2)) return FALSE;
+        if (!pages) place = rc;
+        pages++;
+        if (GetWindowLongW( window, GWL_STYLE ) & WS_VISIBLE)
+        {
+            if (*page) return FALSE;                                        /* one at a time */
+            *page = window;
+        }
+    }
+    return pages >= 2;
+}
+
+/* every node of the tree, open or not, parents before their children: the panes (the first level) and
+ * the pages of each (the levels under it) */
+static void tree_pane_nodes( HWND tree, struct json *j )
+{
+    HTREEITEM item = (HTREEITEM)SendMessageW( tree, TVM_GETNEXTITEM, TVGN_ROOT, 0 ), next;
+    int depth = 0, budget = 400;
+
+    json_arr_begin( j, "paneNodes" );
+    while (item && budget-- > 0)
+    {
+        TVITEMW it = { TVIF_TEXT | TVIF_HANDLE };
+        WCHAR text[260];
+
+        text[0] = 0;
+        it.hItem = item;
+        it.pszText = text;
+        it.cchTextMax = ARRAYSIZE(text);
+        SendMessageW( tree, TVM_GETITEMW, 0, (LPARAM)&it );
+        if (it.pszText != text) lstrcpynW( text, it.pszText && it.pszText != LPSTR_TEXTCALLBACKW ? it.pszText : L"", ARRAYSIZE(text) );
+        json_obj_begin( j );
+        json_int( j, "id", (INT_PTR)item );
+        json_str( j, "text", text );
+        json_int( j, "d", depth );
+        json_obj_end( j );
+        if ((next = (HTREEITEM)SendMessageW( tree, TVM_GETNEXTITEM, TVGN_CHILD, (LPARAM)item ))) depth++;
+        else
+        {
+            next = (HTREEITEM)SendMessageW( tree, TVM_GETNEXTITEM, TVGN_NEXT, (LPARAM)item );
+            while (!next && depth > 0)
+            {
+                item = (HTREEITEM)SendMessageW( tree, TVM_GETNEXTITEM, TVGN_PARENT, (LPARAM)item );
+                depth--;
+                next = item ? (HTREEITEM)SendMessageW( tree, TVM_GETNEXTITEM, TVGN_NEXT, (LPARAM)item ) : NULL;
+            }
+        }
+        item = next;
+    }
+    json_arr_end( j );
+}
+
+static void tree_panes_snapshot( struct w2s_control *ctl, struct json *j )
+{
+    struct lv_data *lv = ctl->data;
+    struct tab_data *data = lv->form;
+    HWND dlg = GetParent( ctl->hwnd ), page;
+    WCHAR blocker[64];
+    RECT rc, client;
+
+    if (!tree_panes( ctl->hwnd, &page ))
+    {
+        if (data && data->form)
+        {
+            data->form = FALSE;
+            form_restore( ctl, data );
+        }
+        return;
+    }
+    if (!data) data = lv->form = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data) );
+    if (!data->sheet)
+    {
+        /* its pages' windows coming and going lay the form out again (w2s_form_child_changed) */
+        data->sheet = TRUE;
+        SetPropW( dlg, form_prop, ctl->hwnd );
+        TRACE( "%p: the page tree of %p\n", ctl->hwnd, dlg );
+    }
+    blocker[0] = 0;
+    if (!pane_dialog_ok( ctl->hwnd, blocker )) data->form = FALSE;
+    else
+    {
+        /* between two pages (the selection comes before the page shows) the mode stays */
+        int formable = form_page( dlg, page, NULL, blocker, data );
+        if (formable >= 0) data->form = formable;
+    }
+    if (blocker[0]) json_str( j, "formBlocker", blocker );
+    if (!data->form)
+    {
+        form_restore( ctl, data );
+        return;
+    }
+
+    /* as a property sheet's (tab_snapshot): the dialog, where the tree is, the page, the buttons */
+    json_str_a( j, "mode", "form" );
+    tree_pane_nodes( ctl->hwnd, j );
+    GetClientRect( dlg, &client );
+    GetWindowRect( ctl->hwnd, &rc );
+    MapWindowPoints( NULL, dlg, (POINT *)&rc, 2 );
+    json_arr_begin( j, "sheetPx" );
+    json_int( j, NULL, client.right );
+    json_int( j, NULL, client.bottom );
+    json_arr_end( j );
+    json_arr_begin( j, "tabRect" );
+    json_int( j, NULL, rc.left );
+    json_int( j, NULL, rc.top );
+    json_int( j, NULL, rc.right - rc.left );
+    json_int( j, NULL, rc.bottom - rc.top );
+    json_arr_end( j );
+    json_arr_begin( j, "page" );
+    if (page) form_page( dlg, page, j, NULL, data );
+    json_arr_end( j );
+    form_dialog_buttons( j, dlg );
+}
+
+static BOOL tree_panes_apply( struct w2s_control *ctl, const struct w2s_event *ev )
+{
+    struct lv_data *lv = ctl->data;
+    struct tab_data *data = lv ? lv->form : NULL;
+    HWND page;
+
+    if (!data || !data->sheet || !tree_panes( ctl->hwnd, &page )) return FALSE;
+    if (form_apply( ctl, GetParent( ctl->hwnd ), page, data, ev )) return TRUE;
+    /* the page going away gets its windows back where they were */
+    if (!strcmp( ev->type, "select" )) form_unslot( data );
+    return FALSE;
+}
+
+static void tree_panes_observe( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    struct lv_data *lv = ctl->data;
+
+    if (msg == TVM_SELECTITEM && lv && lv->form && lv->form->sheet) form_unslot( lv->form );
+}
+
+static void tree_panes_release( struct w2s_control *ctl )
+{
+    struct lv_data *lv = ctl->data;
+    HWND dlg = GetParent( ctl->hwnd );
+
+    if (lv && lv->form)
+    {
+        form_unslot( lv->form );
+        if (lv->form->sheet && dlg && GetPropW( dlg, form_prop ) == ctl->hwnd) RemovePropW( dlg, form_prop );
+        HeapFree( GetProcessHeap(), 0, lv->form );
+    }
+    HeapFree( GetProcessHeap(), 0, lv );
+}
 
 /* ---------- Wizard (map: propsheet.wizard) ---------- */
 

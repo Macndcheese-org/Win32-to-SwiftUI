@@ -21,6 +21,9 @@ struct Snapshot: Codable, Equatable {
         var children: [TreeNode]?
     }
 
+    /// A node of a dialog's page tree (a settings window's panes), open or not, parents first: `d` is its level.
+    struct PaneNode: Codable, Equatable { var id: Int; var text: String; var d: Int }
+
     var entry: String?
     var ack: UInt64?            // the last native event the PE side has taken
     var text: String?
@@ -153,6 +156,7 @@ struct Snapshot: Codable, Equatable {
     var mode: String?           // tab: "strip", "form" (a property sheet as a settings form) or "wizard"
     var sheetPx: [Double]?      // tab, form: the sheet's client size
     var tabRect: [Double]?      // tab, form: the tab control in the sheet
+    var paneNodes: [PaneNode]?  // treeview, form: the tree's every node (the first level are the panes, the rest their pages)
     var page: [FormItem]?       // tab, form: the current page's controls
     var sheetButtons: [FormItem]?   // tab, form: OK, Cancel, Apply...
     var sidebarPx: Double?      // wizard: the steps' width
@@ -309,8 +313,8 @@ final class PassThroughHostingView<Content: View>: NSHostingView<Content> {
                 let s = ScrollGeometry.scale(snap, height: size.height)
                 return (snap.bars ?? []).contains { ScrollGeometry.frame($0, snap, scale: s).contains(point) }
             }
-        case "listbox.single":
-            // a pane list as the settings form: the form, but for the app's own windows in its slots
+        case "listbox.single", "treeview":
+            // a pane list or page tree as the settings form: the form, but for the app's own windows in its slots
             return { [weak model] point, _ in
                 guard let model = model, model.snap.mode == "form" else { return true }
                 return !(FormPlaces.holes[W2S.handle(of: model)] ?? []).contains { $0.contains(point) }
