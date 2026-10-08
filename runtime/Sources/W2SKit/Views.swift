@@ -2,6 +2,7 @@
 // (map/ui-map/*.yaml). Tiers follow the map's `since` ladder.
 import AppKit
 import SwiftUI
+import CoreText
 
 enum ControlViews {
     // map: button.push button.default button.checkbox button.pushlike button.radio button.groupbox
@@ -63,7 +64,50 @@ func stripMnemonic(_ text: String, keep: Bool = false) -> String {
         }
     }
     if out.hasSuffix("...") && !out.hasSuffix("....") { out = String(out.dropLast(3)) + "…" }
-    return out
+    return MacGlyphs.fit(out)
+}
+
+/// Symbols Windows draws with a font of its own (Segoe UI Symbol) that macOS has no font for: the Mac
+/// shows its "last resort" box, the question mark in a square, for them. FileZilla's Next and Back
+/// carry two such arrows. An arrow the Mac lacks becomes the Mac's arrow that points the same way.
+enum MacGlyphs {
+    private static var known: [UInt32: Bool] = [:]
+    private static let lock = NSLock()
+
+    /// whether the system fonts, with their fallbacks, draw the character
+    private static func drawn(_ scalar: Unicode.Scalar) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if let cached = known[scalar.value] { return cached }
+        let text = String(scalar) as CFString
+        let base = CTFontCreateWithName("SF Pro" as CFString, 13, nil)
+        let font = CTFontCreateForString(base, text, CFRange(location: 0, length: CFStringGetLength(text)))
+        // the system draws a character no font has in its "last resort" font (the box with a question mark)
+        let ok = !(CTFontCopyFamilyName(font) as String).contains("LastResort")
+        known[scalar.value] = ok
+        return ok
+    }
+
+    /// the arrow of the Mac's fonts that points where this one does, from the character's Unicode name
+    private static func substitute(_ scalar: Unicode.Scalar) -> Unicode.Scalar? {
+        guard let name = scalar.properties.name, name.contains("ARROW") else { return nil }
+        let directions: [(String, UInt32)] = [
+            ("NORTH WEST", 0x2196), ("NORTH EAST", 0x2197), ("SOUTH EAST", 0x2198), ("SOUTH WEST", 0x2199),
+            ("LEFT RIGHT", 0x2194), ("UP DOWN", 0x2195),
+            ("LEFTWARDS", 0x2190), ("UPWARDS", 0x2191), ("RIGHTWARDS", 0x2192), ("DOWNWARDS", 0x2193),
+        ]
+        guard let hit = directions.first(where: { name.contains($0.0) }) else { return nil }
+        return Unicode.Scalar(hit.1)
+    }
+
+    static func fit(_ text: String) -> String {
+        // text in the ranges every font has is the common case
+        guard text.unicodeScalars.contains(where: { $0.value >= 0x2190 }) else { return text }
+        var out = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars {
+            if scalar.value >= 0x2190, !drawn(scalar), let arrow = substitute(scalar) { out.append(arrow) } else { out.append(scalar) }
+        }
+        return String(out)
+    }
 }
 
 /// Sizes the SwiftUI control like the Win32 one: the app laid its dialog out
