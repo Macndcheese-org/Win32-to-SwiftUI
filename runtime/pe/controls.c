@@ -1389,10 +1389,20 @@ static void listview_apply( struct w2s_control *ctl, const struct w2s_event *ev 
     }
 }
 
-static const struct w2s_kind kind_listview_list = { "listview.list", listview_snapshot, listview_apply };
-static const struct w2s_kind kind_listview_report = { "listview.report", listview_snapshot, listview_apply };
-static const struct w2s_kind kind_listview_checkboxes = { "listview.checkboxes", listview_snapshot, listview_apply };
-static const struct w2s_kind kind_listview_icon = { "listview.icon", listview_snapshot, listview_apply };
+/* A virtual list changes its items without a message that names them: the app redraws them. */
+static void listview_observe( struct w2s_control *ctl, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    if (msg != LVM_REDRAWITEMS && msg != LVM_UPDATE) return;
+    if (!(GetWindowLongW( ctl->hwnd, GWL_STYLE ) & LVS_OWNERDATA)) return;
+    if (!ctl->active || ctl->applying || ctl->snapshotting || ctl->push_posted) return;
+    ctl->push_posted = TRUE;
+    PostMessageW( ctl->hwnd, w2s_wake_message, W2S_WAKE_REFRESH, 0 );
+}
+
+static const struct w2s_kind kind_listview_list = { "listview.list", listview_snapshot, listview_apply, NULL, NULL, NULL, listview_observe };
+static const struct w2s_kind kind_listview_report = { "listview.report", listview_snapshot, listview_apply, NULL, NULL, NULL, listview_observe };
+static const struct w2s_kind kind_listview_checkboxes = { "listview.checkboxes", listview_snapshot, listview_apply, NULL, NULL, NULL, listview_observe };
+static const struct w2s_kind kind_listview_icon = { "listview.icon", listview_snapshot, listview_apply, NULL, NULL, NULL, listview_observe };
 
 /* ---------- TreeView ---------- */
 
@@ -3952,7 +3962,9 @@ static const struct w2s_kind *select_control_kind( HWND hwnd )
         DWORD view = (DWORD)SendMessageW( hwnd, LVM_GETVIEW, 0, 0 );
         DWORD ex = (DWORD)SendMessageW( hwnd, LVM_GETEXTENDEDLISTVIEWSTYLE, 0, 0 );
 
-        if (style & (LVS_OWNERDRAWFIXED | LVS_OWNERDATA)) return NULL;
+        /* a virtual list (LVS_OWNERDATA) is read like any other: its text and images come from the app's
+         * LVN_GETDISPINFO as LVM_GETITEMTEXT asks; owner drawn ones the app paints itself */
+        if (style & LVS_OWNERDRAWFIXED) return NULL;
         switch (view)
         {
         case LV_VIEW_DETAILS: return (ex & LVS_EX_CHECKBOXES) ? &kind_listview_checkboxes : &kind_listview_report;
