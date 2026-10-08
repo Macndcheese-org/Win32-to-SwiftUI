@@ -841,6 +841,9 @@ enum Debug {
                 if let toolbar = frame.toolbar {
                     let buttons = toolbar.items.filter { $0.itemIdentifier != .space }
                     out["frameItems"] = toolbar.items.count
+                    // what AppKit shows (not in the overflow menu), and the window's width in points
+                    out["frameVisible"] = (toolbar.visibleItems ?? []).count
+                    out["frameWindowWidth"] = Int(window?.frame.width.rounded() ?? 0)
                     out["frameEnabled"] = buttons.map { ($0.view as? NSButton)?.isEnabled ?? $0.isEnabled }
                     out["frameChecked"] = buttons.compactMap { ($0.view as? NSButton)?.state == .on ? $0.tag : nil }
                     out["frameLabels"] = buttons.map { $0.label }

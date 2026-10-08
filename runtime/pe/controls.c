@@ -3842,6 +3842,28 @@ static void toolbar_snapshot( struct w2s_control *ctl, struct json *j )
     if ((rgn = children_region( ctl->hwnd, j ))) DeleteObject( rgn );
 }
 
+/* The window of a toolbar in the frame wider by `extra` pixels (never past the work area): the Mac's toolbar
+ * has buttons it had no room for (FrameToolbar.fitWindow). The window is the app's: a frame that can be sized,
+ * as the app shows it, and it lays itself out again for its new size. */
+static void toolbar_grow( HWND hwnd, int extra )
+{
+    HWND root = GetAncestor( hwnd, GA_ROOT );
+    MONITORINFO mi = { sizeof(mi) };
+    DWORD style;
+    RECT rc;
+    int width, x;
+
+    if (!root || root == hwnd || extra <= 0) return;
+    style = GetWindowLongW( root, GWL_STYLE );
+    if ((style & (WS_CHILD | WS_POPUP)) || !(style & WS_THICKFRAME) || IsZoomed( root ) || IsIconic( root )) return;
+    if (!GetWindowRect( root, &rc ) || !GetMonitorInfoW( MonitorFromWindow( root, MONITOR_DEFAULTTONEAREST ), &mi )) return;
+    width = min( rc.right - rc.left + extra, mi.rcWork.right - mi.rcWork.left );
+    if (width <= rc.right - rc.left) return;
+    x = max( mi.rcWork.left, min( rc.left, mi.rcWork.right - width ) );
+    TRACE( "%p: the toolbar needs %d more pixels: window %ld -> %d wide\n", root, extra, rc.right - rc.left, width );
+    SetWindowPos( root, 0, x, rc.top, width, rc.bottom - rc.top, SWP_NOZORDER | SWP_NOACTIVATE );
+}
+
 static void toolbar_apply( struct w2s_control *ctl, const struct w2s_event *ev )
 {
     BOOL dropdown = !strcmp( ev->type, "dropdown" );
@@ -3850,6 +3872,11 @@ static void toolbar_apply( struct w2s_control *ctl, const struct w2s_event *ev )
     POINT pt;
     int i;
 
+    if (!strcmp( ev->type, "growWidth" ))
+    {
+        if (ev->has_value) toolbar_grow( ctl->hwnd, (int)ev->value );
+        return;
+    }
     if (!ev->has_value || (strcmp( ev->type, "click" ) && !dropdown)) return;
     i = (int)ev->value;
     memset( &b, 0, sizeof(b) );

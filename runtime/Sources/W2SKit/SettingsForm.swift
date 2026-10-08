@@ -141,7 +141,17 @@ enum FormLayout {
                 continue
             }
             if first.e == "static.text" && line.count > 1 {
-                rows.append(.labeled(first, Array(line.dropFirst())))
+                let rest = Array(line.dropFirst())
+                if !rest.contains(where: { $0.input }), let second = rest.first, second.e == "syslink" || second.e == "static.text" {
+                    // a sentence that ends in a link (or goes on in a second text): nothing for a text to label,
+                    // so it reads as a paragraph with its link under it, in the controls' column
+                    let texts = line.prefix { $0.e == "static.text" }
+                    for text in texts { rows.append(.note(text)) }
+                    let others = Array(line.dropFirst(texts.count))
+                    if !others.isEmpty { rows.append(.plain(others)) }
+                } else {
+                    rows.append(.labeled(first, rest))
+                }
             } else if first.e == "static.text" && line.count == 1 {
                 let next = i + 1 < lines.count ? lines[i + 1].first : nil
                 if let next = next, next.input, first.rect.height <= 20,

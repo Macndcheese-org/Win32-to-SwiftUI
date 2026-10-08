@@ -104,9 +104,47 @@ final class FrameToolbar: NSObject, NSToolbarDelegate {
         if force || toolbar.items.map(\.itemIdentifier) != want {
             while !toolbar.items.isEmpty { toolbar.removeItem(at: 0) }
             for (n, id) in want.enumerated() { toolbar.insertItem(withItemIdentifier: id, at: n) }
+            fitTries = 0
+            scheduleFit(after: 0.6)
         } else {
             for item in toolbar.items { member(of: item.itemIdentifier)?.refresh(item) }
         }
+    }
+
+    // MARK: the window is as wide as its toolbar needs
+
+    private var fitTries = 0
+    private var fitPending = false
+
+    private func scheduleFit(after delay: Double) {
+        guard !fitPending else { return }
+        fitPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.fitPending = false
+            self?.fitWindow()
+        }
+    }
+
+    /// A Mac window is wide enough for its toolbar: the buttons it has no room for go into the
+    /// overflow menu (»), which a program's own toolbar, laid out for its window's pixels, never
+    /// needed: at Retina the program's window is half as wide in points (FileZilla's 1512 pixels
+    /// are 756 points) and the Mac's buttons are not. AppKit says which ones it left out; the
+    /// program's window grows by about what they need (and the program lays itself out again),
+    /// then AppKit is asked again. Only while the toolbar is new: a window the person made
+    /// narrower stays so.
+    private func fitWindow() {
+        guard let window = window, window.toolbar === toolbar, window.isVisible, !window.styleMask.contains(.fullScreen),
+              !window.isZoomed, !window.isMiniaturized, fitTries < 4, let host = members.first?.host else { return }
+        let shown = Set((toolbar.visibleItems ?? []).map(\.itemIdentifier))
+        let skipped: Set<NSToolbarItem.Identifier> = [.space, .flexibleSpace, .sidebarTrackingSeparator]
+        let left = toolbar.items.filter { !skipped.contains($0.itemIdentifier) && !shown.contains($0.itemIdentifier) }
+        guard !left.isEmpty else { return }
+        fitTries += 1
+        // a button of the Mac's toolbar is about 40 points wide, 8 between two; the overflow button goes
+        let need = left.reduce(CGFloat(0)) { $0 + max($1.view?.frame.width ?? 0, 40) + 8 }
+        let scale = max(host.scale, 0.1)
+        host.model.emit(["t": "growWidth", "v": Int((need / scale).rounded(.up))])
+        scheduleFit(after: 0.9)
     }
 
     private func member(of id: NSToolbarItem.Identifier) -> WindowToolbar? {
