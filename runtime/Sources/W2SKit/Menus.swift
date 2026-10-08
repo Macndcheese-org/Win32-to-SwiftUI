@@ -65,9 +65,10 @@ enum MenuWords {
     }
 
     static let edit = all("Edit", ["InputManager"])
-    /// an app's settings item, in every language AppKit has, and Windows' "Options"
-    static let settings: Set<String> = Set(all("Settings\u{2026}", ["MenuCommands"]).union(all("Preferences\u{2026}", ["MenuCommands"]))
-        .map { bare($0) }).union(["options", "preferences", "settings"])
+    /// an app's settings item: the words of every language AppKit has (the Mac's: "Réglages") and the ones Windows
+    /// uses in every language Wine translates (WindowsWords: "Paramètres", "Einstellungen", "Options")
+    static let settings: Set<String> = Set(all("Settings\u{2026}", ["MenuCommands", "MainMenu"]).union(all("Preferences\u{2026}", ["MenuCommands", "MainMenu"]))
+        .map { bare($0) }).union(WindowsWords.settings.map { bare($0) }).union(["options", "preferences", "settings"])
     /// "About %@" in every language the Mac has, as the words before and after the app's name
     /// ("À propos de", "") ("", "について"); an app's About item, with or without its name
     static let about: [(before: String, after: String)] = {
@@ -420,7 +421,7 @@ final class MenuBar: NSObject, NSMenuDelegate, NSMenuItemValidation {
         guard let spec = MenuBuild.firstItem(specs, MenuBuild.isSettings), let id = spec["id"] as? Int,
               let appMenu = NSApp.mainMenu?.items.first?.submenu else { return }
         let free = !taken.contains(MenuBuild.keyString(",", [.command]))
-        let item = W2SMenuItem(title: MenuWords.local("Settings\u{2026}", ["MenuCommands"]), action: #selector(choose(_:)),
+        let item = W2SMenuItem(title: MenuWords.local("Settings\u{2026}", ["MenuCommands", "MainMenu"]), action: #selector(choose(_:)),
                                keyEquivalent: free ? "," : "")
         item.keyEquivalentModifierMask = [.command]
         item.target = self

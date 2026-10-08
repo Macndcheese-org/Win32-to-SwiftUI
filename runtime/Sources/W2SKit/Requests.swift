@@ -901,6 +901,10 @@ enum Debug {
                 out["appearance"] = hosting.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])?.rawValue ?? ""
                 out["titleBar"] = hosting.window?.styleMask.contains(.titled) ?? false
                 out["macTitle"] = hosting.window?.title ?? ""
+                // tests: the application menu as the Mac shows it (Settings…, About…)
+                out["appMenu"] = (NSApp.mainMenu?.items.first?.submenu?.items ?? []).map { item in
+                    item.isSeparatorItem ? "-" : item.title + (item.keyEquivalent.isEmpty ? "" : " [\(item.keyEquivalent)]")
+                }
                 out["documentEdited"] = hosting.window?.isDocumentEdited ?? false
                 out["representedFilename"] = hosting.window?.representedFilename ?? ""
                 out["hostHidden"] = hosting.superview?.isHidden ?? true

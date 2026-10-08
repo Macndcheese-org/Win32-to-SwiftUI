@@ -18,6 +18,7 @@ OUT=build
 
 echo "=== map -> runtime tables"
 python3 tools/gen_runtime_tables.py "$WINE_SRC" | head -1
+python3 tools/gen_windows_words.py "$WINE_SRC" | head -1
 
 echo "=== win32swiftui.dll (x86_64 PE)"
 mkdir -p $OUT/x86_64-windows
