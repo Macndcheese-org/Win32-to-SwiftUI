@@ -105,7 +105,10 @@ final class FrameToolbar: NSObject, NSToolbarDelegate {
             while !toolbar.items.isEmpty { toolbar.removeItem(at: 0) }
             for (n, id) in want.enumerated() { toolbar.insertItem(withItemIdentifier: id, at: n) }
             fitTries = 0
-            scheduleFit(after: 0.6)
+            fitWaits = 0
+            // after the program's own window has been looked at (Wine's user32 fits a DPI aware program's
+            // window to its pixels' DPI a little after it shows): the toolbar only asks for what is still missing
+            scheduleFit(after: 2.5)
         } else {
             for item in toolbar.items { member(of: item.itemIdentifier)?.refresh(item) }
         }
@@ -114,6 +117,7 @@ final class FrameToolbar: NSObject, NSToolbarDelegate {
     // MARK: the window is as wide as its toolbar needs
 
     private var fitTries = 0
+    private var fitWaits = 0
     private var fitPending = false
 
     private func scheduleFit(after delay: Double) {
@@ -133,8 +137,14 @@ final class FrameToolbar: NSObject, NSToolbarDelegate {
     /// then AppKit is asked again. Only while the toolbar is new: a window the person made
     /// narrower stays so.
     private func fitWindow() {
-        guard let window = window, window.toolbar === toolbar, window.isVisible, !window.styleMask.contains(.fullScreen),
-              !window.isZoomed, !window.isMiniaturized, fitTries < 4, let host = members.first?.host else { return }
+        guard let window = window, window.toolbar === toolbar, fitTries < 4, let host = members.first?.host else { return }
+        // a window the program shows late: look again once it is there
+        guard window.isVisible else {
+            fitWaits += 1
+            if fitWaits < 30 { scheduleFit(after: 1.0) }
+            return
+        }
+        guard !window.styleMask.contains(.fullScreen), !window.isZoomed, !window.isMiniaturized else { return }
         let shown = Set((toolbar.visibleItems ?? []).map(\.itemIdentifier))
         let skipped: Set<NSToolbarItem.Identifier> = [.space, .flexibleSpace, .sidebarTrackingSeparator]
         let left = toolbar.items.filter { !skipped.contains($0.itemIdentifier) && !shown.contains($0.itemIdentifier) }
