@@ -1304,8 +1304,9 @@ static void listview_snapshot( struct w2s_control *ctl, struct json *j )
     if (view == LV_VIEW_DETAILS)
         columns = max( 1, listview_columns( ctl->hwnd, subitems, j ) );
     /* A virtual list has the app's own rows, perhaps a hundred thousand of them: the native view
-     * shows all of them and asks for the ones that come into view, as LVN_GETDISPINFO asks the app. */
-    if (style & LVS_OWNERDATA)
+     * shows all of them and asks for the ones that come into view, as LVN_GETDISPINFO asks the app.
+     * So does any list of more rows than one snapshot holds, which stopped at the 2000th. */
+    if ((style & LVS_OWNERDATA) || count > 2000)
     {
         struct lv_data *data = ctl->data;
 
