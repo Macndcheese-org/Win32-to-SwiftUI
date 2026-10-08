@@ -92,7 +92,7 @@ final class FrameToolbar: NSObject, NSToolbarDelegate {
             let shown = member.buttons.filter { !(sidebarToggle && member.isSidebarButton($0)) }
             if shown.isEmpty { continue }
             if groups > 0 { ids.append(.space) }
-            ids += shown.map(member.id)
+            ids += member.ids(for: shown)
             groups += 1
         }
         return ids
@@ -146,6 +146,40 @@ final class WindowToolbar: NSObject, WindowChrome {
 
     func id(_ b: Snapshot.ToolbarButton) -> NSToolbarItem.Identifier {
         b.sep == true ? .space : .init("w2s.\(handle).\(b.i)")
+    }
+
+    /// The identifiers of these buttons in the toolbar: a run of on/off buttons is one group, the
+    /// Mac's own toggle group (several of them can be on), whose look for the on state is the system's.
+    func ids(for shown: [Snapshot.ToolbarButton]) -> [NSToolbarItem.Identifier] {
+        var ids: [NSToolbarItem.Identifier] = []
+        var inRun = false
+        for b in shown {
+            if b.sep != true && b.check == true {
+                if !inRun { ids.append(.init("w2s.\(handle).g\(b.i)")) }
+                inRun = true
+            } else {
+                inRun = false
+                ids.append(id(b))
+            }
+        }
+        return ids
+    }
+
+    /// the on/off buttons that follow each other from the one with this index
+    private func checkRun(from first: Int) -> [Snapshot.ToolbarButton] {
+        guard let start = buttons.firstIndex(where: { $0.i == first && $0.sep != true }) else { return [] }
+        var run: [Snapshot.ToolbarButton] = []
+        for b in buttons[start...] {
+            if b.sep == true || b.check != true { break }
+            run.append(b)
+        }
+        return run
+    }
+
+    private func groupStart(_ identifier: NSToolbarItem.Identifier) -> Int? {
+        let prefix = "w2s.\(handle).g"
+        guard identifier.rawValue.hasPrefix(prefix) else { return nil }
+        return Int(identifier.rawValue.dropFirst(prefix.count))
     }
 
     /// what makes the items: another set means other items (states update in place)
@@ -226,6 +260,13 @@ final class WindowToolbar: NSObject, WindowChrome {
 
     /// the enabled and checked states the Win32 toolbar has now
     func refresh(_ item: NSToolbarItem) {
+        if let group = item as? NSToolbarItemGroup, let first = groupStart(group.itemIdentifier) {
+            for (n, b) in checkRun(from: first).enumerated() where n < group.subitems.count {
+                group.setSelected(b.checked == true, at: n)
+                group.subitems[n].isEnabled = b.enabled ?? true
+            }
+            return
+        }
         guard let b = button(for: item) else { return }
         let enabled = b.enabled ?? true
         if let toggle = item.view as? NSButton {
@@ -242,7 +283,35 @@ final class WindowToolbar: NSObject, WindowChrome {
         host?.model.emit(["t": b.dropdown == 2 ? "dropdown" : "click", "v": b.i])
     }
 
+    /// the user toggled a button of a group: the Win32 button is clicked as a click on it would
+    @objc func groupClicked(_ sender: NSToolbarItemGroup) {
+        let run = checkRun(from: sender.tag)
+        for (n, b) in run.enumerated() where sender.isSelected(at: n) != (b.checked == true) {
+            host?.model.emit(["t": b.dropdown == 2 ? "dropdown" : "click", "v": b.i])
+            break
+        }
+    }
+
+    private func groupItem(_ identifier: NSToolbarItem.Identifier, from first: Int) -> NSToolbarItem? {
+        let run = checkRun(from: first)
+        guard !run.isEmpty else { return nil }
+        let group = NSToolbarItemGroup(itemIdentifier: identifier, images: run.map { image($0) ?? NSImage() },
+                                       selectionMode: .selectAny, labels: nil, target: self,
+                                       action: #selector(groupClicked(_:)))
+        group.tag = first
+        group.autovalidates = false
+        // the on/off buttons are shown, not folded into a menu when the toolbar is tight
+        group.controlRepresentation = .expanded
+        for (n, b) in run.enumerated() where n < group.subitems.count {
+            let title = stripMnemonic(b.tip ?? b.text ?? "")
+            group.subitems[n].toolTip = title.isEmpty ? nil : title
+        }
+        refresh(group)
+        return group
+    }
+
     func item(_ identifier: NSToolbarItem.Identifier) -> NSToolbarItem? {
+        if let first = groupStart(identifier) { return groupItem(identifier, from: first) }
         guard let b = buttons.first(where: { $0.sep != true && id($0) == identifier }) else { return nil }
         let item = NSToolbarItem(itemIdentifier: identifier)
         let shown = text(b)
