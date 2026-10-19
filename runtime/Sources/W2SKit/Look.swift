@@ -69,7 +69,7 @@ enum Look {
     }
 
     static var appearance: NSAppearance {
-        override.flatMap { NSAppearance(named: $0) } ?? NSApplication.shared.effectiveAppearance
+        Look.override.flatMap { NSAppearance(named: $0) } ?? NSApplication.shared.effectiveAppearance
     }
 
     static func isDark(_ appearance: NSAppearance) -> Bool {
