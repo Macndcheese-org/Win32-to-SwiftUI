@@ -4174,6 +4174,30 @@ BOOL w2s_is_drawing_surface( HWND hwnd, const struct w2s_kind *kind )
     return (kind == &kind_button_push || kind == &kind_button_default) && !GetWindowTextLengthW( hwnd );
 }
 
+/* A scroll bar that wine draws in the non-client area of the window. An app that takes the whole window for its
+ * client area (a WM_NCCALCSIZE that returns the window rectangle, as Chromium's windows do) keeps the scroll bar styles
+ * but has no scroll bar of wine's to replace: it draws its own, if any, so nothing is to be put over it. */
+static BOOL has_nonclient_scroll_bar( HWND hwnd )
+{
+    static const LONG objects[2] = { OBJID_VSCROLL, OBJID_HSCROLL };
+    RECT client, rc, tmp;
+    int i;
+
+    GetClientRect( hwnd, &client );
+    MapWindowPoints( hwnd, NULL, (POINT *)&client, 2 );
+    for (i = 0; i < 2; i++)
+    {
+        SCROLLBARINFO sbi = { sizeof(sbi) };
+
+        if (!GetScrollBarInfo( hwnd, objects[i], &sbi ) ||
+            (sbi.rgstate[0] & (STATE_SYSTEM_INVISIBLE | STATE_SYSTEM_OFFSCREEN)))
+            continue;
+        rc = sbi.rcScrollBar;
+        if (!IntersectRect( &tmp, &rc, &client )) return TRUE;
+    }
+    return FALSE;
+}
+
 const struct w2s_kind *w2s_select_kind( HWND hwnd )
 {
     const struct w2s_kind *kind = select_control_kind( hwnd );
@@ -4183,7 +4207,8 @@ const struct w2s_kind *w2s_select_kind( HWND hwnd )
     if (kind) return kind;
     if (is_scrollbar_control( hwnd )) return (style & (SBS_SIZEBOX | SBS_SIZEGRIP)) ? NULL : &kind_scrollbar;
     /* a child window with scroll bars of its own, not inside a translated control */
-    if ((style & WS_CHILD) && (style & (WS_VSCROLL | WS_HSCROLL)) && !(parent && w2s_control_of( parent )))
+    if ((style & WS_CHILD) && (style & (WS_VSCROLL | WS_HSCROLL)) && !(parent && w2s_control_of( parent )) &&
+        has_nonclient_scroll_bar( hwnd ))
         return &kind_window_scrollbars;
     return NULL;
 }
