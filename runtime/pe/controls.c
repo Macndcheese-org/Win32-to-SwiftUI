@@ -4174,15 +4174,18 @@ BOOL w2s_is_drawing_surface( HWND hwnd, const struct w2s_kind *kind )
     return (kind == &kind_button_push || kind == &kind_button_default) && !GetWindowTextLengthW( hwnd );
 }
 
-/* A scroll bar that wine draws in the non-client area of the window. An app that takes the whole window for its
- * client area (a WM_NCCALCSIZE that returns the window rectangle, as Chromium's windows do) keeps the scroll bar styles
- * but has no scroll bar of wine's to replace: it draws its own, if any, so nothing is to be put over it. */
+/* A scroll bar that wine draws in the non-client area of the window: a bar of the window that lies in the window and
+ * outside its client area. An app that takes the whole window for its client area (a WM_NCCALCSIZE that returns the
+ * window rectangle, as Chromium's windows do) keeps the scroll bar styles but has no scroll bar of wine's to replace:
+ * wine still computes where the bars would be, below and beside the window, and they are not in it. The app draws
+ * its own, if any, so nothing is to be put over it. */
 static BOOL has_nonclient_scroll_bar( HWND hwnd )
 {
     static const LONG objects[2] = { OBJID_VSCROLL, OBJID_HSCROLL };
-    RECT client, rc, tmp;
+    RECT window, client, rc, tmp;
     int i;
 
+    GetWindowRect( hwnd, &window );
     GetClientRect( hwnd, &client );
     MapWindowPoints( hwnd, NULL, (POINT *)&client, 2 );
     for (i = 0; i < 2; i++)
@@ -4193,7 +4196,8 @@ static BOOL has_nonclient_scroll_bar( HWND hwnd )
             (sbi.rgstate[0] & (STATE_SYSTEM_INVISIBLE | STATE_SYSTEM_OFFSCREEN)))
             continue;
         rc = sbi.rcScrollBar;
-        if (!IntersectRect( &tmp, &rc, &client )) return TRUE;
+        if (IsRectEmpty( &rc ) || IntersectRect( &tmp, &rc, &client )) continue;
+        if (IntersectRect( &tmp, &rc, &window ) && EqualRect( &tmp, &rc )) return TRUE;
     }
     return FALSE;
 }
